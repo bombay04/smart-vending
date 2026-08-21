@@ -10,3 +10,79 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum SlotStatus {
+  AVAILABLE
+  SOLD_OUT
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  EXPIRED
+}
+
+model Product {
+  id           Int           @id @default(autoincrement())
+  name         String
+  price        Decimal       @db.Decimal(10, 2)
+  imageUrl     String?
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  slots        Slot[]
+  transactions Transaction[]
+}
+
+model Slot {
+  id           Int           @id @default(autoincrement())
+  slotNumber   Int           @unique
+  status       SlotStatus    @default(AVAILABLE)
+  productId    Int?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  product      Product?      @relation(fields: [productId], references: [id])
+  transactions Transaction[]
+
+  @@index([productId])
+}
+
+model Transaction {
+  id               Int           @id @default(autoincrement())
+  slotId           Int
+  productId        Int
+  amount           Decimal       @db.Decimal(10, 2)
+  paymentStatus    PaymentStatus @default(PENDING)
+  paymentProvider  String
+  providerChargeId String?
+  paidAt           DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  slot             Slot          @relation(fields: [slotId], references: [id])
+  product          Product       @relation(fields: [productId], references: [id])
+
+  @@index([slotId])
+  @@index([productId])
+}
+
+model Employee {
+  id            Int          @id @default(autoincrement())
+  name          String
+  employeeCode  String       @unique
+  faceEmbedding Json?
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  restockLogs   RestockLog[]
+}
+
+model RestockLog {
+  id         Int      @id @default(autoincrement())
+  employeeId Int
+  note       String?
+  createdAt  DateTime @default(now())
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+}
