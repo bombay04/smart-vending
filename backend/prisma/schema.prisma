@@ -23,6 +23,10 @@ enum PaymentStatus {
   EXPIRED
 }
 
+enum PaymentProvider {
+  OPN
+}
+
 model Product {
   id           Int           @id @default(autoincrement())
   name         String
@@ -49,18 +53,18 @@ model Slot {
 }
 
 model Transaction {
-  id               Int           @id @default(autoincrement())
+  id               Int             @id @default(autoincrement())
   slotId           Int
   productId        Int
-  amount           Decimal       @db.Decimal(10, 2)
-  paymentStatus    PaymentStatus @default(PENDING)
-  paymentProvider  String
+  amount           Decimal         @db.Decimal(10, 2)
+  paymentStatus    PaymentStatus   @default(PENDING)
+  paymentProvider  PaymentProvider
   providerChargeId String?
   paidAt           DateTime?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  slot             Slot          @relation(fields: [slotId], references: [id])
-  product          Product       @relation(fields: [productId], references: [id])
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  slot             Slot            @relation(fields: [slotId], references: [id])
+  product          Product         @relation(fields: [productId], references: [id])
 
   @@index([slotId])
   @@index([productId])
@@ -78,11 +82,13 @@ model Employee {
 }
 
 model RestockLog {
-  id         Int      @id @default(autoincrement())
-  employeeId Int
-  note       String?
-  createdAt  DateTime @default(now())
-  employee   Employee @relation(fields: [employeeId], references: [id])
+  id           Int      @id @default(autoincrement())
+  employeeId   Int
+  note         String?
+  beforeStatus Json?
+  afterStatus  Json?
+  createdAt    DateTime @default(now())
+  employee     Employee @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
 }
