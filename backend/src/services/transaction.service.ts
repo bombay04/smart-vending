@@ -1,14 +1,5 @@
 import { prisma } from "../lib/prisma";
-
-export class MockPurchaseError extends Error {
-  constructor(
-    message: string,
-    readonly statusCode: number,
-  ) {
-    super(message);
-    this.name = "MockPurchaseError";
-  }
-}
+import { HttpError } from "../utils/http-error";
 
 export async function createMockPurchase(slotNumber: number) {
   return prisma.$transaction(async (transaction) => {
@@ -18,15 +9,15 @@ export async function createMockPurchase(slotNumber: number) {
     });
 
     if (!slot) {
-      throw new MockPurchaseError("Slot not found.", 404);
+      throw new HttpError("Slot not found.", 404);
     }
 
     if (!slot.product) {
-      throw new MockPurchaseError("Slot has no product.", 400);
+      throw new HttpError("Slot has no product.", 400);
     }
 
     if (slot.status === "SOLD_OUT") {
-      throw new MockPurchaseError("Slot is sold out.", 409);
+      throw new HttpError("Slot is sold out.", 409);
     }
 
     const purchase = await transaction.transaction.create({

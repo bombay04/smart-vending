@@ -1,16 +1,7 @@
 import { prisma } from "../lib/prisma";
+import { HttpError } from "../utils/http-error";
 
 const requiredSlotNumbers = [1, 2, 3];
-
-export class MockRestockError extends Error {
-  constructor(
-    message: string,
-    readonly statusCode: number,
-  ) {
-    super(message);
-    this.name = "MockRestockError";
-  }
-}
 
 export async function createMockRestock(employeeId: number) {
   return prisma.$transaction(async (transaction) => {
@@ -19,11 +10,11 @@ export async function createMockRestock(employeeId: number) {
     });
 
     if (!employee) {
-      throw new MockRestockError("Employee not found.", 404);
+      throw new HttpError("Employee not found.", 404);
     }
 
     if (!employee.isActive) {
-      throw new MockRestockError("Employee is inactive.", 403);
+      throw new HttpError("Employee is inactive.", 403);
     }
 
     const slots = await transaction.slot.findMany({
@@ -37,7 +28,7 @@ export async function createMockRestock(employeeId: number) {
         requiredSlots.some((slot) => slot.slotNumber === slotNumber),
       )
     ) {
-      throw new MockRestockError("Required slots 1, 2, and 3 are not available.", 409);
+      throw new HttpError("Required slots 1, 2, and 3 are not available.", 409);
     }
 
     const beforeStatus = requiredSlots.map((slot) => ({
