@@ -1,7 +1,11 @@
-import type { Request, Response } from "express";
-import { createMockPurchase, MockPurchaseError } from "../services/transaction.service";
+import type { NextFunction, Request, Response } from "express";
+import { createMockPurchase } from "../services/transaction.service";
 
-export async function mockPurchase(request: Request, response: Response): Promise<void> {
+export async function mockPurchase(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+): Promise<void> {
   const slotNumber: unknown = request.body?.slotNumber;
 
   if (typeof slotNumber !== "number" || ![1, 2, 3].includes(slotNumber)) {
@@ -13,11 +17,6 @@ export async function mockPurchase(request: Request, response: Response): Promis
     const purchase = await createMockPurchase(slotNumber);
     response.status(201).json({ data: purchase });
   } catch (error: unknown) {
-    if (error instanceof MockPurchaseError) {
-      response.status(error.statusCode).json({ error: error.message });
-      return;
-    }
-
-    throw error;
+    next(error);
   }
 }
