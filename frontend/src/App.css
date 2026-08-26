@@ -1,0 +1,226 @@
+.home-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: clamp(24px, 5vw, 56px) 24px;
+  background:
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.15), transparent 32rem),
+    linear-gradient(145deg, #f8fbff 0%, #e9f0f8 100%);
+}
+
+.customer-container {
+  width: min(100%, 1180px);
+  margin: 0 auto;
+}
+
+.page-header {
+  margin-bottom: clamp(32px, 5vw, 52px);
+  text-align: center;
+}
+
+.mode-label {
+  display: inline-flex;
+  margin: 0 0 16px;
+  padding: 8px 16px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.page-header h1 {
+  margin: 0;
+  color: #12213d;
+  font-size: clamp(2.35rem, 6vw, 4.5rem);
+  line-height: 1.05;
+  letter-spacing: -0.045em;
+}
+
+.instruction {
+  margin: 18px 0 0;
+  color: #52627a;
+  font-size: clamp(1.1rem, 2vw, 1.4rem);
+}
+
+.state-message {
+  margin: 72px auto;
+  padding: 28px;
+  border: 1px solid #dbe5f0;
+  border-radius: 20px;
+  color: #52627a;
+  background: rgba(255, 255, 255, 0.8);
+  font-size: 1.2rem;
+  text-align: center;
+}
+
+.state-message--error {
+  border-color: #fecaca;
+  color: #b91c1c;
+  background: #fff7f7;
+}
+
+.slot-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.slot-card {
+  display: flex;
+  min-height: 430px;
+  flex-direction: column;
+  padding: 24px;
+  border: 1px solid rgba(203, 213, 225, 0.85);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 18px 45px rgba(30, 55, 90, 0.1);
+}
+
+.slot-card--sold-out {
+  background: rgba(248, 250, 252, 0.94);
+}
+
+.slot-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.slot-number {
+  color: #334155;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.status-badge {
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+.status-badge--available {
+  color: #047857;
+  background: #d1fae5;
+}
+
+.status-badge--sold_out {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.product-media,
+.empty-product > span {
+  display: grid;
+  width: 112px;
+  height: 112px;
+  place-items: center;
+  margin: 34px auto 24px;
+  overflow: hidden;
+  border-radius: 26px;
+  color: #1d4ed8;
+  background: #e8f1ff;
+  font-size: 3.25rem;
+  font-weight: 800;
+}
+
+.product-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.product-name {
+  margin: 0;
+  color: #172033;
+  font-size: clamp(1.4rem, 2vw, 1.75rem);
+  line-height: 1.2;
+  text-align: center;
+}
+
+.product-price {
+  margin: 12px 0 28px;
+  color: #1d4ed8;
+  font-size: 2rem;
+  font-weight: 900;
+  text-align: center;
+}
+
+.product-price span {
+  font-size: 0.9rem;
+  letter-spacing: 0.06em;
+}
+
+.empty-product {
+  margin-bottom: 28px;
+}
+
+.empty-product > span {
+  color: #94a3b8;
+  background: #f1f5f9;
+}
+
+.buy-button {
+  width: 100%;
+  min-height: 64px;
+  margin-top: auto;
+  border: 0;
+  border-radius: 18px;
+  color: #ffffff;
+  background: #2563eb;
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.22);
+  font-size: 1.15rem;
+  font-weight: 850;
+  cursor: pointer;
+  transition:
+    transform 150ms ease,
+    background-color 150ms ease;
+  touch-action: manipulation;
+}
+
+.buy-button:hover:not(:disabled) {
+  background: #1d4ed8;
+  transform: translateY(-2px);
+}
+
+.buy-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.buy-button:disabled {
+  color: #64748b;
+  background: #e2e8f0;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+@media (max-width: 900px) {
+  .slot-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .home-page {
+    padding: 28px 16px;
+  }
+
+  .slot-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .slot-card {
+    min-height: 390px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .buy-button {
+    transition: none;
+  }
+}
