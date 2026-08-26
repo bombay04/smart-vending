@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 import { fetchSlots } from "../api/slot";
+import { createMockPurchase } from "../api/transaction";
 import type { Slot } from "../types/slot";
 
 function HomePage() {
   const [slots, setSlots] = useState<Slot[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [isPurchasing, setIsPurchasing] = useState(false);
+  const [purchaseMessage, setPurchaseMessage] = useState<string | null>(null);
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -32,6 +36,26 @@ function HomePage() {
     };
   }, []);
 
+  async function handleBuy(slotNumber: number): Promise<void> {
+    setPurchaseMessage(null);
+    setPurchaseError(null);
+    setIsPurchasing(true);
+
+    try {
+      const purchase = await createMockPurchase(slotNumber);
+      const refreshedSlots = await fetchSlots();
+
+      setSlots(refreshedSlots);
+      setPurchaseMessage(`Purchase successful: ${purchase.productName}`);
+    } catch (purchaseFailure: unknown) {
+      setPurchaseError(
+        purchaseFailure instanceof Error ? purchaseFailure.message : "Failed to complete purchase.",
+      );
+    } finally {
+      setIsPurchasing(false);
+    }
+  }
+
   return (
     <main className="home-page">
       <div className="customer-container">
@@ -43,6 +67,16 @@ function HomePage() {
 
         {isLoading && <p className="state-message">Loading slots...</p>}
         {error && <p className="state-message state-message--error">Failed to load slots.</p>}
+        {purchaseMessage && (
+          <p className="purchase-feedback purchase-feedback--success" role="status">
+            {purchaseMessage}
+          </p>
+        )}
+        {purchaseError && (
+          <p className="purchase-feedback purchase-feedback--error" role="alert">
+            {purchaseError}
+          </p>
+        )}
 
         {!isLoading && !error && (
           <section className="slot-grid" aria-label="Available vending machine slots">
@@ -79,13 +113,18 @@ function HomePage() {
                     </>
                   ) : (
                     <div className="empty-product">
-                      <span aria-hidden="true">—</span>
+                      <span aria-hidden="true">-</span>
                       <h2 className="product-name">No product</h2>
                     </div>
                   )}
 
-                  <button className="buy-button" type="button" disabled={!canBuy}>
-                    {buttonText}
+                  <button
+                    className="buy-button"
+                    type="button"
+                    disabled={!canBuy || isPurchasing}
+                    onClick={() => handleBuy(slot.slotNumber)}
+                  >
+                    {isPurchasing && canBuy ? "Processing..." : buttonText}
                   </button>
                 </article>
               );
