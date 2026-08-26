@@ -1,6 +1,7 @@
 import type { Slot, SlotResponse } from "../types/slot";
+import { API_BASE_URL } from "../config/api";
 
-const slotsUrl = "http://localhost:3000/api/v1/slots";
+const slotsUrl = `${API_BASE_URL}/api/v1/slots`;
 
 export async function fetchSlots(): Promise<Slot[]> {
   const response = await fetch(slotsUrl);
