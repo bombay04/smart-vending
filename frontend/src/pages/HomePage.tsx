@@ -34,44 +34,65 @@ function HomePage() {
 
   return (
     <main className="home-page">
-      <section className="intro">
-        <h1>Smart Vending Machine</h1>
-        <p className="subtitle">Customer Mode</p>
+      <div className="customer-container">
+        <header className="page-header">
+          <p className="mode-label">Customer Mode</p>
+          <h1>Smart Vending Machine</h1>
+          <p className="instruction">Please select a product</p>
+        </header>
 
-        {isLoading && <p className="placeholder">Loading slots...</p>}
-        {error && <p>Failed to load slots.</p>}
+        {isLoading && <p className="state-message">Loading slots...</p>}
+        {error && <p className="state-message state-message--error">Failed to load slots.</p>}
 
         {!isLoading && !error && (
-          <div>
+          <section className="slot-grid" aria-label="Available vending machine slots">
             {slots.map((slot) => {
               const canBuy = slot.status === "AVAILABLE" && slot.product !== null;
               const buttonText =
                 slot.product === null ? "Unavailable" : slot.status === "SOLD_OUT" ? "Sold Out" : "Buy";
 
               return (
-                <article key={slot.id}>
-                  <h2>Slot {slot.slotNumber}</h2>
+                <article
+                  className={`slot-card${slot.status === "SOLD_OUT" ? " slot-card--sold-out" : ""}`}
+                  key={slot.id}
+                >
+                  <div className="slot-card__header">
+                    <span className="slot-number">Slot {slot.slotNumber}</span>
+                    <span className={`status-badge status-badge--${slot.status.toLowerCase()}`}>
+                      {slot.status}
+                    </span>
+                  </div>
+
                   {slot.product ? (
                     <>
-                      {slot.product.imageUrl && (
-                        <img src={slot.product.imageUrl} alt={slot.product.name} />
-                      )}
-                      <p>{slot.product.name}</p>
-                      <p>Price: {slot.product.price}</p>
+                      <div className="product-media">
+                        {slot.product.imageUrl ? (
+                          <img src={slot.product.imageUrl} alt={slot.product.name} />
+                        ) : (
+                          <span aria-hidden="true">{slot.product.name.charAt(0)}</span>
+                        )}
+                      </div>
+                      <h2 className="product-name">{slot.product.name}</h2>
+                      <p className="product-price">
+                        {slot.product.price} <span>THB</span>
+                      </p>
                     </>
                   ) : (
-                    <p>No product</p>
+                    <div className="empty-product">
+                      <span aria-hidden="true">—</span>
+                      <h2 className="product-name">No product</h2>
+                    </div>
                   )}
-                  <p>Status: {slot.status}</p>
-                  <button type="button" disabled={!canBuy}>
+
+                  <button className="buy-button" type="button" disabled={!canBuy}>
                     {buttonText}
                   </button>
                 </article>
               );
             })}
-          </div>
+          </section>
         )}
-      </section>
+      </div>
     </main>
   );
 }
