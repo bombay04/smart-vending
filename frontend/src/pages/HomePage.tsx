@@ -1,19 +1,19 @@
 import { useEffect, useState } from "react";
-import { fetchProducts } from "../api/product";
-import type { Product } from "../types/product";
+import { fetchSlots } from "../api/slot";
+import type { Slot } from "../types/slot";
 
 function HomePage() {
-  const [products, setProducts] = useState<Product[]>([]);
+  const [slots, setSlots] = useState<Slot[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
 
-    fetchProducts()
+    fetchSlots()
       .then((data) => {
         if (isMounted) {
-          setProducts(data);
+          setSlots(data);
         }
       })
       .catch(() => {
@@ -38,19 +38,37 @@ function HomePage() {
         <h1>Smart Vending Machine</h1>
         <p className="subtitle">Customer Mode</p>
 
-        {isLoading && <p className="placeholder">Loading products...</p>}
-        {error && <p>Failed to load products.</p>}
+        {isLoading && <p className="placeholder">Loading slots...</p>}
+        {error && <p>Failed to load slots.</p>}
 
         {!isLoading && !error && (
           <div>
-            {products.map((product) => (
-              <article key={product.id}>
-                {product.imageUrl && <img src={product.imageUrl} alt={product.name} />}
-                <h2>{product.name}</h2>
-                <p>Price: {product.price}</p>
-                <p>Status: {product.isActive ? "Active" : "Inactive"}</p>
-              </article>
-            ))}
+            {slots.map((slot) => {
+              const canBuy = slot.status === "AVAILABLE" && slot.product !== null;
+              const buttonText =
+                slot.product === null ? "Unavailable" : slot.status === "SOLD_OUT" ? "Sold Out" : "Buy";
+
+              return (
+                <article key={slot.id}>
+                  <h2>Slot {slot.slotNumber}</h2>
+                  {slot.product ? (
+                    <>
+                      {slot.product.imageUrl && (
+                        <img src={slot.product.imageUrl} alt={slot.product.name} />
+                      )}
+                      <p>{slot.product.name}</p>
+                      <p>Price: {slot.product.price}</p>
+                    </>
+                  ) : (
+                    <p>No product</p>
+                  )}
+                  <p>Status: {slot.status}</p>
+                  <button type="button" disabled={!canBuy}>
+                    {buttonText}
+                  </button>
+                </article>
+              );
+            })}
           </div>
         )}
       </section>
