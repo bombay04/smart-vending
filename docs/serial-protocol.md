@@ -25,6 +25,7 @@ Every command must end with `\n`.
 | Response | Meaning |
 | --- | --- |
 | `READY` | The ESP32 is initialized and ready. |
+| `PONG` | Response to a `PING` command. |
 | `ACK:OPEN:1` | The ESP32 accepted the open command for Slot 1. Slots 2 and 3 use the same format. |
 | `LOCK:1:OPENED` | Lock 1 is open. |
 | `LOCK:1:CLOSED` | Lock 1 is closed. |
@@ -65,6 +66,36 @@ Use `--baud` only when testing a firmware configuration that differs from the de
 python edge/serial_test.py --port COM8 --baud 115200
 ```
 
+Protocol parsing can be checked without opening a serial port:
+
+```bash
+python edge/serial_test.py --self-test
+```
+
+## Python module usage
+
+Future Raspberry Pi services can use `Esp32SerialClient` directly:
+
+```python
+from serial_client import Esp32SerialClient
+
+client = Esp32SerialClient("/dev/ttyUSB0")
+
+try:
+    client.connect()
+    client.ping()
+    client.get_status()
+    client.open_slot(1)
+
+    line = client.read_line()
+    if line is not None:
+        message_type = client.classify_message(line)
+        status = client.parse_status_line(line)
+        print(message_type, status)
+finally:
+    client.close()
+```
+
 ## Example manual test session
 
 ```text
@@ -74,6 +105,7 @@ Type a protocol command, or type 'exit'/'quit' to stop.
 ESP32> [READY] READY
 PING
 PI> PING
+ESP32> [PONG] PONG
 GET_STATUS
 PI> GET_STATUS
 OPEN:1
