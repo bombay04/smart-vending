@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchSlots } from "../api/slot";
 import { createMockPurchase } from "../api/transaction";
+import { unlockSlot } from "../api/unlock";
 import type { Slot } from "../types/slot";
 
 function HomePage() {
@@ -10,22 +11,36 @@ function HomePage() {
   const [isPurchasing, setIsPurchasing] = useState(false);
   const [purchaseMessage, setPurchaseMessage] = useState<string | null>(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
+  const [purchasingSlotNumber, setPurchasingSlotNumber] = useState<number | null>(null);
 
   async function handleBuy(slotNumber: number) {
     setPurchaseMessage(null);
     setPurchaseError(null);
     setIsPurchasing(true);
+    setPurchasingSlotNumber(slotNumber);
 
     try {
-      const purchase = await createMockPurchase(slotNumber);
-      setPurchaseMessage(`Purchase successful: ${purchase.productName}`);
-      setSlots(await fetchSlots());
+      await createMockPurchase(slotNumber);
+
+      try {
+        await unlockSlot(slotNumber);
+        setPurchaseMessage(`Purchase successful. Slot ${slotNumber} unlocked.`);
+      } catch {
+        setPurchaseError("Purchase successful, but unlock failed. Please contact staff.");
+      }
+
+      try {
+        setSlots(await fetchSlots());
+      } catch {
+        setPurchaseError((currentError) => currentError ?? "Purchase successful, but slots failed to refresh.");
+      }
     } catch (purchaseFailure: unknown) {
       setPurchaseError(
         purchaseFailure instanceof Error ? purchaseFailure.message : "Failed to complete purchase.",
       );
     } finally {
       setIsPurchasing(false);
+      setPurchasingSlotNumber(null);
     }
   }
 
@@ -116,7 +131,9 @@ function HomePage() {
                     disabled={!canBuy || isPurchasing}
                     onClick={() => handleBuy(slot.slotNumber)}
                   >
-                    {isPurchasing && canBuy ? "Processing..." : buttonText}
+                    {isPurchasing && purchasingSlotNumber === slot.slotNumber
+                      ? "Processing..."
+                      : buttonText}
                   </button>
                 </article>
               );
