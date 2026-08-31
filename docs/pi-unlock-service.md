@@ -2,7 +2,7 @@
 
 The Pi Local Unlock Service exposes a small HTTP API on the Raspberry Pi or development PC. It translates an unlock request into an `OPEN:1`, `OPEN:2`, or `OPEN:3` command sent to the ESP32 over USB Serial.
 
-This service does not connect to the customer Buy button yet. A successful response means the command was sent; it does not synchronously wait for the ESP32 `ACK` or `ERROR:BUSY` response.
+The customer frontend calls this service after a backend purchase succeeds. A successful response means the command was sent; it does not synchronously wait for the ESP32 `ACK` or `ERROR:BUSY` response.
 
 ## Install
 

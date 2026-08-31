@@ -4,36 +4,61 @@ import { createMockPurchase } from "../api/transaction";
 import { unlockSlot } from "../api/unlock";
 import type { Slot } from "../types/slot";
 
+interface PurchaseSuccess {
+  slotNumber: number;
+  productName: string;
+}
+
 function HomePage() {
   const [slots, setSlots] = useState<Slot[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(false);
   const [isPurchasing, setIsPurchasing] = useState(false);
-  const [purchaseMessage, setPurchaseMessage] = useState<string | null>(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
   const [purchasingSlotNumber, setPurchasingSlotNumber] = useState<number | null>(null);
+  const [purchaseSuccess, setPurchaseSuccess] = useState<PurchaseSuccess | null>(null);
+
+  function markSlotAsSoldOut(slotNumber: number) {
+    setSlots((currentSlots) =>
+      currentSlots.map((slot) =>
+        slot.slotNumber === slotNumber ? { ...slot, status: "SOLD_OUT" } : slot,
+      ),
+    );
+  }
 
   async function handleBuy(slotNumber: number) {
-    setPurchaseMessage(null);
     setPurchaseError(null);
     setIsPurchasing(true);
     setPurchasingSlotNumber(slotNumber);
 
     try {
-      await createMockPurchase(slotNumber);
+      const purchase = await createMockPurchase(slotNumber);
 
       try {
         await unlockSlot(slotNumber);
-        setPurchaseMessage(`Purchase successful. Slot ${slotNumber} unlocked.`);
       } catch {
         setPurchaseError("Purchase successful, but unlock failed. Please contact staff.");
+        markSlotAsSoldOut(slotNumber);
+
+        try {
+          setSlots(await fetchSlots());
+        } catch {
+          // Keep the local sold-out state when refreshing fails.
+        }
+
+        return;
       }
 
       try {
         setSlots(await fetchSlots());
       } catch {
-        setPurchaseError((currentError) => currentError ?? "Purchase successful, but slots failed to refresh.");
+        markSlotAsSoldOut(slotNumber);
       }
+
+      setPurchaseSuccess({
+        slotNumber,
+        productName: purchase.productName,
+      });
     } catch (purchaseFailure: unknown) {
       setPurchaseError(
         purchaseFailure instanceof Error ? purchaseFailure.message : "Failed to complete purchase.",
@@ -69,6 +94,40 @@ function HomePage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (purchaseSuccess === null) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setPurchaseSuccess(null);
+    }, 4000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [purchaseSuccess]);
+
+  if (purchaseSuccess !== null) {
+    return (
+      <main className="home-page home-page--success">
+        <section className="purchase-success" aria-live="polite">
+          <div className="purchase-success__icon" aria-hidden="true">
+            ✓
+          </div>
+          <p className="mode-label">Customer Mode</p>
+          <h1>Purchase Successful</h1>
+          <p className="purchase-success__product">{purchaseSuccess.productName}</p>
+          <p className="purchase-success__slot">
+            Slot <strong>{purchaseSuccess.slotNumber}</strong> is unlocked.
+          </p>
+          <p className="purchase-success__instruction">Please take your product.</p>
+          <p className="purchase-success__return">Returning to product selection...</p>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="home-page">
       <div className="customer-container">
@@ -80,7 +139,6 @@ function HomePage() {
 
         {isLoading && <p className="state-message">Loading slots...</p>}
         {error && <p className="state-message state-message--error">Failed to load slots.</p>}
-        {purchaseMessage && <p className="state-message">{purchaseMessage}</p>}
         {purchaseError && (
           <p className="state-message state-message--error">{purchaseError}</p>
         )}
