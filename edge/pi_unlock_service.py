@@ -6,6 +6,7 @@ import atexit
 import logging
 import os
 import threading
+import time
 from typing import Any
 
 from flask import Flask, Response, jsonify, request
@@ -17,13 +18,14 @@ DEFAULT_BAUD_RATE = 115200
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5000
 ALLOWED_ORIGIN = "http://localhost:5173"
+HARDWARE_STATUS_TIMEOUT_SECONDS = 3.0
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("pi-unlock-service")
 
 app = Flask(__name__)
 serial_client: Esp32SerialClient | None = None
-serial_write_lock = threading.Lock()
+serial_operation_lock = threading.Lock()
 
 
 def environment_flag(name: str, default: bool = False) -> bool:
@@ -73,6 +75,83 @@ def health() -> tuple[Response, int] | Response:
     return jsonify(status="ok", hardware="connected", mockHardware=False)
 
 
+def collect_hardware_status() -> list[dict[str, int | bool]]:
+    if serial_client is None or not serial_client.is_connected:
+        raise SerialClientError("Serial connection unavailable.")
+
+    status_by_slot: dict[int, dict[str, bool]] = {1: {}, 2: {}, 3: {}}
+    deadline = time.monotonic() + HARDWARE_STATUS_TIMEOUT_SECONDS
+
+    serial_client.clear_input_buffer()
+    serial_client.get_status()
+
+    while time.monotonic() < deadline:
+        line = serial_client.read_line()
+        if line is None:
+            continue
+
+        parsed = serial_client.parse_status_line(line)
+        if parsed is None:
+            logger.debug("Ignoring unrelated ESP32 line: %s", line)
+            continue
+
+        message_type = parsed.get("type")
+        slot_number = parsed.get("slot")
+        sensor_status = parsed.get("status")
+
+        if not isinstance(slot_number, int) or slot_number not in status_by_slot:
+            continue
+
+        if message_type == "IR" and sensor_status in ("PRESENT", "EMPTY"):
+            status_by_slot[slot_number]["productPresent"] = sensor_status == "PRESENT"
+        elif message_type == "DOOR" and sensor_status in ("OPEN", "CLOSED"):
+            status_by_slot[slot_number]["doorClosed"] = sensor_status == "CLOSED"
+        else:
+            continue
+
+        if all(
+            "productPresent" in slot_status and "doorClosed" in slot_status
+            for slot_status in status_by_slot.values()
+        ):
+            return [
+                {
+                    "slotNumber": slot_number,
+                    "productPresent": status_by_slot[slot_number]["productPresent"],
+                    "doorClosed": status_by_slot[slot_number]["doorClosed"],
+                }
+                for slot_number in (1, 2, 3)
+            ]
+
+    raise SerialClientError("Timed out waiting for complete ESP32 hardware status.")
+
+
+@app.get("/hardware/status")
+def hardware_status() -> tuple[Response, int] | Response:
+    if MOCK_HARDWARE:
+        return jsonify(
+            status="ok",
+            slots=[
+                {"slotNumber": slot_number, "productPresent": True, "doorClosed": True}
+                for slot_number in (1, 2, 3)
+            ],
+        )
+
+    if serial_client is None or not serial_client.is_connected:
+        return jsonify(error="Hardware status unavailable."), 503
+
+    try:
+        with serial_operation_lock:
+            slots = collect_hardware_status()
+        logger.info("Complete ESP32 hardware status collected")
+        return jsonify(status="ok", slots=slots)
+    except SerialClientError as error:
+        logger.error("Hardware status collection failed: %s", error)
+        return jsonify(error="Unable to collect complete hardware status."), 503
+    except Exception:
+        logger.exception("Unexpected hardware status error")
+        return jsonify(error="Internal server error."), 500
+
+
 @app.post("/unlock")
 def unlock() -> tuple[Response, int] | Response:
     if not request.is_json:
@@ -103,7 +182,7 @@ def unlock() -> tuple[Response, int] | Response:
         return jsonify(error="Serial connection unavailable."), 503
 
     try:
-        with serial_write_lock:
+        with serial_operation_lock:
             serial_client.open_slot(slot_number)
         logger.info("Serial unlock command sent for slot %s", slot_number)
     except SerialClientError as error:
