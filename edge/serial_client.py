@@ -79,6 +79,14 @@ class Esp32SerialClient:
     def ping(self) -> None:
         self.send_command("PING")
 
+    def clear_input_buffer(self) -> None:
+        connection = self._require_connection()
+
+        try:
+            connection.reset_input_buffer()
+        except Exception as error:
+            raise SerialClientError(f"Unable to clear serial input: {error}") from error
+
     def read_line(self) -> str | None:
         connection = self._require_connection()
 

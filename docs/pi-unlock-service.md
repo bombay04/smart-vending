@@ -68,6 +68,29 @@ Health check:
 curl http://localhost:5000/health
 ```
 
+Read the current IR product-presence and reed-switch door state:
+
+```bash
+curl http://localhost:5000/hardware/status
+```
+
+Successful response:
+
+```json
+{
+  "status": "ok",
+  "slots": [
+    { "slotNumber": 1, "productPresent": true, "doorClosed": true },
+    { "slotNumber": 2, "productPresent": false, "doorClosed": true },
+    { "slotNumber": 3, "productPresent": true, "doorClosed": false }
+  ]
+}
+```
+
+In real mode, the service sends `GET_STATUS` and waits up to three seconds for both `IR` and `DOOR` state for all three slots. Unrelated Serial lines are ignored. Missing, incomplete, timed-out, or disconnected hardware status returns HTTP `503`; the service never invents missing sensor values.
+
+In mock mode, all three slots deterministically report `productPresent: true` and `doorClosed: true`.
+
 Mock or real unlock request on Linux/Raspberry Pi:
 
 ```bash
