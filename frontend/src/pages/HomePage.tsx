@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { fetchSlots } from "../api/slot";
 import { createMockPurchase } from "../api/transaction";
 import { unlockSlot } from "../api/unlock";
+import RestockMode from "../components/RestockMode";
 import type { Slot } from "../types/slot";
 
 interface PurchaseSuccess {
@@ -10,6 +11,7 @@ interface PurchaseSuccess {
 }
 
 function HomePage() {
+  const [activeMode, setActiveMode] = useState<"customer" | "restock">("customer");
   const [slots, setSlots] = useState<Slot[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -108,6 +110,10 @@ function HomePage() {
     };
   }, [purchaseSuccess]);
 
+  if (activeMode === "restock") {
+    return <RestockMode onExit={() => setActiveMode("customer")} />;
+  }
+
   if (purchaseSuccess !== null) {
     return (
       <main className="home-page home-page--success">
@@ -135,6 +141,13 @@ function HomePage() {
           <p className="mode-label">Customer Mode</p>
           <h1>Smart Vending Machine</h1>
           <p className="instruction">Please select a product</p>
+          <button
+            className="employee-mode-button"
+            type="button"
+            onClick={() => setActiveMode("restock")}
+          >
+            Employee Mode
+          </button>
         </header>
 
         {isLoading && <p className="state-message">Loading slots...</p>}
