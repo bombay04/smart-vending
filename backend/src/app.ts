@@ -1,4 +1,5 @@
 import express from "express";
+import employeeRouter from "./routes/employee.routes";
 import { errorMiddleware } from "./middlewares/error.middleware";
 import healthRouter from "./routes/health.routes";
 import productRouter from "./routes/product.routes";
@@ -23,6 +24,7 @@ app.use((request, response, next) => {
 
 app.use(express.json());
 app.use("/health", healthRouter);
+app.use("/api/v1/employees", employeeRouter);
 app.use("/api/v1/products", productRouter);
 app.use("/api/v1/slots", slotRouter);
 app.use("/api/v1/transactions", transactionRouter);

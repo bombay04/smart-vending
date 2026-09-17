@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { fetchHardwareStatus } from "../api/hardware";
 import { createMockRestock } from "../api/restock";
 import type { MockRestockResult } from "../api/restock";
+import type { AuthenticatedEmployee } from "../types/employee";
 import type { HardwareSlotStatus } from "../types/hardware";
 
 const POLLING_INTERVAL_MS = 2000;
 const REQUEST_TIMEOUT_MS = 3000;
 const STABLE_CLOSED_DURATION_MS = 2000;
 const SUCCESS_DISPLAY_DURATION_MS = 3500;
-const PROTOTYPE_EMPLOYEE_ID = 1;
 
 type ValidationState = "READY" | "NOT_READY" | "CHECKING";
 
@@ -17,6 +17,7 @@ interface ValidatedSlotStatus extends HardwareSlotStatus {
 }
 
 interface RestockModeProps {
+  authenticatedEmployee: AuthenticatedEmployee;
   onExit: () => void;
   onRestockSuccess: (restock: MockRestockResult) => void;
 }
@@ -52,7 +53,7 @@ function validateSlots(
   });
 }
 
-function RestockMode({ onExit, onRestockSuccess }: RestockModeProps) {
+function RestockMode({ authenticatedEmployee, onExit, onRestockSuccess }: RestockModeProps) {
   const [slots, setSlots] = useState<ValidatedSlotStatus[] | null>(null);
   const [isUnavailable, setIsUnavailable] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -136,7 +137,7 @@ function RestockMode({ onExit, onRestockSuccess }: RestockModeProps) {
     let restock: MockRestockResult;
 
     try {
-      restock = await createMockRestock(PROTOTYPE_EMPLOYEE_ID);
+      restock = await createMockRestock(authenticatedEmployee.id);
     } catch (error: unknown) {
       setRestockError(
         error instanceof Error ? error.message : "Failed to confirm restock. Please try again.",
@@ -173,7 +174,10 @@ function RestockMode({ onExit, onRestockSuccess }: RestockModeProps) {
           <div>
             <p className="mode-label mode-label--employee">Employee Mode</p>
             <h1>Restock Mode</h1>
-            <p className="instruction">Current physical slot and door status</p>
+            <p className="instruction">
+              Signed in as {authenticatedEmployee.name} ({authenticatedEmployee.employeeCode}) ·
+              Current physical slot and door status
+            </p>
           </div>
           <button
             className="restock-exit-button"
