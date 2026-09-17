@@ -173,10 +173,43 @@
   box-shadow: 0 18px 45px rgba(30, 55, 90, 0.1);
 }
 
+.hardware-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
 .hardware-card h2 {
-  margin: 0 0 28px;
+  margin: 0;
   color: #172033;
   font-size: clamp(1.7rem, 3vw, 2.25rem);
+}
+
+.validation-badge {
+  min-width: 110px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  font-size: 0.8rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-align: center;
+}
+
+.validation-badge--ready {
+  color: #ffffff;
+  background: #059669;
+}
+
+.validation-badge--not-ready {
+  color: #ffffff;
+  background: #dc2626;
+}
+
+.validation-badge--checking {
+  color: #854d0e;
+  background: #fef08a;
 }
 
 .hardware-status-row {
@@ -236,6 +269,54 @@
 .hardware-unavailable p {
   margin: 14px 0 0;
   font-size: 1.1rem;
+}
+
+.restock-confirmation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 32px;
+  padding: 24px 28px;
+  border: 1px solid #cbd5e1;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.restock-confirmation--ready {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.restock-confirmation p {
+  margin: 0;
+  color: #475569;
+  font-size: clamp(1rem, 2.5vw, 1.25rem);
+  font-weight: 750;
+}
+
+.restock-confirmation--ready p {
+  color: #166534;
+}
+
+.confirm-restock-button {
+  min-width: 220px;
+  min-height: 60px;
+  padding: 0 24px;
+  border: 0;
+  border-radius: 18px;
+  color: #ffffff;
+  background: #059669;
+  font-size: 1.05rem;
+  font-weight: 850;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.confirm-restock-button:disabled {
+  color: #64748b;
+  background: #e2e8f0;
+  cursor: not-allowed;
 }
 
 .state-message {
@@ -418,6 +499,15 @@
   }
 
   .restock-exit-button {
+    width: 100%;
+  }
+
+  .restock-confirmation {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .confirm-restock-button {
     width: 100%;
   }
 

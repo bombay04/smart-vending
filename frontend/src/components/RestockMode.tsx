@@ -4,19 +4,62 @@ import type { HardwareSlotStatus } from "../types/hardware";
 
 const POLLING_INTERVAL_MS = 2000;
 const REQUEST_TIMEOUT_MS = 3000;
+const STABLE_CLOSED_DURATION_MS = 2000;
+
+type ValidationState = "READY" | "NOT_READY" | "CHECKING";
+
+interface ValidatedSlotStatus extends HardwareSlotStatus {
+  validationState: ValidationState;
+}
 
 interface RestockModeProps {
   onExit: () => void;
 }
 
+function validateSlots(
+  slots: HardwareSlotStatus[],
+  closedSinceBySlot: Map<number, number>,
+  currentTime: number,
+): ValidatedSlotStatus[] {
+  return slots.map((slot) => {
+    if (!slot.doorClosed) {
+      closedSinceBySlot.delete(slot.slotNumber);
+
+      return { ...slot, validationState: "NOT_READY" };
+    }
+
+    let closedSince = closedSinceBySlot.get(slot.slotNumber);
+    if (closedSince === undefined) {
+      closedSince = currentTime;
+      closedSinceBySlot.set(slot.slotNumber, closedSince);
+    }
+
+    if (!slot.productPresent) {
+      return { ...slot, validationState: "NOT_READY" };
+    }
+
+    const hasStableClosedDoor = currentTime - closedSince >= STABLE_CLOSED_DURATION_MS;
+
+    return {
+      ...slot,
+      validationState: hasStableClosedDoor ? "READY" : "CHECKING",
+    };
+  });
+}
+
 function RestockMode({ onExit }: RestockModeProps) {
-  const [slots, setSlots] = useState<HardwareSlotStatus[] | null>(null);
+  const [slots, setSlots] = useState<ValidatedSlotStatus[] | null>(null);
   const [isUnavailable, setIsUnavailable] = useState(false);
+  const allSlotsReady =
+    slots !== null &&
+    slots.length === 3 &&
+    slots.every((slot) => slot.validationState === "READY");
 
   useEffect(() => {
     let isActive = true;
     let pollingTimeoutId: number | undefined;
     let activeRequest: AbortController | null = null;
+    const closedSinceBySlot = new Map<number, number>();
 
     async function pollHardwareStatus() {
       activeRequest = new AbortController();
@@ -28,11 +71,12 @@ function RestockMode({ onExit }: RestockModeProps) {
         const response = await fetchHardwareStatus(activeRequest.signal);
 
         if (isActive) {
-          setSlots(response.slots);
+          setSlots(validateSlots(response.slots, closedSinceBySlot, Date.now()));
           setIsUnavailable(false);
         }
       } catch {
         if (isActive) {
+          closedSinceBySlot.clear();
           setSlots(null);
           setIsUnavailable(true);
         }
@@ -88,7 +132,16 @@ function RestockMode({ onExit }: RestockModeProps) {
           <section className="hardware-grid" aria-label="Physical vending slot status">
             {slots.map((slot) => (
               <article className="hardware-card" key={slot.slotNumber}>
-                <h2>Slot {slot.slotNumber}</h2>
+                <div className="hardware-card__header">
+                  <h2>Slot {slot.slotNumber}</h2>
+                  <strong
+                    className={`validation-badge validation-badge--${slot.validationState
+                      .toLowerCase()
+                      .replace("_", "-")}`}
+                  >
+                    {slot.validationState.replace("_", " ")}
+                  </strong>
+                </div>
 
                 <div className="hardware-status-row">
                   <span className="hardware-status-label">Product</span>
@@ -115,6 +168,20 @@ function RestockMode({ onExit }: RestockModeProps) {
             ))}
           </section>
         )}
+
+        <section
+          className={`restock-confirmation${allSlotsReady ? " restock-confirmation--ready" : ""}`}
+          aria-live="polite"
+        >
+          <p>
+            {allSlotsReady
+              ? "All slots ready for restock confirmation"
+              : "All slots must be READY before restock can be confirmed."}
+          </p>
+          <button className="confirm-restock-button" type="button" disabled={!allSlotsReady}>
+            Confirm Restock
+          </button>
+        </section>
       </div>
     </main>
   );
