@@ -3,7 +3,9 @@ import { fetchSlots } from "../api/slot";
 import { createMockPurchase } from "../api/transaction";
 import { unlockSlot } from "../api/unlock";
 import type { MockRestockResult } from "../api/restock";
+import EmployeeAuthentication from "../components/EmployeeAuthentication";
 import RestockMode from "../components/RestockMode";
+import type { AuthenticatedEmployee } from "../types/employee";
 import type { Slot } from "../types/slot";
 
 interface PurchaseSuccess {
@@ -12,7 +14,11 @@ interface PurchaseSuccess {
 }
 
 function HomePage() {
-  const [activeMode, setActiveMode] = useState<"customer" | "restock">("customer");
+  const [activeMode, setActiveMode] = useState<"customer" | "employee-auth" | "restock">(
+    "customer",
+  );
+  const [authenticatedEmployee, setAuthenticatedEmployee] =
+    useState<AuthenticatedEmployee | null>(null);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -50,7 +56,18 @@ function HomePage() {
   }, []);
 
   const exitRestockMode = useCallback(() => {
+    setAuthenticatedEmployee(null);
     setActiveMode("customer");
+  }, []);
+
+  const cancelEmployeeAuthentication = useCallback(() => {
+    setAuthenticatedEmployee(null);
+    setActiveMode("customer");
+  }, []);
+
+  const handleEmployeeAuthenticated = useCallback((employee: AuthenticatedEmployee) => {
+    setAuthenticatedEmployee(employee);
+    setActiveMode("restock");
   }, []);
 
   async function handleBuy(slotNumber: number) {
@@ -135,9 +152,19 @@ function HomePage() {
     };
   }, [purchaseSuccess]);
 
-  if (activeMode === "restock") {
+  if (activeMode === "employee-auth") {
+    return (
+      <EmployeeAuthentication
+        onAuthenticated={handleEmployeeAuthenticated}
+        onCancel={cancelEmployeeAuthentication}
+      />
+    );
+  }
+
+  if (activeMode === "restock" && authenticatedEmployee !== null) {
     return (
       <RestockMode
+        authenticatedEmployee={authenticatedEmployee}
         onExit={exitRestockMode}
         onRestockSuccess={handleRestockSuccess}
       />
@@ -174,7 +201,10 @@ function HomePage() {
           <button
             className="employee-mode-button"
             type="button"
-            onClick={() => setActiveMode("restock")}
+            onClick={() => {
+              setAuthenticatedEmployee(null);
+              setActiveMode("employee-auth");
+            }}
           >
             Employee Mode
           </button>

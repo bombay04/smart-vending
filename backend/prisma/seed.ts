@@ -9,6 +9,19 @@ const products = [
 
 async function main(): Promise<void> {
   await prisma.$transaction(async (transaction) => {
+    await transaction.employee.upsert({
+      where: { employeeCode: "EMP001" },
+      update: {
+        name: "Prototype Employee",
+        isActive: true,
+      },
+      create: {
+        name: "Prototype Employee",
+        employeeCode: "EMP001",
+        isActive: true,
+      },
+    });
+
     for (const productData of products) {
       const existingProduct = await transaction.product.findFirst({
         where: { name: productData.name },
