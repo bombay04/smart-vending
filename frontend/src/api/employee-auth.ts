@@ -11,12 +11,14 @@ export async function authenticateMockEmployee(
   employeeCode: string,
   signal?: AbortSignal,
 ): Promise<AuthenticatedEmployee> {
+  const normalizedEmployeeCode = employeeCode.trim().toUpperCase();
+
   const response = await fetch(mockEmployeeAuthUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ employeeCode }),
+    body: JSON.stringify({ employeeCode: normalizedEmployeeCode }),
     signal,
   });
 
