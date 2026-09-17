@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { fetchSlots } from "../api/slot";
 import { createMockPurchase } from "../api/transaction";
 import { unlockSlot } from "../api/unlock";
+import type { MockRestockResult } from "../api/restock";
 import RestockMode from "../components/RestockMode";
 import type { Slot } from "../types/slot";
 
@@ -27,6 +28,30 @@ function HomePage() {
       ),
     );
   }
+
+  const handleRestockSuccess = useCallback((restock: MockRestockResult) => {
+    const restockedSlotNumbers = new Set(restock.slots.map((slot) => slot.slotNumber));
+
+    setSlots((currentSlots) =>
+      currentSlots.map((slot) =>
+        restockedSlotNumbers.has(slot.slotNumber) ? { ...slot, status: "AVAILABLE" } : slot,
+      ),
+    );
+    setError(false);
+
+    void fetchSlots()
+      .then((data) => {
+        setSlots(data);
+        setError(false);
+      })
+      .catch(() => {
+        // Keep the availability confirmed by the successful restock response.
+      });
+  }, []);
+
+  const exitRestockMode = useCallback(() => {
+    setActiveMode("customer");
+  }, []);
 
   async function handleBuy(slotNumber: number) {
     setPurchaseError(null);
@@ -111,7 +136,12 @@ function HomePage() {
   }, [purchaseSuccess]);
 
   if (activeMode === "restock") {
-    return <RestockMode onExit={() => setActiveMode("customer")} />;
+    return (
+      <RestockMode
+        onExit={exitRestockMode}
+        onRestockSuccess={handleRestockSuccess}
+      />
+    );
   }
 
   if (purchaseSuccess !== null) {

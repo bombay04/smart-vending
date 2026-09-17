@@ -1,10 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchHardwareStatus } from "../api/hardware";
+import { createMockRestock } from "../api/restock";
+import type { MockRestockResult } from "../api/restock";
 import type { HardwareSlotStatus } from "../types/hardware";
 
 const POLLING_INTERVAL_MS = 2000;
 const REQUEST_TIMEOUT_MS = 3000;
 const STABLE_CLOSED_DURATION_MS = 2000;
+const SUCCESS_DISPLAY_DURATION_MS = 3500;
+const PROTOTYPE_EMPLOYEE_ID = 1;
 
 type ValidationState = "READY" | "NOT_READY" | "CHECKING";
 
@@ -14,6 +18,7 @@ interface ValidatedSlotStatus extends HardwareSlotStatus {
 
 interface RestockModeProps {
   onExit: () => void;
+  onRestockSuccess: (restock: MockRestockResult) => void;
 }
 
 function validateSlots(
@@ -47,9 +52,13 @@ function validateSlots(
   });
 }
 
-function RestockMode({ onExit }: RestockModeProps) {
+function RestockMode({ onExit, onRestockSuccess }: RestockModeProps) {
   const [slots, setSlots] = useState<ValidatedSlotStatus[] | null>(null);
   const [isUnavailable, setIsUnavailable] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [restockError, setRestockError] = useState<string | null>(null);
+  const [isSuccessful, setIsSuccessful] = useState(false);
+  const submissionInProgressRef = useRef(false);
   const allSlotsReady =
     slots !== null &&
     slots.length === 3 &&
@@ -103,6 +112,60 @@ function RestockMode({ onExit }: RestockModeProps) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isSuccessful) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(onExit, SUCCESS_DISPLAY_DURATION_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isSuccessful, onExit]);
+
+  async function handleConfirmRestock() {
+    if (!allSlotsReady || submissionInProgressRef.current) {
+      return;
+    }
+
+    submissionInProgressRef.current = true;
+    setIsSubmitting(true);
+    setRestockError(null);
+
+    let restock: MockRestockResult;
+
+    try {
+      restock = await createMockRestock(PROTOTYPE_EMPLOYEE_ID);
+    } catch (error: unknown) {
+      setRestockError(
+        error instanceof Error ? error.message : "Failed to confirm restock. Please try again.",
+      );
+      submissionInProgressRef.current = false;
+      setIsSubmitting(false);
+      return;
+    }
+
+    onRestockSuccess(restock);
+    setIsSuccessful(true);
+  }
+
+  if (isSuccessful) {
+    return (
+      <main className="home-page home-page--success restock-page">
+        <section className="purchase-success restock-success" role="status" aria-live="polite">
+          <div className="purchase-success__icon" aria-hidden="true">
+            {"\u2713"}
+          </div>
+          <p className="mode-label mode-label--employee">Employee Mode</p>
+          <h1>Restock Successful</h1>
+          <p className="restock-success__inventory">Inventory has been restored.</p>
+          <p className="purchase-success__return">Returning to Customer Mode...</p>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="home-page restock-page">
       <div className="customer-container">
@@ -112,7 +175,12 @@ function RestockMode({ onExit }: RestockModeProps) {
             <h1>Restock Mode</h1>
             <p className="instruction">Current physical slot and door status</p>
           </div>
-          <button className="restock-exit-button" type="button" onClick={onExit}>
+          <button
+            className="restock-exit-button"
+            type="button"
+            disabled={isSubmitting}
+            onClick={onExit}
+          >
             Exit Restock Mode
           </button>
         </header>
@@ -173,13 +241,21 @@ function RestockMode({ onExit }: RestockModeProps) {
           className={`restock-confirmation${allSlotsReady ? " restock-confirmation--ready" : ""}`}
           aria-live="polite"
         >
-          <p>
-            {allSlotsReady
-              ? "All slots ready for restock confirmation"
-              : "All slots must be READY before restock can be confirmed."}
-          </p>
-          <button className="confirm-restock-button" type="button" disabled={!allSlotsReady}>
-            Confirm Restock
+          <div>
+            <p>
+              {allSlotsReady
+                ? "All slots ready for restock confirmation"
+                : "All slots must be READY before restock can be confirmed."}
+            </p>
+            {restockError && <p className="restock-error">{restockError}</p>}
+          </div>
+          <button
+            className="confirm-restock-button"
+            type="button"
+            disabled={!allSlotsReady || isSubmitting}
+            onClick={handleConfirmRestock}
+          >
+            {isSubmitting ? "Confirming..." : "Confirm Restock"}
           </button>
         </section>
       </div>

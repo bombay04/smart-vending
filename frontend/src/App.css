@@ -131,6 +131,12 @@
   background: #f8fafc;
 }
 
+.restock-exit-button:disabled {
+  color: #94a3b8;
+  background: #e2e8f0;
+  cursor: not-allowed;
+}
+
 .restock-page {
   background:
     radial-gradient(circle at top right, rgba(14, 116, 144, 0.14), transparent 32rem),
@@ -295,6 +301,11 @@
   font-weight: 750;
 }
 
+.restock-confirmation .restock-error {
+  margin-top: 10px;
+  color: #b91c1c;
+}
+
 .restock-confirmation--ready p {
   color: #166534;
 }
@@ -317,6 +328,17 @@
   color: #64748b;
   background: #e2e8f0;
   cursor: not-allowed;
+}
+
+.restock-success {
+  border-color: #86efac;
+}
+
+.restock-success__inventory {
+  margin: 28px 0 0;
+  color: #166534;
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  font-weight: 800;
 }
 
 .state-message {
