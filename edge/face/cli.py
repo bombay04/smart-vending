@@ -13,7 +13,7 @@ from .config import (
     DEFAULT_CAMERA_STABILIZATION_SECONDS,
     DEFAULT_ENROLLMENT_SAMPLE_COUNT,
     DEFAULT_LIVE_SAMPLE_COUNT,
-    DEFAULT_MATCH_DISTANCE_THRESHOLD,
+    DEFAULT_SFACE_L2_DISTANCE_THRESHOLD,
     DEFAULT_TEMPLATE_DIRECTORY,
 )
 from .engine import FaceEngine
@@ -88,7 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_parser.add_argument(
         "--debug",
         action="store_true",
-        help="Print non-biometric capture, crop, and aggregate representation diagnostics.",
+        help="Print privacy-safe capture, detection, embedding, and timing diagnostics.",
     )
 
     recognize_parser = subparsers.add_parser(
@@ -100,11 +100,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=_environment_integer("FACE_CAMERA_INDEX", DEFAULT_CAMERA_INDEX),
     )
     recognize_parser.add_argument(
-        "--threshold",
+        "--sface-l2-threshold",
+        dest="sface_l2_threshold",
         type=float,
         default=_environment_float(
-            "FACE_MATCH_THRESHOLD", DEFAULT_MATCH_DISTANCE_THRESHOLD
+            "FACE_SFACE_L2_THRESHOLD", DEFAULT_SFACE_L2_DISTANCE_THRESHOLD
         ),
+        help="Uncalibrated SFace FR_NORM_L2 threshold; lower is more similar.",
     )
     recognize_parser.add_argument(
         "--template-dir", type=Path, default=_template_directory()
@@ -125,7 +127,7 @@ def build_parser() -> argparse.ArgumentParser:
     recognize_parser.add_argument(
         "--debug",
         action="store_true",
-        help="Print non-biometric capture, crop, and aggregate representation diagnostics.",
+        help="Print privacy-safe capture, detection, embedding, and timing diagnostics.",
     )
 
     probe_parser = subparsers.add_parser(
@@ -139,7 +141,9 @@ def build_parser() -> argparse.ArgumentParser:
 def _create_engine(args: argparse.Namespace) -> FaceEngine:
     return FaceEngine(
         camera_index=args.camera_index,
-        threshold=getattr(args, "threshold", DEFAULT_MATCH_DISTANCE_THRESHOLD),
+        sface_l2_threshold=getattr(
+            args, "sface_l2_threshold", DEFAULT_SFACE_L2_DISTANCE_THRESHOLD
+        ),
         stabilization_seconds=args.stabilization_seconds,
         enrollment_sample_count=getattr(
             args, "enrollment_samples", DEFAULT_ENROLLMENT_SAMPLE_COUNT
@@ -176,7 +180,7 @@ def run(args: argparse.Namespace) -> int:
         template = engine.register(args.employee_code)
         print(
             f"REGISTERED employeeCode={template.employee_code} "
-            f"samples={len(template.representations)}"
+            f"samples={len(template.embeddings)}"
         )
         return EXIT_SUCCESS
 

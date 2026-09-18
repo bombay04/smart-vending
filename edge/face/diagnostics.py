@@ -24,20 +24,22 @@ class FaceDetectionDiagnostics:
     frame_width: int
     frame_height: int
     bounding_boxes: tuple[tuple[int, int, int, int], ...]
-    normalized_crop_box: tuple[int, int, int, int] | None = None
-    crop_width: int | None = None
-    crop_height: int | None = None
+    confidences: tuple[float, ...]
+    landmarks_valid: tuple[bool, ...]
 
 
 @dataclass(frozen=True)
-class RepresentationDiagnostics:
-    length: int
-    nonzero_values: int
-    minimum: float
-    maximum: float
-    mean: float
-    l1_norm: float
+class EmbeddingDiagnostics:
+    shape: tuple[int, ...]
+    dtype: str
+    all_finite: bool
     l2_norm: float
+
+
+@dataclass(frozen=True)
+class InferenceTimingDiagnostics:
+    stage: str
+    elapsed_milliseconds: float
 
 
 @dataclass(frozen=True)
@@ -74,7 +76,8 @@ class ConsensusDecisionDiagnostics:
 DiagnosticEvent: TypeAlias = (
     CameraCaptureDiagnostics
     | FaceDetectionDiagnostics
-    | RepresentationDiagnostics
+    | EmbeddingDiagnostics
+    | InferenceTimingDiagnostics
     | SampleCollectionDiagnostics
     | LiveSampleDistanceDiagnostics
     | ConsensusDecisionDiagnostics
@@ -83,7 +86,7 @@ DiagnosticSink: TypeAlias = Callable[[DiagnosticEvent], None]
 
 
 def format_diagnostic(event: DiagnosticEvent) -> str:
-    """Format aggregate diagnostics without exposing a representation vector."""
+    """Format aggregate diagnostics without exposing an embedding vector."""
 
     if isinstance(event, CameraCaptureDiagnostics):
         return (
@@ -102,31 +105,29 @@ def format_diagnostic(event: DiagnosticEvent) -> str:
             _format_bounding_box(box, event.frame_width, event.frame_height)
             for box in event.bounding_boxes
         ) or "none"
-        crop = (
-            f"{event.crop_width}x{event.crop_height}"
-            if event.crop_width is not None and event.crop_height is not None
-            else "none"
-        )
-        normalized_crop = (
-            ",".join(str(value) for value in event.normalized_crop_box)
-            if event.normalized_crop_box is not None
-            else "none"
-        )
+        confidences = ",".join(f"{value:.6f}" for value in event.confidences) or "none"
+        landmarks = ",".join(
+            "valid" if value else "invalid" for value in event.landmarks_valid
+        ) or "none"
         return (
             "DEBUG detection "
             f"frame={event.frame_width}x{event.frame_height} "
             f"faceCount={len(event.bounding_boxes)} boxes={boxes} "
-            f"normalizedCrop={normalized_crop} crop={crop}"
+            f"confidences={confidences} landmarks={landmarks}"
         )
 
-    if isinstance(event, RepresentationDiagnostics):
+    if isinstance(event, EmbeddingDiagnostics):
+        shape = "x".join(str(value) for value in event.shape)
         return (
-            "DEBUG representation "
-            f"length={event.length} "
-            f"nonzero={event.nonzero_values} "
-            f"min={event.minimum:.6f} max={event.maximum:.6f} "
-            f"mean={event.mean:.6f} "
-            f"l1={event.l1_norm:.6f} l2={event.l2_norm:.6f}"
+            "DEBUG embedding "
+            f"shape={shape} dtype={event.dtype} "
+            f"finite={str(event.all_finite).lower()} l2={event.l2_norm:.6f}"
+        )
+
+    if isinstance(event, InferenceTimingDiagnostics):
+        return (
+            "DEBUG inference "
+            f"stage={event.stage} elapsedMs={event.elapsed_milliseconds:.3f}"
         )
 
     if isinstance(event, SampleCollectionDiagnostics):

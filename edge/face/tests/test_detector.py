@@ -1,73 +1,119 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy
 
-from edge.face.detector import HaarFaceDetector, normalized_square_bounds
+from edge.face.detector import YuNetFaceDetector
 from edge.face.diagnostics import FaceDetectionDiagnostics
-from edge.face.errors import MultipleFacesError, NoFaceError
+from edge.face.errors import ModelError, MultipleFacesError, NoFaceError
 
 
-class FakeClassifier:
-    def __init__(self, boxes: list[tuple[int, int, int, int]]) -> None:
-        self.boxes = numpy.array(boxes, dtype=numpy.int32)
+def valid_face(x: float = 10.0) -> numpy.ndarray:
+    return numpy.array(
+        [x, 20, 100, 120, 35, 55, 75, 55, 55, 80, 40, 105, 70, 105, 0.99],
+        dtype=numpy.float32,
+    )
 
-    def detectMultiScale(self, *_args: object, **_kwargs: object) -> numpy.ndarray:
-        return self.boxes
+
+class FakeNetwork:
+    def __init__(self, faces: numpy.ndarray | None) -> None:
+        self.faces = faces
+        self.input_size: tuple[int, int] | None = None
+
+    def setInputSize(self, input_size: tuple[int, int]) -> None:
+        self.input_size = input_size
+
+    def detect(self, _frame: numpy.ndarray) -> tuple[bool, numpy.ndarray | None]:
+        return True, self.faces
 
 
-def detector_with_boxes(boxes: list[tuple[int, int, int, int]]) -> HaarFaceDetector:
-    detector = object.__new__(HaarFaceDetector)
-    detector._classifier = FakeClassifier(boxes)
-    return detector
+class FakeFactory:
+    def __init__(self, network: FakeNetwork | None, *, fail: bool = False) -> None:
+        self.network = network
+        self.fail = fail
+        self.calls: list[tuple[object, ...]] = []
+
+    def create(self, *args: object) -> FakeNetwork | None:
+        self.calls.append(args)
+        if self.fail:
+            raise RuntimeError("invalid model")
+        return self.network
+
+
+class FakeDnn:
+    DNN_BACKEND_OPENCV = 3
+    DNN_TARGET_CPU = 0
+
+
+class FakeCv2:
+    def __init__(self, network: FakeNetwork | None, *, fail: bool = False) -> None:
+        self.dnn = FakeDnn()
+        self.FaceDetectorYN = FakeFactory(network, fail=fail)
 
 
 class DetectorTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.model_path = Path(self.temporary_directory.name) / "yunet.onnx"
+        self.model_path.touch()
         self.frame = numpy.zeros((200, 300, 3), dtype=numpy.uint8)
 
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def detector(self, faces: numpy.ndarray | None) -> tuple[YuNetFaceDetector, FakeNetwork]:
+        network = FakeNetwork(faces)
+        return (
+            YuNetFaceDetector(self.model_path, cv2_module=FakeCv2(network)),
+            network,
+        )
+
+    def test_missing_model_is_controlled(self) -> None:
+        with self.assertRaisesRegex(ModelError, "YuNet model is missing"):
+            YuNetFaceDetector(self.model_path.with_name("missing.onnx"))
+
+    def test_model_load_error_is_controlled(self) -> None:
+        with self.assertRaisesRegex(ModelError, "could not be loaded"):
+            YuNetFaceDetector(self.model_path, cv2_module=FakeCv2(None, fail=True))
+
     def test_no_face_is_not_silently_accepted(self) -> None:
-        diagnostics: list[FaceDetectionDiagnostics] = []
-        detector = detector_with_boxes([])
+        diagnostics: list[object] = []
+        detector, _ = self.detector(None)
         with self.assertRaises(NoFaceError):
-            detector.extract_single_face(
+            detector.detect_single_face(
                 self.frame, diagnostic_sink=diagnostics.append
             )
-        self.assertEqual(len(diagnostics[0].bounding_boxes), 0)
+        detection = next(
+            event for event in diagnostics if isinstance(event, FaceDetectionDiagnostics)
+        )
+        self.assertEqual(detection.bounding_boxes, ())
 
     def test_multiple_faces_are_not_silently_reduced_to_one(self) -> None:
-        diagnostics: list[FaceDetectionDiagnostics] = []
-        detector = detector_with_boxes([(10, 10, 80, 80), (120, 20, 90, 90)])
+        detector, _ = self.detector(numpy.stack((valid_face(), valid_face(130))))
         with self.assertRaises(MultipleFacesError):
-            detector.extract_single_face(
-                self.frame, diagnostic_sink=diagnostics.append
-            )
-        self.assertEqual(len(diagnostics[0].bounding_boxes), 2)
+            detector.detect_single_face(self.frame)
 
-    def test_crop_is_square_and_does_not_stretch_haar_aspect_ratio(self) -> None:
-        diagnostics: list[FaceDetectionDiagnostics] = []
-        detector = detector_with_boxes([(50, 40, 100, 80)])
-        crop = detector.extract_single_face(
+    def test_exactly_one_valid_face_returns_complete_yunet_row(self) -> None:
+        network = FakeNetwork(numpy.stack((valid_face(),)))
+        fake_cv2 = FakeCv2(network)
+        detector = YuNetFaceDetector(self.model_path, cv2_module=fake_cv2)
+        diagnostics: list[object] = []
+        row = detector.detect_single_face(
             self.frame, diagnostic_sink=diagnostics.append
         )
-        self.assertEqual(crop.shape, (72, 72))
-        self.assertEqual(diagnostics[0].bounding_boxes, ((50, 40, 100, 80),))
-        self.assertEqual(diagnostics[0].normalized_crop_box, (64, 44, 72, 72))
-        self.assertEqual(
-            (diagnostics[0].crop_width, diagnostics[0].crop_height), (72, 72)
-        )
 
-    def test_square_crop_stays_inside_frame_at_boundaries(self) -> None:
-        for bounding_box in ((-10, -5, 50, 40), (280, 180, 50, 50)):
-            x, y, width, height = normalized_square_bounds(
-                bounding_box, frame_width=300, frame_height=200
-            )
-            self.assertEqual(width, height)
-            self.assertGreaterEqual(x, 0)
-            self.assertGreaterEqual(y, 0)
-            self.assertLessEqual(x + width, 300)
-            self.assertLessEqual(y + height, 200)
+        self.assertEqual(row.shape, (15,))
+        self.assertEqual(network.input_size, (300, 200))
+        self.assertEqual(fake_cv2.FaceDetectorYN.calls[0][-2:], (3, 0))
+        detection = next(
+            event for event in diagnostics if isinstance(event, FaceDetectionDiagnostics)
+        )
+        self.assertEqual(detection.bounding_boxes, ((10, 20, 100, 120),))
+        self.assertTrue(detection.landmarks_valid[0])
+        self.assertAlmostEqual(detection.confidences[0], 0.99, places=5)
 
 
 if __name__ == "__main__":

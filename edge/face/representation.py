@@ -1,108 +1,142 @@
-"""Spatial uniform-LBP representation for prototype face matching."""
+"""SFace alignment, embedding validation, and L2 matching."""
 
 from __future__ import annotations
 
+import math
+import time
+from pathlib import Path
 from typing import Any
 
+import numpy
+
 from .config import (
-    FACE_HEIGHT,
-    FACE_WIDTH,
-    LBP_BIN_COUNT,
-    LBP_GRID_COLUMNS,
-    LBP_GRID_ROWS,
-    REPRESENTATION_LENGTH,
+    DEFAULT_SFACE_MODEL_PATH,
+    MAX_SFACE_L2_DISTANCE,
+    SFACE_EMBEDDING_LENGTH,
 )
-from .diagnostics import DiagnosticSink, RepresentationDiagnostics
-from .errors import DependencyError
+from .diagnostics import (
+    DiagnosticSink,
+    EmbeddingDiagnostics,
+    InferenceTimingDiagnostics,
+)
+from .errors import EmbeddingError, ModelError
 from .opencv_support import require_cv2
 
 
-def _require_numpy() -> Any:
-    try:
-        import numpy
-    except ImportError as error:
-        raise DependencyError(
-            "NumPy is unavailable. Install edge/requirements.txt with binary wheels."
-        ) from error
-    return numpy
+def validate_embedding(embedding: Any) -> EmbeddingDiagnostics:
+    """Validate official SFace output and return non-biometric metadata."""
 
-
-def _build_uniform_lbp_lookup() -> Any:
-    numpy = _require_numpy()
-    lookup = numpy.empty(256, dtype=numpy.uint8)
-    uniform_label = 0
-    for code in range(256):
-        bits = [(code >> bit) & 1 for bit in range(8)]
-        transitions = sum(
-            bits[index] != bits[(index + 1) % 8] for index in range(8)
+    if embedding is None:
+        raise EmbeddingError("SFace returned no embedding.")
+    array = numpy.asarray(embedding)
+    if array.shape != (1, SFACE_EMBEDDING_LENGTH):
+        raise EmbeddingError(
+            f"SFace embedding shape must be (1, {SFACE_EMBEDDING_LENGTH})."
         )
-        if transitions <= 2:
-            lookup[code] = uniform_label
-            uniform_label += 1
-        else:
-            lookup[code] = LBP_BIN_COUNT - 1
-    if uniform_label != LBP_BIN_COUNT - 1:
-        raise RuntimeError("Unexpected uniform LBP lookup size.")
-    return lookup
+    if not numpy.issubdtype(array.dtype, numpy.floating):
+        raise EmbeddingError("SFace embedding must use a floating dtype.")
 
-
-def _calculate_lbp_codes(normalized: Any) -> Any:
-    numpy = _require_numpy()
-    center = normalized[1:-1, 1:-1]
-    neighbor_slices = (
-        normalized[:-2, :-2],
-        normalized[:-2, 1:-1],
-        normalized[:-2, 2:],
-        normalized[1:-1, 2:],
-        normalized[2:, 2:],
-        normalized[2:, 1:-1],
-        normalized[2:, :-2],
-        normalized[1:-1, :-2],
+    all_finite = bool(numpy.all(numpy.isfinite(array)))
+    if not all_finite:
+        raise EmbeddingError("SFace embedding contains non-finite values.")
+    l2_norm = float(numpy.linalg.norm(array.astype(numpy.float64, copy=False)))
+    if not math.isfinite(l2_norm) or l2_norm <= 0.0:
+        raise EmbeddingError("SFace embedding must have a finite non-zero norm.")
+    return EmbeddingDiagnostics(
+        shape=tuple(int(value) for value in array.shape),
+        dtype=str(array.dtype),
+        all_finite=all_finite,
+        l2_norm=l2_norm,
     )
-    lbp_codes = numpy.zeros(center.shape, dtype=numpy.uint8)
-    for bit, neighbor in enumerate(neighbor_slices):
-        lbp_codes |= ((neighbor >= center).astype(numpy.uint8) << bit)
-    return lbp_codes
 
 
-def create_representation(
-    face_grayscale: Any, *, diagnostic_sink: DiagnosticSink | None = None
-) -> tuple[float, ...]:
-    """Normalize one grayscale face crop into a spatial LBP histogram."""
+class SFaceEmbedder:
+    def __init__(
+        self,
+        model_path: Path = DEFAULT_SFACE_MODEL_PATH,
+        *,
+        cv2_module: Any | None = None,
+    ) -> None:
+        self.model_path = Path(model_path)
+        if not self.model_path.is_file():
+            raise ModelError(f"SFace model is missing: {self.model_path}")
 
-    numpy = _require_numpy()
-    cv2 = require_cv2()
-    face = numpy.asarray(face_grayscale)
-    if face.ndim != 2 or face.size == 0:
-        raise ValueError("Face representation requires a non-empty grayscale image.")
-
-    normalized = cv2.resize(face, (FACE_WIDTH, FACE_HEIGHT), interpolation=cv2.INTER_AREA)
-    normalized = cv2.equalizeHist(normalized.astype(numpy.uint8, copy=False))
-
-    lbp_codes = _calculate_lbp_codes(normalized)
-    uniform_lbp = _build_uniform_lbp_lookup()[lbp_codes]
-    histogram_parts: list[Any] = []
-    for row in numpy.array_split(uniform_lbp, LBP_GRID_ROWS, axis=0):
-        for cell in numpy.array_split(row, LBP_GRID_COLUMNS, axis=1):
-            histogram = numpy.bincount(
-                cell.ravel(), minlength=LBP_BIN_COUNT
-            ).astype(numpy.float32)
-            histogram /= float(histogram.sum())
-            histogram_parts.append(histogram)
-
-    representation = numpy.concatenate(histogram_parts)
-    if representation.size != REPRESENTATION_LENGTH:
-        raise RuntimeError("Unexpected face representation length.")
-    if diagnostic_sink is not None:
-        diagnostic_sink(
-            RepresentationDiagnostics(
-                length=int(representation.size),
-                nonzero_values=int(numpy.count_nonzero(representation)),
-                minimum=float(representation.min()),
-                maximum=float(representation.max()),
-                mean=float(representation.mean()),
-                l1_norm=float(numpy.linalg.norm(representation, ord=1)),
-                l2_norm=float(numpy.linalg.norm(representation, ord=2)),
+        self._cv2 = cv2_module or require_cv2()
+        try:
+            self._recognizer = self._cv2.FaceRecognizerSF.create(
+                str(self.model_path),
+                "",
+                self._cv2.dnn.DNN_BACKEND_OPENCV,
+                self._cv2.dnn.DNN_TARGET_CPU,
             )
-        )
-    return tuple(float(value) for value in representation)
+        except Exception as error:
+            raise ModelError(
+                f"SFace model could not be loaded: {self.model_path}"
+            ) from error
+        if self._recognizer is None:
+            raise ModelError(f"SFace model could not be loaded: {self.model_path}")
+
+    def create_embedding(
+        self,
+        frame: Any,
+        detection: Any,
+        *,
+        diagnostic_sink: DiagnosticSink | None = None,
+    ) -> tuple[float, ...]:
+        try:
+            align_started = time.perf_counter()
+            aligned_face = self._recognizer.alignCrop(frame, detection)
+            align_elapsed = (time.perf_counter() - align_started) * 1000.0
+            feature_started = time.perf_counter()
+            embedding = self._recognizer.feature(aligned_face)
+            feature_elapsed = (time.perf_counter() - feature_started) * 1000.0
+        except Exception as error:
+            raise EmbeddingError(
+                "SFace alignment or feature extraction failed."
+            ) from error
+
+        diagnostics = validate_embedding(embedding)
+        if diagnostic_sink is not None:
+            diagnostic_sink(
+                InferenceTimingDiagnostics(
+                    stage="alignCrop", elapsed_milliseconds=align_elapsed
+                )
+            )
+            diagnostic_sink(
+                InferenceTimingDiagnostics(
+                    stage="sfaceFeature", elapsed_milliseconds=feature_elapsed
+                )
+            )
+            diagnostic_sink(diagnostics)
+
+        array = numpy.asarray(embedding).reshape(-1)
+        return tuple(float(value) for value in array)
+
+    def distance(
+        self, first: tuple[float, ...], second: tuple[float, ...]
+    ) -> float:
+        first_feature = _feature_matrix(first)
+        second_feature = _feature_matrix(second)
+        try:
+            distance = float(
+                self._recognizer.match(
+                    first_feature,
+                    second_feature,
+                    self._cv2.FaceRecognizerSF_FR_NORM_L2,
+                )
+            )
+        except Exception as error:
+            raise EmbeddingError("SFace L2 matching failed.") from error
+        if (
+            not math.isfinite(distance)
+            or distance < 0.0
+            or distance > MAX_SFACE_L2_DISTANCE + 1e-6
+        ):
+            raise EmbeddingError("SFace returned an invalid L2 distance.")
+        return distance
+
+
+def _feature_matrix(values: tuple[float, ...]) -> Any:
+    array = numpy.asarray(values, dtype=numpy.float32).reshape(1, -1)
+    validate_embedding(array)
+    return array

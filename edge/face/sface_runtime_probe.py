@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import math
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -14,15 +13,16 @@ from typing import Any
 import numpy
 
 from .camera import capture_frame
-from .config import DEFAULT_CAMERA_INDEX, DEFAULT_CAMERA_STABILIZATION_SECONDS
-from .errors import CameraError, DependencyError
+from .config import (
+    DEFAULT_CAMERA_INDEX,
+    DEFAULT_CAMERA_STABILIZATION_SECONDS,
+    DEFAULT_SFACE_MODEL_PATH,
+    DEFAULT_YUNET_MODEL_PATH,
+)
+from .diagnostics import EmbeddingDiagnostics
+from .errors import CameraError, DependencyError, EmbeddingError
 from .opencv_support import require_cv2
-
-
-MODEL_DIRECTORY = Path(__file__).resolve().parent / "data" / "models"
-DEFAULT_YUNET_MODEL = MODEL_DIRECTORY / "face_detection_yunet_2023mar.onnx"
-DEFAULT_SFACE_MODEL = MODEL_DIRECTORY / "face_recognition_sface_2021dec.onnx"
-EXPECTED_SFACE_EMBEDDING_VALUES = 128
+from .representation import validate_embedding as _validate_embedding
 
 
 class RuntimeProbeError(Exception):
@@ -53,14 +53,6 @@ class MultipleProbeFacesError(RuntimeProbeError):
 
 class InvalidEmbeddingError(RuntimeProbeError):
     code = "INVALID_EMBEDDING"
-
-
-@dataclass(frozen=True)
-class EmbeddingDiagnostics:
-    shape: tuple[int, ...]
-    dtype: str
-    all_finite: bool
-    l2_norm: float
 
 
 @dataclass(frozen=True)
@@ -116,43 +108,18 @@ def select_exactly_one_face(detection_result: Any) -> tuple[Any, int]:
 
 
 def validate_embedding(embedding: Any) -> EmbeddingDiagnostics:
-    """Validate SFace output and return aggregate metadata only."""
+    """Translate production embedding failures into the probe's stable error."""
 
-    if embedding is None:
-        raise InvalidEmbeddingError("SFace returned no embedding.")
-
-    array = numpy.asarray(embedding)
-    valid_shape = (
-        array.ndim == 1
-        or (array.ndim == 2 and array.shape[0] == 1)
-    ) and array.size == EXPECTED_SFACE_EMBEDDING_VALUES
-    if not valid_shape:
-        raise InvalidEmbeddingError(
-            "SFace returned an unexpected embedding shape; expected 128 values."
-        )
-    if not numpy.issubdtype(array.dtype, numpy.floating):
-        raise InvalidEmbeddingError("SFace returned a non-floating embedding dtype.")
-
-    all_finite = bool(numpy.all(numpy.isfinite(array)))
-    if not all_finite:
-        raise InvalidEmbeddingError("SFace returned a non-finite embedding.")
-
-    l2_norm = float(numpy.linalg.norm(array.astype(numpy.float64, copy=False)))
-    if not math.isfinite(l2_norm) or l2_norm <= 0.0:
-        raise InvalidEmbeddingError("SFace returned an invalid embedding norm.")
-
-    return EmbeddingDiagnostics(
-        shape=tuple(int(value) for value in array.shape),
-        dtype=str(array.dtype),
-        all_finite=all_finite,
-        l2_norm=l2_norm,
-    )
+    try:
+        return _validate_embedding(embedding)
+    except EmbeddingError as error:
+        raise InvalidEmbeddingError(str(error)) from error
 
 
 def run_probe(
     *,
-    yunet_model: Path = DEFAULT_YUNET_MODEL,
-    sface_model: Path = DEFAULT_SFACE_MODEL,
+    yunet_model: Path = DEFAULT_YUNET_MODEL_PATH,
+    sface_model: Path = DEFAULT_SFACE_MODEL_PATH,
     camera_index: int = DEFAULT_CAMERA_INDEX,
     stabilization_seconds: float = DEFAULT_CAMERA_STABILIZATION_SECONDS,
     cv2_module: Any | None = None,
@@ -290,8 +257,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run one privacy-safe YuNet + SFace runtime probe."
     )
-    parser.add_argument("--yunet-model", type=Path, default=DEFAULT_YUNET_MODEL)
-    parser.add_argument("--sface-model", type=Path, default=DEFAULT_SFACE_MODEL)
+    parser.add_argument("--yunet-model", type=Path, default=DEFAULT_YUNET_MODEL_PATH)
+    parser.add_argument("--sface-model", type=Path, default=DEFAULT_SFACE_MODEL_PATH)
     parser.add_argument("--camera-index", type=int, default=DEFAULT_CAMERA_INDEX)
     parser.add_argument(
         "--stabilization-seconds",

@@ -9,7 +9,10 @@ from dataclasses import dataclass
 class FaceTemplate:
     employee_code: str
     algorithm: str
-    representations: tuple[tuple[float, ...], ...]
+    similarity_metric: str
+    detector_model: str
+    embedding_model: str
+    embeddings: tuple[tuple[float, ...], ...]
 
 
 @dataclass(frozen=True)

@@ -7,8 +7,10 @@ from pathlib import Path
 
 from edge.face.config import (
     DEFAULT_ENROLLMENT_SAMPLE_COUNT,
-    REPRESENTATION_ALGORITHM,
-    REPRESENTATION_LENGTH,
+    SFACE_ALGORITHM,
+    SFACE_MODEL_FILENAME,
+    SFACE_SIMILARITY_METRIC,
+    YUNET_MODEL_FILENAME,
 )
 from edge.face.errors import (
     CorruptTemplateError,
@@ -19,8 +21,22 @@ from edge.face.models import FaceTemplate
 from edge.face.storage import TEMPLATE_SCHEMA_VERSION, TemplateStore
 
 
-def empty_representation() -> tuple[float, ...]:
-    return tuple(0.0 for _ in range(REPRESENTATION_LENGTH))
+def embedding(value: float = 1.0) -> tuple[float, ...]:
+    return (value,) + tuple(1.0 for _ in range(127))
+
+
+def face_template() -> FaceTemplate:
+    return FaceTemplate(
+        employee_code="EMP001",
+        algorithm=SFACE_ALGORITHM,
+        similarity_metric=SFACE_SIMILARITY_METRIC,
+        detector_model=YUNET_MODEL_FILENAME,
+        embedding_model=SFACE_MODEL_FILENAME,
+        embeddings=tuple(
+            embedding(float(index + 1))
+            for index in range(DEFAULT_ENROLLMENT_SAMPLE_COUNT)
+        ),
+    )
 
 
 class TemplateStoreTests(unittest.TestCase):
@@ -32,37 +48,52 @@ class TemplateStoreTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def test_multi_sample_template_round_trip(self) -> None:
-        template = FaceTemplate(
-            employee_code="EMP001",
-            algorithm=REPRESENTATION_ALGORITHM,
-            representations=tuple(
-                empty_representation()
-                for _ in range(DEFAULT_ENROLLMENT_SAMPLE_COUNT)
-            ),
-        )
+    def test_schema_v3_multi_embedding_template_round_trip(self) -> None:
+        template = face_template()
         path = self.store.save(template)
         document = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(document["schemaVersion"], TEMPLATE_SCHEMA_VERSION)
+
+        self.assertEqual(document["schemaVersion"], 3)
+        self.assertEqual(TEMPLATE_SCHEMA_VERSION, 3)
+        self.assertEqual(document["algorithm"], SFACE_ALGORITHM)
+        self.assertEqual(document["similarityMetric"], SFACE_SIMILARITY_METRIC)
+        self.assertEqual(document["detectorModel"], YUNET_MODEL_FILENAME)
+        self.assertEqual(document["embeddingModel"], SFACE_MODEL_FILENAME)
         self.assertEqual(
-            len(document["representations"]), DEFAULT_ENROLLMENT_SAMPLE_COUNT
+            len(document["embeddings"]), DEFAULT_ENROLLMENT_SAMPLE_COUNT
         )
-        self.assertNotIn("representation", document)
+        for forbidden in ("image", "frame", "crop", "landmarks", "representations"):
+            self.assertNotIn(forbidden, document)
         self.assertEqual(self.store.load("EMP001"), template)
 
-    def test_old_single_sample_schema_is_rejected_as_incompatible(self) -> None:
+    def test_schema_v2_lbp_template_is_explicitly_incompatible(self) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
         document = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "employeeCode": "EMP001",
-            "algorithm": "spatial-uniform-lbp-v1",
-            "representation": list(empty_representation()),
+            "algorithm": "spatial-uniform-lbp-square-v2",
+            "representations": [[0.0] * 3776] * 5,
         }
         (self.directory / "EMP001.json").write_text(
             json.dumps(document), encoding="utf-8"
         )
-        with self.assertRaisesRegex(IncompatibleTemplateError, "Re-register"):
+        with self.assertRaisesRegex(
+            IncompatibleTemplateError, "LBP templates cannot be migrated"
+        ):
             self.store.load("EMP001")
+
+    def test_incompatible_model_metadata_is_rejected(self) -> None:
+        template = face_template()
+        incompatible = FaceTemplate(
+            employee_code=template.employee_code,
+            algorithm="different-model",
+            similarity_metric=template.similarity_metric,
+            detector_model=template.detector_model,
+            embedding_model=template.embedding_model,
+            embeddings=template.embeddings,
+        )
+        with self.assertRaises(IncompatibleTemplateError):
+            self.store.save(incompatible)
 
     def test_missing_template(self) -> None:
         with self.assertRaises(TemplateNotFoundError):

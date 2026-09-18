@@ -14,8 +14,11 @@ from .config import (
     DEFAULT_TEMPLATE_DIRECTORY,
     MAX_ENROLLMENT_SAMPLE_COUNT,
     MIN_ENROLLMENT_SAMPLE_COUNT,
-    REPRESENTATION_ALGORITHM,
-    REPRESENTATION_LENGTH,
+    SFACE_ALGORITHM,
+    SFACE_EMBEDDING_LENGTH,
+    SFACE_MODEL_FILENAME,
+    SFACE_SIMILARITY_METRIC,
+    YUNET_MODEL_FILENAME,
 )
 from .errors import (
     CorruptTemplateError,
@@ -26,7 +29,7 @@ from .errors import (
 from .models import FaceTemplate
 
 
-TEMPLATE_SCHEMA_VERSION = 2
+TEMPLATE_SCHEMA_VERSION = 3
 EMPLOYEE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
@@ -49,8 +52,11 @@ class TemplateStore:
             "schemaVersion": TEMPLATE_SCHEMA_VERSION,
             "employeeCode": template.employee_code,
             "algorithm": template.algorithm,
-            "representations": [
-                list(representation) for representation in template.representations
+            "similarityMetric": template.similarity_metric,
+            "detectorModel": template.detector_model,
+            "embeddingModel": template.embedding_model,
+            "embeddings": [
+                list(embedding) for embedding in template.embeddings
             ],
         }
 
@@ -102,24 +108,44 @@ class TemplateStore:
             if schema_version != TEMPLATE_SCHEMA_VERSION:
                 raise IncompatibleTemplateError(
                     f"Face template {path.name} uses schema {schema_version!r}; "
-                    f"schema {TEMPLATE_SCHEMA_VERSION} multi-sample enrollment is "
-                    "required. Re-register the employee."
+                    f"schema {TEMPLATE_SCHEMA_VERSION} YuNet/SFace enrollment is "
+                    "required. Re-register the employee; LBP templates cannot be "
+                    "migrated automatically."
                 )
             employee_code = document.get("employeeCode")
             algorithm = document.get("algorithm")
-            raw_representations = document.get("representations")
-            if not isinstance(employee_code, str) or not isinstance(algorithm, str):
+            similarity_metric = document.get("similarityMetric")
+            detector_model = document.get("detectorModel")
+            embedding_model = document.get("embeddingModel")
+            raw_embeddings = document.get("embeddings")
+            if not all(
+                isinstance(value, str)
+                for value in (
+                    employee_code,
+                    algorithm,
+                    similarity_metric,
+                    detector_model,
+                    embedding_model,
+                )
+            ):
                 raise ValueError("Invalid template identity fields.")
-            if not isinstance(raw_representations, list):
-                raise ValueError("Invalid template representations.")
-            representations = tuple(
-                tuple(float(value) for value in raw_representation)
-                for raw_representation in raw_representations
-                if isinstance(raw_representation, list)
+            if not isinstance(raw_embeddings, list):
+                raise ValueError("Invalid template embeddings.")
+            embeddings = tuple(
+                tuple(float(value) for value in raw_embedding)
+                for raw_embedding in raw_embeddings
+                if isinstance(raw_embedding, list)
             )
-            if len(representations) != len(raw_representations):
-                raise ValueError("Invalid enrollment representation collection.")
-            template = FaceTemplate(employee_code, algorithm, representations)
+            if len(embeddings) != len(raw_embeddings):
+                raise ValueError("Invalid enrollment embedding collection.")
+            template = FaceTemplate(
+                employee_code=employee_code,
+                algorithm=algorithm,
+                similarity_metric=similarity_metric,
+                detector_model=detector_model,
+                embedding_model=embedding_model,
+                embeddings=embeddings,
+            )
             if path != self._path_for(employee_code):
                 raise ValueError("Template filename does not match employeeCode.")
             self._validate_template(template, path)
@@ -135,26 +161,34 @@ class TemplateStore:
 
     @staticmethod
     def _validate_template(template: FaceTemplate, path: Path) -> None:
-        if template.algorithm != REPRESENTATION_ALGORITHM:
+        if (
+            template.algorithm != SFACE_ALGORITHM
+            or template.similarity_metric != SFACE_SIMILARITY_METRIC
+            or template.detector_model != YUNET_MODEL_FILENAME
+            or template.embedding_model != SFACE_MODEL_FILENAME
+        ):
             raise IncompatibleTemplateError(
-                f"Unsupported face representation in template: {path.name}"
+                f"Unsupported face model or metric in template: {path.name}"
             )
         if not (
             MIN_ENROLLMENT_SAMPLE_COUNT
-            <= len(template.representations)
+            <= len(template.embeddings)
             <= MAX_ENROLLMENT_SAMPLE_COUNT
         ):
             raise CorruptTemplateError(
                 f"Invalid enrollment sample count in template: {path.name}"
             )
-        for representation in template.representations:
-            if len(representation) != REPRESENTATION_LENGTH:
+        for embedding in template.embeddings:
+            if len(embedding) != SFACE_EMBEDDING_LENGTH:
                 raise CorruptTemplateError(
-                    f"Invalid representation length in template: {path.name}"
+                    f"Invalid embedding length in template: {path.name}"
                 )
-            if any(
-                not math.isfinite(value) or value < 0.0 for value in representation
+            norm_squared = sum(value * value for value in embedding)
+            if (
+                any(not math.isfinite(value) for value in embedding)
+                or not math.isfinite(norm_squared)
+                or norm_squared <= 0.0
             ):
                 raise CorruptTemplateError(
-                    f"Invalid representation values in template: {path.name}"
+                    f"Invalid embedding values in template: {path.name}"
                 )

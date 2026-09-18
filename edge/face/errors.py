@@ -13,6 +13,18 @@ class DependencyError(FaceEngineError):
     code = "DEPENDENCY_ERROR"
 
 
+class ModelError(FaceEngineError):
+    code = "MODEL_ERROR"
+
+
+class EmbeddingError(FaceEngineError):
+    code = "EMBEDDING_ERROR"
+
+
+class DetectionError(FaceEngineError):
+    code = "DETECTION_ERROR"
+
+
 class CameraError(FaceEngineError):
     code = "CAMERA_ERROR"
 

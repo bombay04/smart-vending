@@ -21,21 +21,22 @@ MIN_LIVE_SAMPLE_COUNT = 2
 MAX_LIVE_SAMPLE_COUNT = 5
 MAX_ATTEMPTS_PER_SAMPLE = 3
 
-FACE_WIDTH = 96
-FACE_HEIGHT = 96
-LBP_GRID_ROWS = 8
-LBP_GRID_COLUMNS = 8
-LBP_BIN_COUNT = 59
-REPRESENTATION_LENGTH = LBP_GRID_ROWS * LBP_GRID_COLUMNS * LBP_BIN_COUNT
-REPRESENTATION_ALGORITHM = "spatial-uniform-lbp-square-v2"
-
-# Prototype value only. Calibrate this on captures from the deployed Pi camera.
-DEFAULT_MATCH_DISTANCE_THRESHOLD = 0.35
-
-HAAR_SCALE_FACTOR = 1.1
-HAAR_MIN_NEIGHBORS = 5
-HAAR_MIN_FACE_SIZE = 80
-# Use an inscribed central square to avoid background and geometric stretching.
-FACE_SQUARE_CROP_SCALE = 0.90
-
 DEFAULT_TEMPLATE_DIRECTORY = Path(__file__).resolve().parent / "data" / "templates"
+DEFAULT_MODEL_DIRECTORY = Path(__file__).resolve().parent / "data" / "models"
+YUNET_MODEL_FILENAME = "face_detection_yunet_2023mar.onnx"
+SFACE_MODEL_FILENAME = "face_recognition_sface_2021dec.onnx"
+DEFAULT_YUNET_MODEL_PATH = DEFAULT_MODEL_DIRECTORY / YUNET_MODEL_FILENAME
+DEFAULT_SFACE_MODEL_PATH = DEFAULT_MODEL_DIRECTORY / SFACE_MODEL_FILENAME
+
+YUNET_SCORE_THRESHOLD = 0.9
+YUNET_NMS_THRESHOLD = 0.3
+YUNET_TOP_K = 5000
+YUNET_DETECTION_VALUE_COUNT = 15
+
+SFACE_EMBEDDING_LENGTH = 128
+SFACE_ALGORITHM = "opencv-yunet-2023mar-sface-2021dec"
+SFACE_SIMILARITY_METRIC = "opencv-fr-norm-l2"
+
+# Upstream OpenCV SFace LFW reference only. It is not calibrated for this camera.
+DEFAULT_SFACE_L2_DISTANCE_THRESHOLD = 1.128
+MAX_SFACE_L2_DISTANCE = 2.0

@@ -1,52 +1,144 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy
 
-from edge.face.config import (
-    LBP_BIN_COUNT,
-    LBP_GRID_COLUMNS,
-    LBP_GRID_ROWS,
-    REPRESENTATION_LENGTH,
-)
-from edge.face.representation import (
-    _build_uniform_lbp_lookup,
-    _calculate_lbp_codes,
-    create_representation,
-)
+from edge.face.diagnostics import EmbeddingDiagnostics, InferenceTimingDiagnostics
+from edge.face.errors import EmbeddingError, ModelError
+from edge.face.representation import SFaceEmbedder, validate_embedding
+
+
+class FakeRecognizer:
+    def __init__(self, embedding: numpy.ndarray) -> None:
+        self.embedding = embedding
+        self.alignment_detection: numpy.ndarray | None = None
+        self.match_result = 0.75
+
+    def alignCrop(
+        self, _frame: numpy.ndarray, detection: numpy.ndarray
+    ) -> numpy.ndarray:
+        self.alignment_detection = detection
+        return numpy.zeros((112, 112, 3), dtype=numpy.uint8)
+
+    def feature(self, _aligned_face: numpy.ndarray) -> numpy.ndarray:
+        return self.embedding
+
+    def match(
+        self, _first: numpy.ndarray, _second: numpy.ndarray, _metric: int
+    ) -> float:
+        return self.match_result
+
+
+class FakeFactory:
+    def __init__(self, recognizer: FakeRecognizer | None, *, fail: bool = False) -> None:
+        self.recognizer = recognizer
+        self.fail = fail
+        self.calls: list[tuple[object, ...]] = []
+
+    def create(self, *args: object) -> FakeRecognizer | None:
+        self.calls.append(args)
+        if self.fail:
+            raise RuntimeError("invalid model")
+        return self.recognizer
+
+
+class FakeDnn:
+    DNN_BACKEND_OPENCV = 3
+    DNN_TARGET_CPU = 0
+
+
+class FakeCv2:
+    FaceRecognizerSF_FR_NORM_L2 = 1
+
+    def __init__(
+        self, recognizer: FakeRecognizer | None, *, fail: bool = False
+    ) -> None:
+        self.dnn = FakeDnn()
+        self.FaceRecognizerSF = FakeFactory(recognizer, fail=fail)
 
 
 class RepresentationTests(unittest.TestCase):
-    def test_uniform_lbp_lookup_has_58_patterns_and_one_catch_all_bin(self) -> None:
-        lookup = _build_uniform_lbp_lookup()
-        self.assertEqual(len(set(int(value) for value in lookup)), LBP_BIN_COUNT)
-        self.assertEqual(int(numpy.count_nonzero(lookup != LBP_BIN_COUNT - 1)), 58)
-        self.assertNotEqual(int(lookup[0]), LBP_BIN_COUNT - 1)
-        self.assertNotEqual(int(lookup[255]), LBP_BIN_COUNT - 1)
-        self.assertEqual(int(lookup[0b01010101]), LBP_BIN_COUNT - 1)
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.model_path = Path(self.temporary_directory.name) / "sface.onnx"
+        self.model_path.touch()
 
-    def test_uint8_neighbor_comparisons_do_not_overflow(self) -> None:
-        image = numpy.array(
-            [[0, 255, 0], [255, 128, 0], [129, 127, 128]],
-            dtype=numpy.uint8,
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def test_missing_model_is_controlled(self) -> None:
+        with self.assertRaisesRegex(ModelError, "SFace model is missing"):
+            SFaceEmbedder(self.model_path.with_name("missing.onnx"))
+
+    def test_model_load_error_is_controlled(self) -> None:
+        with self.assertRaisesRegex(ModelError, "could not be loaded"):
+            SFaceEmbedder(self.model_path, cv2_module=FakeCv2(None, fail=True))
+
+    def test_valid_embedding_validation(self) -> None:
+        diagnostics = validate_embedding(
+            numpy.ones((1, 128), dtype=numpy.float32)
         )
-        codes = _calculate_lbp_codes(image)
-        self.assertEqual(int(codes[0, 0]), 210)
+        self.assertEqual(diagnostics.shape, (1, 128))
+        self.assertEqual(diagnostics.dtype, "float32")
+        self.assertTrue(diagnostics.all_finite)
+        self.assertGreater(diagnostics.l2_norm, 0.0)
 
-    def test_representation_has_normalized_spatial_histograms(self) -> None:
-        image = numpy.arange(96 * 96, dtype=numpy.uint8).reshape((96, 96))
-        representation = create_representation(image)
-        self.assertEqual(len(representation), REPRESENTATION_LENGTH)
+    def test_invalid_embedding_shapes_are_rejected(self) -> None:
+        for embedding in (
+            numpy.ones((128,), dtype=numpy.float32),
+            numpy.ones((127,), dtype=numpy.float32),
+            numpy.ones((2, 64), dtype=numpy.float32),
+            numpy.ones((1, 1, 128), dtype=numpy.float32),
+        ):
+            with self.subTest(shape=embedding.shape):
+                with self.assertRaises(EmbeddingError):
+                    validate_embedding(embedding)
 
-        for cell_index in range(LBP_GRID_ROWS * LBP_GRID_COLUMNS):
-            start = cell_index * LBP_BIN_COUNT
-            cell_histogram = representation[start : start + LBP_BIN_COUNT]
-            self.assertAlmostEqual(sum(cell_histogram), 1.0, places=6)
+    def test_non_floating_non_finite_and_zero_embeddings_are_rejected(self) -> None:
+        invalid_embeddings = (
+            numpy.ones((1, 128), dtype=numpy.int32),
+            numpy.full((1, 128), numpy.nan, dtype=numpy.float32),
+            numpy.zeros((1, 128), dtype=numpy.float32),
+        )
+        for embedding in invalid_embeddings:
+            with self.subTest(dtype=embedding.dtype):
+                with self.assertRaises(EmbeddingError):
+                    validate_embedding(embedding)
 
-    def test_representation_is_deterministic_for_identical_input(self) -> None:
-        image = numpy.arange(96 * 96, dtype=numpy.uint8).reshape((96, 96))
-        self.assertEqual(create_representation(image), create_representation(image))
+    def test_alignment_uses_complete_detection_and_emits_only_metadata(self) -> None:
+        raw_embedding = numpy.full((1, 128), 7.123456, dtype=numpy.float32)
+        recognizer = FakeRecognizer(raw_embedding)
+        embedder = SFaceEmbedder(
+            self.model_path, cv2_module=FakeCv2(recognizer)
+        )
+        detection = numpy.arange(15, dtype=numpy.float32)
+        diagnostics: list[object] = []
+
+        embedding = embedder.create_embedding(
+            numpy.zeros((480, 640, 3), dtype=numpy.uint8),
+            detection,
+            diagnostic_sink=diagnostics.append,
+        )
+
+        self.assertEqual(len(embedding), 128)
+        self.assertIs(recognizer.alignment_detection, detection)
+        self.assertTrue(any(isinstance(event, EmbeddingDiagnostics) for event in diagnostics))
+        self.assertEqual(
+            sum(isinstance(event, InferenceTimingDiagnostics) for event in diagnostics),
+            2,
+        )
+        self.assertFalse(any(isinstance(event, numpy.ndarray) for event in diagnostics))
+
+    def test_distance_uses_opencv_sface_norm_l2(self) -> None:
+        recognizer = FakeRecognizer(numpy.ones((1, 128), dtype=numpy.float32))
+        fake_cv2 = FakeCv2(recognizer)
+        embedder = SFaceEmbedder(self.model_path, cv2_module=fake_cv2)
+        embedding = tuple(1.0 for _ in range(128))
+        self.assertEqual(embedder.distance(embedding, embedding), 0.75)
+        self.assertEqual(fake_cv2.FaceRecognizerSF.calls[0][-2:], (3, 0))
 
 
 if __name__ == "__main__":

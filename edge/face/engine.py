@@ -1,4 +1,4 @@
-"""High-level multi-sample registration and consensus recognition operations."""
+"""High-level schema-v3 SFace enrollment and recognition operations."""
 
 from __future__ import annotations
 
@@ -10,16 +10,19 @@ from .config import (
     DEFAULT_CAMERA_STABILIZATION_SECONDS,
     DEFAULT_ENROLLMENT_SAMPLE_COUNT,
     DEFAULT_LIVE_SAMPLE_COUNT,
-    DEFAULT_MATCH_DISTANCE_THRESHOLD,
+    DEFAULT_SFACE_L2_DISTANCE_THRESHOLD,
     MAX_ATTEMPTS_PER_SAMPLE,
     MAX_CAMERA_STABILIZATION_SECONDS,
     MAX_ENROLLMENT_SAMPLE_COUNT,
     MAX_LIVE_SAMPLE_COUNT,
     MIN_ENROLLMENT_SAMPLE_COUNT,
     MIN_LIVE_SAMPLE_COUNT,
-    REPRESENTATION_ALGORITHM,
+    SFACE_ALGORITHM,
+    SFACE_MODEL_FILENAME,
+    SFACE_SIMILARITY_METRIC,
+    YUNET_MODEL_FILENAME,
 )
-from .detector import HaarFaceDetector
+from .detector import YuNetFaceDetector
 from .diagnostics import (
     ConsensusDecisionDiagnostics,
     DiagnosticEvent,
@@ -28,9 +31,14 @@ from .diagnostics import (
     SampleCollectionDiagnostics,
 )
 from .errors import MultipleFacesError, NoFaceError
-from .matching import all_live_samples_match, is_match, median_enrollment_distance
+from .matching import (
+    all_live_samples_match,
+    is_match,
+    median_enrollment_distance,
+    validate_l2_threshold,
+)
 from .models import FaceTemplate, RecognitionResult
-from .representation import create_representation
+from .representation import SFaceEmbedder
 from .storage import TemplateStore
 
 
@@ -45,18 +53,18 @@ class FaceEngine:
         self,
         *,
         camera_index: int = DEFAULT_CAMERA_INDEX,
-        threshold: float = DEFAULT_MATCH_DISTANCE_THRESHOLD,
+        sface_l2_threshold: float = DEFAULT_SFACE_L2_DISTANCE_THRESHOLD,
         stabilization_seconds: float = DEFAULT_CAMERA_STABILIZATION_SECONDS,
         enrollment_sample_count: int = DEFAULT_ENROLLMENT_SAMPLE_COUNT,
         live_sample_count: int = DEFAULT_LIVE_SAMPLE_COUNT,
         template_store: TemplateStore | None = None,
-        detector: HaarFaceDetector | None = None,
+        detector: YuNetFaceDetector | None = None,
+        embedder: SFaceEmbedder | None = None,
         diagnostic_sink: DiagnosticSink | None = None,
     ) -> None:
         if camera_index < 0:
             raise ValueError("camera_index must be non-negative.")
-        if not math.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
-            raise ValueError("threshold must be a finite value from 0.0 to 1.0.")
+        validate_l2_threshold(sface_l2_threshold)
         if not math.isfinite(stabilization_seconds) or not (
             0.0 <= stabilization_seconds <= MAX_CAMERA_STABILIZATION_SECONDS
         ):
@@ -77,27 +85,31 @@ class FaceEngine:
             maximum=MAX_LIVE_SAMPLE_COUNT,
         )
         self.camera_index = camera_index
-        self.threshold = threshold
+        self.threshold = sface_l2_threshold
         self.stabilization_seconds = stabilization_seconds
         self.template_store = template_store or TemplateStore()
-        self.detector = detector or HaarFaceDetector()
+        self.detector = detector or YuNetFaceDetector()
+        self.embedder = embedder or SFaceEmbedder()
         self.diagnostic_sink = diagnostic_sink
 
     def register(self, employee_code: str) -> FaceTemplate:
-        representations = self._collect_representations(
+        embeddings = self._collect_embeddings(
             phase="enrollment", sample_count=self.enrollment_sample_count
         )
         template = FaceTemplate(
             employee_code=employee_code,
-            algorithm=REPRESENTATION_ALGORITHM,
-            representations=representations,
+            algorithm=SFACE_ALGORITHM,
+            similarity_metric=SFACE_SIMILARITY_METRIC,
+            detector_model=YUNET_MODEL_FILENAME,
+            embedding_model=SFACE_MODEL_FILENAME,
+            embeddings=embeddings,
         )
         self.template_store.save(template)
         return template
 
     def recognize(self) -> RecognitionResult:
         templates = self.template_store.load_all()
-        live_representations = self._collect_representations(
+        live_embeddings = self._collect_embeddings(
             phase="recognition", sample_count=self.live_sample_count
         )
 
@@ -107,9 +119,11 @@ class FaceEngine:
         for template in templates:
             sample_distances = tuple(
                 median_enrollment_distance(
-                    live_representation, template.representations
+                    live_embedding,
+                    template.embeddings,
+                    self.embedder.distance,
                 )
-                for live_representation in live_representations
+                for live_embedding in live_embeddings
             )
             for sample_number, distance in enumerate(sample_distances, start=1):
                 self._emit(
@@ -166,10 +180,10 @@ class FaceEngine:
             sample_distances=sample_distances,
         )
 
-    def _collect_representations(
+    def _collect_embeddings(
         self, *, phase: str, sample_count: int
     ) -> tuple[tuple[float, ...], ...]:
-        representations: list[tuple[float, ...]] = []
+        embeddings: list[tuple[float, ...]] = []
         for sample_number in range(1, sample_count + 1):
             for attempt in range(1, MAX_ATTEMPTS_PER_SAMPLE + 1):
                 self._emit(
@@ -188,7 +202,7 @@ class FaceEngine:
                     diagnostic_sink=self.diagnostic_sink,
                 )
                 try:
-                    face = self.detector.extract_single_face(
+                    detection = self.detector.detect_single_face(
                         frame, diagnostic_sink=self.diagnostic_sink
                     )
                 except (NoFaceError, MultipleFacesError) as error:
@@ -211,9 +225,11 @@ class FaceEngine:
                         ) from error
                     continue
 
-                representations.append(
-                    create_representation(
-                        face, diagnostic_sink=self.diagnostic_sink
+                embeddings.append(
+                    self.embedder.create_embedding(
+                        frame,
+                        detection,
+                        diagnostic_sink=self.diagnostic_sink,
                     )
                 )
                 self._emit(
@@ -227,7 +243,7 @@ class FaceEngine:
                     )
                 )
                 break
-        return tuple(representations)
+        return tuple(embeddings)
 
     def _emit(self, event: DiagnosticEvent) -> None:
         if self.diagnostic_sink is not None:
