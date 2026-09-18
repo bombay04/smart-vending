@@ -10,10 +10,14 @@ from pathlib import Path
 from .camera import probe_camera_indices
 from .config import (
     DEFAULT_CAMERA_INDEX,
+    DEFAULT_CAMERA_STABILIZATION_SECONDS,
+    DEFAULT_ENROLLMENT_SAMPLE_COUNT,
+    DEFAULT_LIVE_SAMPLE_COUNT,
     DEFAULT_MATCH_DISTANCE_THRESHOLD,
     DEFAULT_TEMPLATE_DIRECTORY,
 )
 from .engine import FaceEngine
+from .diagnostics import DiagnosticEvent, format_diagnostic
 from .errors import FaceEngineError
 from .storage import TemplateStore
 
@@ -66,6 +70,26 @@ def build_parser() -> argparse.ArgumentParser:
     register_parser.add_argument(
         "--template-dir", type=Path, default=_template_directory()
     )
+    register_parser.add_argument(
+        "--stabilization-seconds",
+        type=float,
+        default=_environment_float(
+            "FACE_CAMERA_STABILIZATION_SECONDS",
+            DEFAULT_CAMERA_STABILIZATION_SECONDS,
+        ),
+    )
+    register_parser.add_argument(
+        "--enrollment-samples",
+        type=int,
+        default=_environment_integer(
+            "FACE_ENROLLMENT_SAMPLES", DEFAULT_ENROLLMENT_SAMPLE_COUNT
+        ),
+    )
+    register_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print non-biometric capture, crop, and aggregate representation diagnostics.",
+    )
 
     recognize_parser = subparsers.add_parser(
         "recognize", help="Capture and compare exactly one face."
@@ -85,6 +109,24 @@ def build_parser() -> argparse.ArgumentParser:
     recognize_parser.add_argument(
         "--template-dir", type=Path, default=_template_directory()
     )
+    recognize_parser.add_argument(
+        "--stabilization-seconds",
+        type=float,
+        default=_environment_float(
+            "FACE_CAMERA_STABILIZATION_SECONDS",
+            DEFAULT_CAMERA_STABILIZATION_SECONDS,
+        ),
+    )
+    recognize_parser.add_argument(
+        "--live-samples",
+        type=int,
+        default=_environment_integer("FACE_LIVE_SAMPLES", DEFAULT_LIVE_SAMPLE_COUNT),
+    )
+    recognize_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print non-biometric capture, crop, and aggregate representation diagnostics.",
+    )
 
     probe_parser = subparsers.add_parser(
         "probe-camera", help="Find indices that open and capture a frame."
@@ -98,8 +140,18 @@ def _create_engine(args: argparse.Namespace) -> FaceEngine:
     return FaceEngine(
         camera_index=args.camera_index,
         threshold=getattr(args, "threshold", DEFAULT_MATCH_DISTANCE_THRESHOLD),
+        stabilization_seconds=args.stabilization_seconds,
+        enrollment_sample_count=getattr(
+            args, "enrollment_samples", DEFAULT_ENROLLMENT_SAMPLE_COUNT
+        ),
+        live_sample_count=getattr(args, "live_samples", DEFAULT_LIVE_SAMPLE_COUNT),
         template_store=TemplateStore(args.template_dir),
+        diagnostic_sink=_print_diagnostic if args.debug else None,
     )
+
+
+def _print_diagnostic(event: DiagnosticEvent) -> None:
+    print(format_diagnostic(event), file=sys.stderr)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -122,19 +174,25 @@ def run(args: argparse.Namespace) -> int:
     engine = _create_engine(args)
     if args.command == "register":
         template = engine.register(args.employee_code)
-        print(f"REGISTERED employeeCode={template.employee_code}")
+        print(
+            f"REGISTERED employeeCode={template.employee_code} "
+            f"samples={len(template.representations)}"
+        )
         return EXIT_SUCCESS
 
     result = engine.recognize()
     if result.matched:
         print(
             f"MATCH employeeCode={result.employee_code} "
-            f"distance={result.distance:.6f} threshold={result.threshold:.6f}"
+            f"distance={result.distance:.6f} threshold={result.threshold:.6f} "
+            f"liveSamples={len(result.sample_distances)}"
         )
         return EXIT_SUCCESS
     print(
         f"NO_MATCH distance={result.distance:.6f} "
-        f"threshold={result.threshold:.6f}"
+        f"threshold={result.threshold:.6f} "
+        f"passedSamples={sum(distance <= result.threshold for distance in result.sample_distances)}"
+        f"/{len(result.sample_distances)}"
     )
     return EXIT_NO_MATCH
 
@@ -152,4 +210,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

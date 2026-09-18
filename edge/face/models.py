@@ -9,7 +9,7 @@ from dataclasses import dataclass
 class FaceTemplate:
     employee_code: str
     algorithm: str
-    representation: tuple[float, ...]
+    representations: tuple[tuple[float, ...], ...]
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,7 @@ class RecognitionResult:
     employee_code: str | None
     distance: float
     threshold: float
+    sample_distances: tuple[float, ...]
 
 
 @dataclass(frozen=True)
@@ -25,4 +26,3 @@ class CameraProbeResult:
     camera_index: int
     opened: bool
     captured_frame: bool
-

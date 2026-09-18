@@ -36,3 +36,6 @@ class TemplateNotFoundError(TemplateStorageError):
 class CorruptTemplateError(TemplateStorageError):
     pass
 
+
+class IncompatibleTemplateError(TemplateStorageError):
+    pass

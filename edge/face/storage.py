@@ -12,14 +12,21 @@ from typing import Any
 
 from .config import (
     DEFAULT_TEMPLATE_DIRECTORY,
+    MAX_ENROLLMENT_SAMPLE_COUNT,
+    MIN_ENROLLMENT_SAMPLE_COUNT,
     REPRESENTATION_ALGORITHM,
     REPRESENTATION_LENGTH,
 )
-from .errors import CorruptTemplateError, TemplateNotFoundError, TemplateStorageError
+from .errors import (
+    CorruptTemplateError,
+    IncompatibleTemplateError,
+    TemplateNotFoundError,
+    TemplateStorageError,
+)
 from .models import FaceTemplate
 
 
-TEMPLATE_SCHEMA_VERSION = 1
+TEMPLATE_SCHEMA_VERSION = 2
 EMPLOYEE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
@@ -42,7 +49,9 @@ class TemplateStore:
             "schemaVersion": TEMPLATE_SCHEMA_VERSION,
             "employeeCode": template.employee_code,
             "algorithm": template.algorithm,
-            "representation": list(template.representation),
+            "representations": [
+                list(representation) for representation in template.representations
+            ],
         }
 
         temporary_path: Path | None = None
@@ -87,39 +96,65 @@ class TemplateStore:
             document: Any = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(document, dict):
                 raise ValueError("Template root must be an object.")
-            if document.get("schemaVersion") != TEMPLATE_SCHEMA_VERSION:
-                raise ValueError("Unsupported template schema version.")
+            schema_version = document.get("schemaVersion")
+            if type(schema_version) is not int:
+                raise ValueError("Invalid template schema version.")
+            if schema_version != TEMPLATE_SCHEMA_VERSION:
+                raise IncompatibleTemplateError(
+                    f"Face template {path.name} uses schema {schema_version!r}; "
+                    f"schema {TEMPLATE_SCHEMA_VERSION} multi-sample enrollment is "
+                    "required. Re-register the employee."
+                )
             employee_code = document.get("employeeCode")
             algorithm = document.get("algorithm")
-            raw_representation = document.get("representation")
+            raw_representations = document.get("representations")
             if not isinstance(employee_code, str) or not isinstance(algorithm, str):
                 raise ValueError("Invalid template identity fields.")
-            if not isinstance(raw_representation, list):
-                raise ValueError("Invalid template representation.")
-            representation = tuple(float(value) for value in raw_representation)
-            template = FaceTemplate(employee_code, algorithm, representation)
+            if not isinstance(raw_representations, list):
+                raise ValueError("Invalid template representations.")
+            representations = tuple(
+                tuple(float(value) for value in raw_representation)
+                for raw_representation in raw_representations
+                if isinstance(raw_representation, list)
+            )
+            if len(representations) != len(raw_representations):
+                raise ValueError("Invalid enrollment representation collection.")
+            template = FaceTemplate(employee_code, algorithm, representations)
             if path != self._path_for(employee_code):
                 raise ValueError("Template filename does not match employeeCode.")
             self._validate_template(template, path)
             return template
-        except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        except (
+            OSError,
+            OverflowError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as error:
             raise CorruptTemplateError(f"Invalid face template: {path.name}") from error
 
     @staticmethod
     def _validate_template(template: FaceTemplate, path: Path) -> None:
         if template.algorithm != REPRESENTATION_ALGORITHM:
-            raise CorruptTemplateError(
+            raise IncompatibleTemplateError(
                 f"Unsupported face representation in template: {path.name}"
             )
-        if len(template.representation) != REPRESENTATION_LENGTH:
-            raise CorruptTemplateError(
-                f"Invalid representation length in template: {path.name}"
-            )
-        if any(
-            not math.isfinite(value) or value < 0.0
-            for value in template.representation
+        if not (
+            MIN_ENROLLMENT_SAMPLE_COUNT
+            <= len(template.representations)
+            <= MAX_ENROLLMENT_SAMPLE_COUNT
         ):
             raise CorruptTemplateError(
-                f"Invalid representation values in template: {path.name}"
+                f"Invalid enrollment sample count in template: {path.name}"
             )
-
+        for representation in template.representations:
+            if len(representation) != REPRESENTATION_LENGTH:
+                raise CorruptTemplateError(
+                    f"Invalid representation length in template: {path.name}"
+                )
+            if any(
+                not math.isfinite(value) or value < 0.0 for value in representation
+            ):
+                raise CorruptTemplateError(
+                    f"Invalid representation values in template: {path.name}"
+                )
