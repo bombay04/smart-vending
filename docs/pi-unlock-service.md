@@ -1,6 +1,6 @@
-# Pi Local Unlock Service
+# Pi Local Hardware and Face Authentication Service
 
-The Pi Local Unlock Service exposes a small HTTP API on the Raspberry Pi or development PC. It translates an unlock request into an `OPEN:1`, `OPEN:2`, or `OPEN:3` command sent to the ESP32 over USB Serial.
+The Pi local service exposes HTTP APIs for ESP32 vending hardware and employee face authentication. It translates unlock requests into commands sent over USB Serial and runs the local YuNet/SFace recognition engine without sending biometric data off the Pi.
 
 The customer frontend calls this service after a backend purchase succeeds. A successful response means the command was sent; it does not synchronously wait for the ESP32 `ACK` or `ERROR:BUSY` response.
 
@@ -120,5 +120,39 @@ A successful mock response is:
 ```
 
 Invalid JSON, a missing `slotNumber`, or a slot outside `1` through `3` returns HTTP `400`. An unavailable real Serial connection returns HTTP `503`.
+
+## Face authentication
+
+Start one bounded employee face scan:
+
+```bash
+curl -X POST http://localhost:5000/face/authenticate
+```
+
+The service lazily initializes one `FaceEngine` and reuses its YuNet/SFace runtime for later requests. Recognition retains the engine's schema-v3 templates, default `1.128` SFace L2 threshold, three live samples, all-samples-pass consensus, ambiguous-candidate rejection, and bounded capture retries.
+
+Responses are:
+
+| HTTP | Status | Meaning |
+| --- | --- | --- |
+| `200` | `MATCH` | One template matched; response also contains `employeeCode`, `distance`, and `threshold`. |
+| `401` | `NO_MATCH` | Recognition completed but did not produce one unambiguous match. |
+| `422` | `NO_FACE` | No usable face was captured within the bounded retries. |
+| `422` | `MULTIPLE_FACES` | More than one face remained visible within the bounded retries. |
+| `409` | `BUSY` | Another face-authentication request owns the camera. |
+| `503` | `UNAVAILABLE` | Camera, model, template, runtime, or another operational dependency failed. |
+
+A successful match has this shape:
+
+```json
+{
+  "status": "MATCH",
+  "employeeCode": "EMP001",
+  "distance": 0.437637,
+  "threshold": 1.128
+}
+```
+
+Only one face scan can run at a time. The endpoint never returns embeddings, template contents, images, aligned crops, or landmarks. `employeeCode` is only a recognition result; the backend `/api/v1/employees/auth/face` endpoint must still validate that the employee exists and is active before Restock Mode is authorized.
 
 `ERROR:BUSY` handling will be added when the service supports synchronously matching ESP32 responses to commands. The current API intentionally reports only that the command was written to Serial.

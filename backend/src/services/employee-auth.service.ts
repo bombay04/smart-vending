@@ -1,16 +1,29 @@
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../utils/http-error";
 
-export async function authenticateMockEmployee(employeeCode: string) {
-  const employee = await prisma.employee.findUnique({
-    where: { employeeCode },
-    select: {
-      id: true,
-      name: true,
-      employeeCode: true,
-      isActive: true,
-    },
-  });
+interface EmployeeAuthenticationRecord {
+  id: number;
+  name: string;
+  employeeCode: string;
+  isActive: boolean;
+}
+
+type FindEmployeeByCode = (employeeCode: string) => Promise<EmployeeAuthenticationRecord | null>;
+
+export function normalizeEmployeeCode(employeeCode: unknown): string {
+  if (typeof employeeCode !== "string" || employeeCode.trim().length === 0) {
+    throw new HttpError("employeeCode must be a non-empty string.", 400);
+  }
+
+  return employeeCode.trim().toUpperCase();
+}
+
+export async function authenticateEmployeeWithLookup(
+  employeeCode: unknown,
+  findEmployeeByCode: FindEmployeeByCode,
+) {
+  const normalizedEmployeeCode = normalizeEmployeeCode(employeeCode);
+  const employee = await findEmployeeByCode(normalizedEmployeeCode);
 
   if (!employee || !employee.isActive) {
     throw new HttpError("Invalid employee code.", 401);
@@ -22,3 +35,20 @@ export async function authenticateMockEmployee(employeeCode: string) {
     employeeCode: employee.employeeCode,
   };
 }
+
+export async function authenticateEmployee(employeeCode: unknown) {
+  return authenticateEmployeeWithLookup(employeeCode, (normalizedEmployeeCode) =>
+    prisma.employee.findUnique({
+      where: { employeeCode: normalizedEmployeeCode },
+      select: {
+        id: true,
+        name: true,
+        employeeCode: true,
+        isActive: true,
+      },
+    }),
+  );
+}
+
+// Retained temporarily for Task 33 development tooling. Production uses /auth/face.
+export const authenticateMockEmployee = authenticateEmployee;

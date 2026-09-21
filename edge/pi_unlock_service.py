@@ -4,14 +4,25 @@ from __future__ import annotations
 
 import atexit
 import logging
+import math
 import os
 import threading
 import time
-from typing import Any
+from typing import Any, Protocol
 
 from flask import Flask, Response, jsonify, request
 
-from serial_client import Esp32SerialClient, SerialClientError
+if __package__:
+    from .face.engine import FaceEngine
+    from .face.errors import FaceEngineError, MultipleFacesError, NoFaceError
+    from .face.models import RecognitionResult
+    from .serial_client import Esp32SerialClient, SerialClientError
+else:
+    # Keep direct `python edge/pi_unlock_service.py` execution working on the Pi.
+    from face.engine import FaceEngine
+    from face.errors import FaceEngineError, MultipleFacesError, NoFaceError
+    from face.models import RecognitionResult
+    from serial_client import Esp32SerialClient, SerialClientError
 
 
 DEFAULT_BAUD_RATE = 115200
@@ -26,6 +37,14 @@ logger = logging.getLogger("pi-unlock-service")
 app = Flask(__name__)
 serial_client: Esp32SerialClient | None = None
 serial_operation_lock = threading.Lock()
+face_authentication_lock = threading.Lock()
+
+
+class FaceRecognizer(Protocol):
+    def recognize(self) -> RecognitionResult: ...
+
+
+face_engine: FaceRecognizer | None = None
 
 
 def environment_flag(name: str, default: bool = False) -> bool:
@@ -150,6 +169,94 @@ def hardware_status() -> tuple[Response, int] | Response:
     except Exception:
         logger.exception("Unexpected hardware status error")
         return jsonify(error="Internal server error."), 500
+
+
+def get_face_engine() -> FaceRecognizer:
+    """Lazily initialize one YuNet/SFace runtime for the service lifecycle."""
+
+    global face_engine
+
+    if face_engine is None:
+        face_engine = FaceEngine()
+        logger.info("Face authentication runtime initialized")
+    return face_engine
+
+
+@app.post("/face/authenticate")
+def authenticate_face() -> tuple[Response, int] | Response:
+    if not face_authentication_lock.acquire(blocking=False):
+        return jsonify(status="BUSY"), 409
+
+    try:
+        try:
+            result = get_face_engine().recognize()
+        except NoFaceError:
+            logger.info("Face authentication capture outcome: NO_FACE")
+            return jsonify(status="NO_FACE"), 422
+        except MultipleFacesError:
+            logger.info("Face authentication capture outcome: MULTIPLE_FACES")
+            return jsonify(status="MULTIPLE_FACES"), 422
+        except FaceEngineError as error:
+            logger.error(
+                "Face authentication unavailable (%s)", type(error).__name__
+            )
+            return (
+                jsonify(
+                    status="UNAVAILABLE",
+                    error="Face authentication service is unavailable.",
+                ),
+                503,
+            )
+        except Exception as error:
+            logger.error(
+                "Unexpected face authentication failure (%s)", type(error).__name__
+            )
+            return (
+                jsonify(
+                    status="UNAVAILABLE",
+                    error="Face authentication service is unavailable.",
+                ),
+                503,
+            )
+
+        if not isinstance(result, RecognitionResult) or type(result.matched) is not bool:
+            logger.error("Face engine returned an invalid recognition result")
+            return (
+                jsonify(
+                    status="UNAVAILABLE",
+                    error="Face authentication service is unavailable.",
+                ),
+                503,
+            )
+
+        if not result.matched:
+            return jsonify(status="NO_MATCH"), 401
+
+        if (
+            not isinstance(result.employee_code, str)
+            or not result.employee_code
+            or type(result.distance) not in (int, float)
+            or type(result.threshold) not in (int, float)
+            or not math.isfinite(result.distance)
+            or not math.isfinite(result.threshold)
+        ):
+            logger.error("Face engine returned an invalid match result")
+            return (
+                jsonify(
+                    status="UNAVAILABLE",
+                    error="Face authentication service is unavailable.",
+                ),
+                503,
+            )
+
+        return jsonify(
+            status="MATCH",
+            employeeCode=result.employee_code,
+            distance=result.distance,
+            threshold=result.threshold,
+        )
+    finally:
+        face_authentication_lock.release()
 
 
 @app.post("/unlock")
