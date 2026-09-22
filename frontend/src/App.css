@@ -220,7 +220,8 @@
 .face-scan-indicator--no_match,
 .face-scan-indicator--no_face,
 .face-scan-indicator--multiple_faces,
-.face-scan-indicator--unavailable {
+.face-scan-indicator--unavailable,
+.face-scan-indicator--locked {
   border-color: #fecaca;
   color: #b91c1c;
   background: #fff7f7;
@@ -253,6 +254,18 @@
 .employee-auth-status .employee-auth-identity {
   color: #166534;
   font-weight: 850;
+}
+
+.employee-auth-status .employee-auth-attempts {
+  color: #9a3412;
+  font-weight: 800;
+}
+
+.employee-auth-status .employee-auth-countdown {
+  color: #991b1b;
+  font-size: clamp(1.25rem, 3vw, 1.6rem);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
 }
 
 .employee-auth-actions {

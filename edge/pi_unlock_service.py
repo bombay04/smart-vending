@@ -8,7 +8,7 @@ import math
 import os
 import threading
 import time
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from flask import Flask, Response, jsonify, request
 
@@ -30,6 +30,8 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5000
 ALLOWED_ORIGIN = "http://localhost:5173"
 HARDWARE_STATUS_TIMEOUT_SECONDS = 3.0
+MAX_FAILED_ATTEMPTS = 3
+LOCKOUT_DURATION_SECONDS = 180
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("pi-unlock-service")
@@ -45,6 +47,77 @@ class FaceRecognizer(Protocol):
 
 
 face_engine: FaceRecognizer | None = None
+
+
+class FaceAuthenticationLockout:
+    """Concurrency-safe, process-local face-authentication failure state."""
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._state_lock = threading.Lock()
+        self._failed_attempts = 0
+        self._locked_until: float | None = None
+
+    def status(self) -> dict[str, int | str]:
+        with self._state_lock:
+            now = self._clock()
+            self._expire_if_needed(now)
+
+            if self._locked_until is not None:
+                return {
+                    "status": "LOCKED",
+                    "retryAfterSeconds": self._retry_after_seconds(now),
+                }
+
+            return {
+                "status": "READY",
+                "failedAttempts": self._failed_attempts,
+                "remainingAttempts": MAX_FAILED_ATTEMPTS - self._failed_attempts,
+            }
+
+    def record_failure(self) -> dict[str, int | str]:
+        with self._state_lock:
+            now = self._clock()
+            self._expire_if_needed(now)
+
+            if self._locked_until is not None:
+                return {
+                    "status": "LOCKED",
+                    "retryAfterSeconds": self._retry_after_seconds(now),
+                }
+
+            self._failed_attempts += 1
+            if self._failed_attempts >= MAX_FAILED_ATTEMPTS:
+                self._failed_attempts = MAX_FAILED_ATTEMPTS
+                self._locked_until = now + LOCKOUT_DURATION_SECONDS
+                return {
+                    "status": "LOCKED",
+                    "retryAfterSeconds": LOCKOUT_DURATION_SECONDS,
+                }
+
+            return {
+                "status": "READY",
+                "failedAttempts": self._failed_attempts,
+                "remainingAttempts": MAX_FAILED_ATTEMPTS - self._failed_attempts,
+            }
+
+    def reset_failures(self) -> None:
+        with self._state_lock:
+            self._failed_attempts = 0
+            self._locked_until = None
+
+    def _expire_if_needed(self, now: float) -> None:
+        if self._locked_until is not None and now >= self._locked_until:
+            self._failed_attempts = 0
+            self._locked_until = None
+
+    def _retry_after_seconds(self, now: float) -> int:
+        if self._locked_until is None:
+            raise RuntimeError("Lockout expiry requested while authentication is ready.")
+        return max(1, min(LOCKOUT_DURATION_SECONDS, math.ceil(self._locked_until - now)))
+
+
+face_authentication_lockout = FaceAuthenticationLockout()
 
 
 def environment_flag(name: str, default: bool = False) -> bool:
@@ -182,20 +255,65 @@ def get_face_engine() -> FaceRecognizer:
     return face_engine
 
 
+def locked_response(lockout_status: dict[str, int | str]) -> tuple[Response, int]:
+    return (
+        jsonify(
+            status="LOCKED",
+            retryAfterSeconds=lockout_status["retryAfterSeconds"],
+        ),
+        423,
+    )
+
+
+@app.get("/face/auth/status")
+def face_authentication_status() -> Response:
+    response = jsonify(face_authentication_lockout.status())
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.post("/face/authenticate")
 def authenticate_face() -> tuple[Response, int] | Response:
+    lockout_status = face_authentication_lockout.status()
+    if lockout_status["status"] == "LOCKED":
+        return locked_response(lockout_status)
+
     if not face_authentication_lock.acquire(blocking=False):
         return jsonify(status="BUSY"), 409
 
     try:
+        # Recheck after acquiring the scan mutex. A request may have observed READY
+        # just before another request atomically activated the lockout.
+        lockout_status = face_authentication_lockout.status()
+        if lockout_status["status"] == "LOCKED":
+            return locked_response(lockout_status)
+
         try:
             result = get_face_engine().recognize()
         except NoFaceError:
             logger.info("Face authentication capture outcome: NO_FACE")
-            return jsonify(status="NO_FACE"), 422
+            failure_status = face_authentication_lockout.record_failure()
+            if failure_status["status"] == "LOCKED":
+                return locked_response(failure_status)
+            return (
+                jsonify(
+                    status="NO_FACE",
+                    remainingAttempts=failure_status["remainingAttempts"],
+                ),
+                422,
+            )
         except MultipleFacesError:
             logger.info("Face authentication capture outcome: MULTIPLE_FACES")
-            return jsonify(status="MULTIPLE_FACES"), 422
+            failure_status = face_authentication_lockout.record_failure()
+            if failure_status["status"] == "LOCKED":
+                return locked_response(failure_status)
+            return (
+                jsonify(
+                    status="MULTIPLE_FACES",
+                    remainingAttempts=failure_status["remainingAttempts"],
+                ),
+                422,
+            )
         except FaceEngineError as error:
             logger.error(
                 "Face authentication unavailable (%s)", type(error).__name__
@@ -230,7 +348,16 @@ def authenticate_face() -> tuple[Response, int] | Response:
             )
 
         if not result.matched:
-            return jsonify(status="NO_MATCH"), 401
+            failure_status = face_authentication_lockout.record_failure()
+            if failure_status["status"] == "LOCKED":
+                return locked_response(failure_status)
+            return (
+                jsonify(
+                    status="NO_MATCH",
+                    remainingAttempts=failure_status["remainingAttempts"],
+                ),
+                401,
+            )
 
         if (
             not isinstance(result.employee_code, str)
@@ -249,6 +376,7 @@ def authenticate_face() -> tuple[Response, int] | Response:
                 503,
             )
 
+        face_authentication_lockout.reset_failures()
         return jsonify(
             status="MATCH",
             employeeCode=result.employee_code,
