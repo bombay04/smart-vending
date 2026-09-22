@@ -136,10 +136,11 @@ Responses are:
 | HTTP | Status | Meaning |
 | --- | --- | --- |
 | `200` | `MATCH` | One template matched; response also contains `employeeCode`, `distance`, and `threshold`. |
-| `401` | `NO_MATCH` | Recognition completed but did not produce one unambiguous match. |
-| `422` | `NO_FACE` | No usable face was captured within the bounded retries. |
-| `422` | `MULTIPLE_FACES` | More than one face remained visible within the bounded retries. |
+| `401` | `NO_MATCH` | Recognition completed without one unambiguous match; counted failure with `remainingAttempts`. |
+| `422` | `NO_FACE` | No usable face was captured within the bounded retries; counted failure with `remainingAttempts`. |
+| `422` | `MULTIPLE_FACES` | More than one face remained visible within the bounded retries; counted failure with `remainingAttempts`. |
 | `409` | `BUSY` | Another face-authentication request owns the camera. |
+| `423` | `LOCKED` | Three counted failures occurred; no camera or recognition work was attempted. Response contains `retryAfterSeconds`. |
 | `503` | `UNAVAILABLE` | Camera, model, template, runtime, or another operational dependency failed. |
 
 A successful match has this shape:
@@ -152,6 +153,27 @@ A successful match has this shape:
   "threshold": 1.128
 }
 ```
+
+`NO_MATCH`, `NO_FACE`, and `MULTIPLE_FACES` each count once per completed `POST /face/authenticate`, regardless of the bounded internal capture retries. `BUSY`, `UNAVAILABLE`, malformed/internal errors, and requests that do not complete do not count. A valid `MATCH` resets the accumulated failures. The third counted failure returns:
+
+```json
+{
+  "status": "LOCKED",
+  "retryAfterSeconds": 180
+}
+```
+
+Further authentication requests return HTTP `423` immediately and do not initialize or invoke `FaceEngine`. The remaining time is determined with a monotonic clock. After 180 seconds the failure count resets and the next request may scan.
+
+The frontend can safely read the current authority state without scanning:
+
+```bash
+curl http://localhost:5000/face/auth/status
+```
+
+An unlocked response contains `status: "READY"`, `failedAttempts`, and `remainingAttempts`. A locked response contains `status: "LOCKED"` and `retryAfterSeconds`. The frontend checks this endpoint when Employee Mode opens and after its display countdown reaches zero, so navigation or browser refresh cannot bypass an active Pi lockout. The countdown is informational; the Pi remains authoritative.
+
+Lockout state is concurrency-safe but exists only in Pi service process memory. Restarting the service clears it. This is an accepted prototype limitation; nothing is persisted to the backend, browser storage, or biometric template files.
 
 Only one face scan can run at a time. The endpoint never returns embeddings, template contents, images, aligned crops, or landmarks. `employeeCode` is only a recognition result; the backend `/api/v1/employees/auth/face` endpoint must still validate that the employee exists and is active before Restock Mode is authorized.
 

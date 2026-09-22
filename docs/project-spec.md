@@ -102,9 +102,11 @@ Employee authentication state must remain in application memory and must not be 
 
 Local face scanning, backend active-employee validation, fail-closed error handling, and memory-only frontend authentication are **implemented**. The target behavior is to clear authentication immediately once a successful restock is committed. The current UI instead retains the authenticated employee in memory during the approximately 3.5-second success screen and clears it when returning to Customer Home. This is a known implementation discrepancy; no application change is made by this specification.
 
-### Pending lockout
+### Face-authentication lockout
 
-After three failed face-authentication attempts, employee authentication must be locked for three minutes. This is a **future/pending requirement** and must not be represented as implemented.
+The three-failure, three-minute employee face-authentication lockout is **implemented**. The Raspberry Pi service is authoritative: each completed `NO_MATCH`, `NO_FACE`, or `MULTIPLE_FACES` HTTP authentication operation counts once, while internal capture retries do not count separately. `BUSY`, `UNAVAILABLE`, malformed/internal errors, and network failures do not count. A valid `MATCH` resets prior failures.
+
+The third counted failure starts a 180-second lockout immediately. While locked, the Pi returns HTTP `423` with `status: "LOCKED"` and a positive `retryAfterSeconds` without opening the camera or running face recognition. Lockout state uses a monotonic clock and concurrency-safe process memory. It therefore survives frontend navigation and browser refresh but resets if the Pi service process restarts; persistent or distributed rate limiting is outside the prototype scope.
 
 ## Face recognition and biometric privacy
 
@@ -212,7 +214,7 @@ The following are out of scope for Phase 1:
 | Fail-closed employee-auth outcomes | Implemented |
 | Three-slot restock readiness and stable-closed gating | Implemented |
 | Restock log and all-slot inventory reset | Implemented through mock-named endpoint |
-| Three-failure, three-minute face-auth lockout | Required/pending |
+| Three-failure, three-minute face-auth lockout | Implemented |
 | LINE notification after sale | Required/pending |
 | LINE notification after restock | Required/pending |
 | Raspberry Pi audio/voice | Required/pending (Task 39) |
