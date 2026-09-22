@@ -179,7 +179,7 @@ Only one face operation can run at a time. Authentication and registration share
 
 ## Employee face registration
 
-The Admin prototype UI first normalizes the entered code with `trim()` plus uppercase and calls:
+The Admin prototype UI is reached by direct navigation to `/admin/face-registration`; it is not linked from Customer Home. It first normalizes the entered code with `trim()` plus uppercase and calls:
 
 ```text
 POST /api/v1/employees/face-registration/validate

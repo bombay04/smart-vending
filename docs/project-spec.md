@@ -144,7 +144,9 @@ The YuNet/SFace pipeline, sampling and comparison rules, schema-v3 storage, loca
 
 Prototype employee face registration is **implemented** with this flow:
 
-`Home → Admin: Register Employee Face → enter employeeCode → trim and uppercase → backend validates existing active employee → ready state → Pi captures five valid samples → schema-v3 template saved locally`
+`Direct navigation to /admin/face-registration → enter employeeCode → trim and uppercase → backend validates existing active employee → ready state → Pi captures five valid samples → schema-v3 template saved locally`
+
+The dedicated prototype admin route is not linked or otherwise exposed from Customer Home. Its back action returns to Customer Home. Production admin authentication and authorization remain out of scope; the route separation is an interface boundary, not an access-control mechanism.
 
 The backend is authoritative for identity and active status. `POST /api/v1/employees/face-registration/validate` returns only `id`, `name`, and normalized `employeeCode`; unknown and inactive employees fail closed. The frontend visibly separates validation, ready, capture, success, `NO_FACE`, `MULTIPLE_FACES`, `ALREADY_REGISTERED`, camera `BUSY`, backend unavailable, and Pi unavailable states.
 

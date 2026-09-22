@@ -109,7 +109,6 @@
 }
 
 .employee-mode-button,
-.admin-registration-button,
 .restock-exit-button {
   min-height: 52px;
   padding: 0 22px;
@@ -126,16 +125,7 @@
   margin-top: 24px;
 }
 
-.admin-registration-button {
-  display: block;
-  margin: 12px auto 0;
-  border-color: #ddd6fe;
-  color: #6d28d9;
-  background: #f5f3ff;
-}
-
 .employee-mode-button:hover,
-.admin-registration-button:hover,
 .restock-exit-button:hover {
   border-color: #64748b;
   background: #f8fafc;
