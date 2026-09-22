@@ -1,17 +1,21 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FaceRegistrationError,
+  fetchFaceRegistrationStatuses,
   registerEmployeeFace,
 } from "../api/face-registration";
 import {
   EmployeeValidationError,
+  fetchEmployeesForFaceRegistration,
   validateEmployeeForFaceRegistration,
 } from "../api/employee-auth";
-import type { AuthenticatedEmployee } from "../types/employee";
+import type { RegistrationEmployee } from "../types/employee";
 
+type DirectoryState = "LOADING" | "READY" | "EMPTY" | "BACKEND_UNAVAILABLE";
+type PiStatusState = "IDLE" | "LOADING" | "READY" | "UNAVAILABLE";
 type RegistrationState =
-  | "ENTRY"
   | "VALIDATING"
+  | "INACTIVE"
   | "NOT_ELIGIBLE"
   | "BACKEND_UNAVAILABLE"
   | "READY"
@@ -24,21 +28,21 @@ type RegistrationState =
   | "PI_UNAVAILABLE";
 
 const STATE_CONTENT: Record<RegistrationState, { title: string; instruction: string }> = {
-  ENTRY: {
-    title: "Find an employee",
-    instruction: "Enter the employee code to verify that the employee exists and is active.",
-  },
   VALIDATING: {
     title: "Validating employee",
-    instruction: "Checking the employee record with the backend...",
+    instruction: "Confirming that this employee is still active before capture...",
+  },
+  INACTIVE: {
+    title: "Inactive employee",
+    instruction: "Inactive employees cannot register a face.",
   },
   NOT_ELIGIBLE: {
     title: "Employee not eligible",
-    instruction: "The employee code is unknown or the employee is inactive.",
+    instruction: "The employee is unknown or is no longer active.",
   },
   BACKEND_UNAVAILABLE: {
     title: "Backend unavailable",
-    instruction: "Employee validation could not be completed. Check the backend and try again.",
+    instruction: "Employee validation could not be completed. Try again before capture.",
   },
   READY: {
     title: "Ready to register",
@@ -79,40 +83,103 @@ interface EmployeeFaceRegistrationProps {
 }
 
 function EmployeeFaceRegistration({ onCancel }: EmployeeFaceRegistrationProps) {
-  const [employeeCode, setEmployeeCode] = useState("");
-  const [employee, setEmployee] = useState<AuthenticatedEmployee | null>(null);
-  const [registrationState, setRegistrationState] = useState<RegistrationState>("ENTRY");
+  const [employees, setEmployees] = useState<RegistrationEmployee[]>([]);
+  const [directoryState, setDirectoryState] = useState<DirectoryState>("LOADING");
+  const [piStatusState, setPiStatusState] = useState<PiStatusState>("IDLE");
+  const [registrationStatuses, setRegistrationStatuses] = useState<Record<string, boolean>>({});
+  const [selectedEmployee, setSelectedEmployee] = useState<RegistrationEmployee | null>(null);
+  const [registrationState, setRegistrationState] = useState<RegistrationState>("VALIDATING");
   const activeRequestRef = useRef<AbortController | null>(null);
 
-  useEffect(
-    () => () => {
-      activeRequestRef.current?.abort();
-    },
-    [],
-  );
+  async function loadDirectory() {
+    const controller = new AbortController();
+    activeRequestRef.current?.abort();
+    activeRequestRef.current = controller;
+    setDirectoryState("LOADING");
+    setPiStatusState("IDLE");
+    setRegistrationStatuses({});
 
-  async function handleValidation(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const normalizedEmployeeCode = employeeCode.trim().toUpperCase();
-    if (normalizedEmployeeCode.length === 0) {
-      setEmployee(null);
-      setRegistrationState("NOT_ELIGIBLE");
+    try {
+      const loadedEmployees = await fetchEmployeesForFaceRegistration(controller.signal);
+      if (controller.signal.aborted) return;
+      setEmployees(loadedEmployees);
+      if (loadedEmployees.length === 0) {
+        setDirectoryState("EMPTY");
+        return;
+      }
+
+      setDirectoryState("READY");
+      setPiStatusState("LOADING");
+      try {
+        const statuses = await fetchFaceRegistrationStatuses(
+          loadedEmployees.map((employee) => employee.employeeCode),
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
+        setRegistrationStatuses(
+          Object.fromEntries(
+            statuses.map((status) => [status.employeeCode, status.registered]),
+          ),
+        );
+        setPiStatusState("READY");
+      } catch {
+        if (!controller.signal.aborted) setPiStatusState("UNAVAILABLE");
+      }
+    } catch {
+      if (!controller.signal.aborted) {
+        setEmployees([]);
+        setDirectoryState("BACKEND_UNAVAILABLE");
+      }
+    } finally {
+      if (activeRequestRef.current === controller) activeRequestRef.current = null;
+    }
+  }
+
+  useEffect(() => {
+    void loadDirectory();
+    return () => activeRequestRef.current?.abort();
+  }, []);
+
+  async function retryPiStatuses() {
+    const controller = new AbortController();
+    activeRequestRef.current?.abort();
+    activeRequestRef.current = controller;
+    setPiStatusState("LOADING");
+
+    try {
+      const statuses = await fetchFaceRegistrationStatuses(
+        employees.map((employee) => employee.employeeCode),
+        controller.signal,
+      );
+      setRegistrationStatuses(
+        Object.fromEntries(statuses.map((status) => [status.employeeCode, status.registered])),
+      );
+      setPiStatusState("READY");
+    } catch {
+      if (!controller.signal.aborted) setPiStatusState("UNAVAILABLE");
+    } finally {
+      if (activeRequestRef.current === controller) activeRequestRef.current = null;
+    }
+  }
+
+  async function validateSelection(employee: RegistrationEmployee) {
+    setSelectedEmployee(employee);
+    if (!employee.isActive) {
+      setRegistrationState("INACTIVE");
+      return;
+    }
+    if (registrationStatuses[employee.employeeCode] === true) {
+      setRegistrationState("ALREADY_REGISTERED");
       return;
     }
 
     const controller = new AbortController();
     activeRequestRef.current?.abort();
     activeRequestRef.current = controller;
-    setEmployeeCode(normalizedEmployeeCode);
-    setEmployee(null);
     setRegistrationState("VALIDATING");
 
     try {
-      const validatedEmployee = await validateEmployeeForFaceRegistration(
-        normalizedEmployeeCode,
-        controller.signal,
-      );
-      setEmployee(validatedEmployee);
+      await validateEmployeeForFaceRegistration(employee.employeeCode, controller.signal);
       setRegistrationState("READY");
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
@@ -127,13 +194,17 @@ function EmployeeFaceRegistration({ onCancel }: EmployeeFaceRegistrationProps) {
   }
 
   async function handleRegistration() {
-    if (employee === null) return;
+    if (selectedEmployee === null) return;
     const controller = new AbortController();
     activeRequestRef.current = controller;
     setRegistrationState("CAPTURING");
 
     try {
-      await registerEmployeeFace(employee.employeeCode, controller.signal);
+      await registerEmployeeFace(selectedEmployee.employeeCode, controller.signal);
+      setRegistrationStatuses((current) => ({
+        ...current,
+        [selectedEmployee.employeeCode]: true,
+      }));
       setRegistrationState("SUCCESS");
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
@@ -149,12 +220,10 @@ function EmployeeFaceRegistration({ onCancel }: EmployeeFaceRegistrationProps) {
     }
   }
 
-  function resetEmployee() {
+  function chooseAnotherEmployee() {
     activeRequestRef.current?.abort();
     activeRequestRef.current = null;
-    setEmployee(null);
-    setEmployeeCode("");
-    setRegistrationState("ENTRY");
+    setSelectedEmployee(null);
   }
 
   function handleBack() {
@@ -163,8 +232,6 @@ function EmployeeFaceRegistration({ onCancel }: EmployeeFaceRegistrationProps) {
     onCancel();
   }
 
-  const content = STATE_CONTENT[registrationState];
-  const isValidating = registrationState === "VALIDATING";
   const isCapturing = registrationState === "CAPTURING";
   const canRetryCapture = ["NO_FACE", "MULTIPLE_FACES", "BUSY", "PI_UNAVAILABLE"].includes(
     registrationState,
@@ -176,55 +243,114 @@ function EmployeeFaceRegistration({ onCancel }: EmployeeFaceRegistrationProps) {
         <p className="mode-label mode-label--admin">Admin Prototype</p>
         <h1 id="registration-title">Employee Face Registration</h1>
 
-        <div className="employee-registration-status" aria-live="polite" aria-busy={isCapturing}>
-          <h2>{content.title}</h2>
-          <p>{content.instruction}</p>
-          {employee !== null && (
-            <p className="employee-registration-identity">
-              {employee.name} - {employee.employeeCode}
-            </p>
-          )}
-        </div>
+        {selectedEmployee === null ? (
+          <div className="employee-directory" aria-live="polite">
+            <div className="employee-registration-status">
+              <h2>Select an employee</h2>
+              <p>Choose an existing backend employee to continue.</p>
+            </div>
 
-        {employee === null ? (
-          <form className="employee-registration-form" onSubmit={(event) => void handleValidation(event)}>
-            <label htmlFor="registration-employee-code">Employee code</label>
-            <input
-              id="registration-employee-code"
-              type="text"
-              autoComplete="off"
-              maxLength={64}
-              value={employeeCode}
-              disabled={isValidating}
-              onChange={(event) => {
-                setEmployeeCode(event.target.value);
-                if (registrationState !== "ENTRY") setRegistrationState("ENTRY");
-              }}
-            />
-            <button type="submit" disabled={isValidating}>
-              {isValidating ? "Validating..." : "Validate Employee"}
-            </button>
-          </form>
-        ) : (
-          <div className="employee-registration-actions">
-            {(registrationState === "READY" || canRetryCapture) && (
-              <button
-                className="employee-registration-submit"
-                type="button"
-                onClick={() => void handleRegistration()}
-              >
-                {canRetryCapture ? "Try Capture Again" : "Start Face Registration"}
-              </button>
+            {directoryState === "LOADING" && <p className="directory-message">Loading employees...</p>}
+            {directoryState === "BACKEND_UNAVAILABLE" && (
+              <div className="directory-message directory-message--error">
+                <p>The employee list is unavailable.</p>
+                <button type="button" onClick={() => void loadDirectory()}>Retry</button>
+              </div>
             )}
-            <button
-              className="employee-registration-secondary"
-              type="button"
-              disabled={isCapturing}
-              onClick={resetEmployee}
-            >
-              Register Another Employee
-            </button>
+            {directoryState === "EMPTY" && (
+              <div className="directory-message">
+                <p>No employees are available for registration.</p>
+                <button type="button" onClick={() => void loadDirectory()}>Refresh List</button>
+              </div>
+            )}
+            {directoryState === "READY" && (
+              <>
+                {piStatusState === "LOADING" && (
+                  <p className="registration-status-banner">Checking local registration status...</p>
+                )}
+                {piStatusState === "UNAVAILABLE" && (
+                  <div className="registration-status-banner registration-status-banner--warning">
+                    <span>Pi registration status is unavailable.</span>
+                    <button type="button" onClick={() => void retryPiStatuses()}>Retry Status</button>
+                  </div>
+                )}
+                <div className="employee-directory-list">
+                  {employees.map((employee) => {
+                    const registered = registrationStatuses[employee.employeeCode];
+                    const registrationLabel =
+                      piStatusState === "LOADING"
+                        ? "Checking..."
+                        : registered === true
+                          ? "Registered"
+                          : registered === false
+                            ? "Not registered"
+                            : "Status unavailable";
+                    return (
+                      <button
+                        className="employee-directory-item"
+                        type="button"
+                        key={employee.id}
+                        disabled={!employee.isActive || piStatusState === "LOADING"}
+                        onClick={() => void validateSelection(employee)}
+                      >
+                        <span className="employee-directory-identity">
+                          <strong>{employee.name}</strong>
+                          <span>{employee.employeeCode}</span>
+                        </span>
+                        <span className="employee-directory-badges">
+                          <span className={`employee-state-badge employee-state-badge--${employee.isActive ? "active" : "inactive"}`}>
+                            {employee.isActive ? "Active" : "Inactive"}
+                          </span>
+                          <span className={`registration-state-badge registration-state-badge--${registered === true ? "registered" : registered === false ? "unregistered" : "unknown"}`}>
+                            {registrationLabel}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
+        ) : (
+          <>
+            <div className="employee-registration-status" aria-live="polite" aria-busy={isCapturing}>
+              <h2>{STATE_CONTENT[registrationState].title}</h2>
+              <p>{STATE_CONTENT[registrationState].instruction}</p>
+              <p className="employee-registration-identity">
+                {selectedEmployee.name} - {selectedEmployee.employeeCode}
+              </p>
+            </div>
+
+            <div className="employee-registration-actions">
+              {(registrationState === "READY" || canRetryCapture) && (
+                <button
+                  className="employee-registration-submit"
+                  type="button"
+                  onClick={() => void handleRegistration()}
+                >
+                  {canRetryCapture ? "Try Capture Again" : "Start Face Registration"}
+                </button>
+              )}
+              {registrationState === "BACKEND_UNAVAILABLE" && (
+                <button
+                  className="employee-registration-submit"
+                  type="button"
+                  onClick={() => void validateSelection(selectedEmployee)}
+                >
+                  Retry Validation
+                </button>
+              )}
+              <button
+                className="employee-registration-secondary"
+                type="button"
+                disabled={isCapturing || registrationState === "VALIDATING"}
+                onClick={chooseAnotherEmployee}
+              >
+                Choose Another Employee
+              </button>
+            </div>
+          </>
         )}
 
         <button className="employee-registration-back" type="button" onClick={handleBack}>

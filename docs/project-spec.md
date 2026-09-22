@@ -144,17 +144,21 @@ The YuNet/SFace pipeline, sampling and comparison rules, schema-v3 storage, loca
 
 Prototype employee face registration is **implemented** with this flow:
 
-`Direct navigation to /admin/face-registration → enter employeeCode → trim and uppercase → backend validates existing active employee → ready state → Pi captures five valid samples → schema-v3 template saved locally`
+`Direct navigation to /admin/face-registration → load backend employee list → combine it with Pi-local registered/unregistered status → select employee → backend revalidates active status → ready state → Pi captures five valid samples → schema-v3 template saved locally`
 
 The dedicated prototype admin route is not linked or otherwise exposed from Customer Home. Its back action returns to Customer Home. Production admin authentication and authorization remain out of scope; the route separation is an interface boundary, not an access-control mechanism.
 
-The backend is authoritative for identity and active status. `POST /api/v1/employees/face-registration/validate` returns only `id`, `name`, and normalized `employeeCode`; unknown and inactive employees fail closed. The frontend visibly separates validation, ready, capture, success, `NO_FACE`, `MULTIPLE_FACES`, `ALREADY_REGISTERED`, camera `BUSY`, backend unavailable, and Pi unavailable states.
+The backend is authoritative for identity and active status. `GET /api/v1/employees/face-registration` returns only `id`, `employeeCode`, `name`, and `isActive` for the selection list. `POST /api/v1/employees/face-registration/validate` remains the final active-employee check before capture and returns only `id`, `name`, and normalized `employeeCode`; unknown and inactive employees fail closed. Inactive employees remain visible but cannot be selected for enrollment.
+
+The Pi alone is authoritative for registration existence. `POST /face/registration/status` accepts a bounded list of employee codes and returns only normalized codes with `registered: true|false`. The frontend joins those booleans with backend metadata so an existing local template can be labeled Registered without placing biometric state in the backend. If Pi status is unavailable, the list remains usable with an explicit unknown state; the non-overwriting registration endpoint remains the final protection.
+
+The frontend visibly separates employee-list loading, empty list, backend unavailable, Pi-status unavailable, validation, ready, capture, success, `NO_FACE`, `MULTIPLE_FACES`, `ALREADY_REGISTERED`, camera `BUSY`, and Pi unavailable states.
 
 The Pi is authoritative for biometric enrollment and calls the same Task 34 `FaceEngine`, YuNet detector, SFace embedder, validation rules, five-sample default, and schema-v3 `TemplateStore`. It does not invoke a subprocess or create a second enrollment pipeline. An existing template returns explicit `ALREADY_REGISTERED` and is never silently overwritten; replacement and re-enrollment are out of scope.
 
 Registration and authentication share one camera mutex, so simultaneous operations fail safely with `BUSY`. Registration outcomes never mutate authentication failure or lockout state. After registration, the unchanged `/face/authenticate` flow reads the new local template; backend validation remains required before Restock Mode.
 
-Only the normalized employee code crosses the Pi registration HTTP boundary. Frames, detections, aligned crops, landmarks, embeddings, and template contents are neither returned nor sent to the backend/frontend; original captures are not persisted. Runtime templates remain under Git-ignored `edge/face/data/` storage.
+Only normalized employee codes and registration-existence booleans cross the Pi registration HTTP boundary. Frames, detections, aligned crops, landmarks, embeddings, template paths, model data, and template contents are neither returned nor sent to the backend/frontend; original captures are not persisted. Runtime templates remain under Git-ignored `edge/face/data/` storage.
 
 Task 37 is a prototype admin flow, not a production enrollment station: it has no separate admin authorization, no liveness/anti-spoofing, no replacement workflow, and no server-side cancellation of a capture already started when the browser leaves. Backend validation and Pi capture are sequential frontend-orchestrated calls, so a status change between those calls is not transactionally locked. Automated tests cover the flow; real Raspberry Pi camera validation has not been recorded for this task.
 

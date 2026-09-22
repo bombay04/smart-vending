@@ -1,9 +1,10 @@
 import { API_BASE_URL } from "../config/api";
-import type { AuthenticatedEmployee } from "../types/employee";
+import type { AuthenticatedEmployee, RegistrationEmployee } from "../types/employee";
 
 const mockEmployeeAuthUrl = `${API_BASE_URL}/api/v1/employees/auth/mock`;
 const faceEmployeeAuthUrl = `${API_BASE_URL}/api/v1/employees/auth/face`;
 const faceRegistrationValidationUrl = `${API_BASE_URL}/api/v1/employees/face-registration/validate`;
+const faceRegistrationEmployeesUrl = `${API_BASE_URL}/api/v1/employees/face-registration`;
 
 export class EmployeeValidationError extends Error {
   constructor(readonly rejected: boolean) {
@@ -76,11 +77,55 @@ export function validateFaceAuthenticatedEmployee(
   return postEmployeeCode(faceEmployeeAuthUrl, employeeCode, signal);
 }
 
+function isRegistrationEmployee(value: unknown): value is RegistrationEmployee {
+  if (!isAuthenticatedEmployee(value)) {
+    return false;
+  }
+  return "isActive" in value && typeof value.isActive === "boolean";
+}
+
 export function validateEmployeeForFaceRegistration(
   employeeCode: string,
   signal?: AbortSignal,
 ): Promise<AuthenticatedEmployee> {
   return postEmployeeCode(faceRegistrationValidationUrl, employeeCode, signal);
+}
+
+export async function fetchEmployeesForFaceRegistration(
+  signal?: AbortSignal,
+): Promise<RegistrationEmployee[]> {
+  const response = await fetch(faceRegistrationEmployeesUrl, {
+    cache: "no-store",
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new EmployeeValidationError(false);
+  }
+
+  let responseData: unknown;
+  try {
+    responseData = (await response.json()) as unknown;
+  } catch {
+    throw new EmployeeValidationError(false);
+  }
+
+  if (
+    typeof responseData !== "object" ||
+    responseData === null ||
+    !("employees" in responseData) ||
+    !Array.isArray(responseData.employees) ||
+    !responseData.employees.every(isRegistrationEmployee)
+  ) {
+    throw new EmployeeValidationError(false);
+  }
+
+  return responseData.employees.map((employee) => ({
+    id: employee.id,
+    employeeCode: employee.employeeCode,
+    name: employee.name,
+    isActive: employee.isActive,
+  }));
 }
 
 export async function authenticateMockEmployee(

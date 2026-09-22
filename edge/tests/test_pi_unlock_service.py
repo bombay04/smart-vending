@@ -21,12 +21,15 @@ class StubFaceEngine:
         result: RecognitionResult | None = None,
         error: Exception | None = None,
         registration_error: Exception | None = None,
+        registered_codes: set[str] | None = None,
     ) -> None:
         self.result = result
         self.error = error
         self.recognize_calls = 0
         self.registration_error = registration_error
         self.register_calls: list[str] = []
+        self.registered_codes = registered_codes or set()
+        self.status_calls: list[str] = []
 
     def recognize(self) -> RecognitionResult:
         self.recognize_calls += 1
@@ -41,6 +44,10 @@ class StubFaceEngine:
         if self.registration_error is not None:
             raise self.registration_error
         return object()
+
+    def is_registered(self, employee_code: str) -> bool:
+        self.status_calls.append(employee_code)
+        return employee_code in self.registered_codes
 
 
 class FakeClock:
@@ -124,6 +131,11 @@ class PiUnlockServiceTests(unittest.TestCase):
 
     def post_face_registration(self, employee_code: object = "EMP001"):
         return self.client.post("/face/register", json={"employeeCode": employee_code})
+
+    def post_face_registration_status(self, employee_codes: object):
+        return self.client.post(
+            "/face/registration/status", json={"employeeCodes": employee_codes}
+        )
 
     def set_face_outcome(
         self,
@@ -522,6 +534,69 @@ class PiUnlockServiceTests(unittest.TestCase):
         self.assertEqual(second_registration_response.get_json(), {"status": "BUSY"})
         self.assertEqual(response_holder, [200])
         self.assertEqual(engine.recognize_calls, 0)
+
+    def test_registration_status_reports_only_existence_for_known_and_unknown_codes(
+        self,
+    ) -> None:
+        engine = StubFaceEngine(
+            result=recognition_result(matched=True), registered_codes={"EMP001"}
+        )
+        pi_unlock_service.face_engine = engine
+
+        response = self.post_face_registration_status(
+            ["emp001", " EMP002 ", "EMP999"]
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(
+            response.get_json(),
+            {
+                "status": "OK",
+                "employees": [
+                    {"employeeCode": "EMP001", "registered": True},
+                    {"employeeCode": "EMP002", "registered": False},
+                    {"employeeCode": "EMP999", "registered": False},
+                ],
+            },
+        )
+        self.assertEqual(engine.status_calls, ["EMP001", "EMP002", "EMP999"])
+        serialized = response.get_data(as_text=True).lower()
+        for forbidden in (
+            "embedding",
+            "template",
+            "image",
+            "landmark",
+            "path",
+            "model",
+        ):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_registration_status_rejects_malformed_requests(self) -> None:
+        engine = StubFaceEngine(result=recognition_result(matched=True))
+        pi_unlock_service.face_engine = engine
+
+        for employee_codes in ([], ["bad code"], [123], "EMP001"):
+            response = self.post_face_registration_status(employee_codes)
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.get_json()["status"], "INVALID_REQUEST")
+
+        self.assertEqual(engine.status_calls, [])
+
+    def test_registration_status_does_not_change_authentication_failures(self) -> None:
+        self.set_face_outcome(matched=False)
+        self.post_face_authentication()
+        engine = StubFaceEngine(
+            result=recognition_result(matched=True), registered_codes={"EMP001"}
+        )
+        pi_unlock_service.face_engine = engine
+
+        self.post_face_registration_status(["EMP001"])
+
+        self.assertEqual(
+            self.client.get("/face/auth/status").get_json(),
+            {"status": "READY", "failedAttempts": 1, "remainingAttempts": 2},
+        )
 
     def test_mock_unlock_and_status_endpoints_still_work(self) -> None:
         with patch.object(pi_unlock_service, "MOCK_HARDWARE", True):

@@ -179,7 +179,26 @@ Only one face operation can run at a time. Authentication and registration share
 
 ## Employee face registration
 
-The Admin prototype UI is reached by direct navigation to `/admin/face-registration`; it is not linked from Customer Home. It first normalizes the entered code with `trim()` plus uppercase and calls:
+The Admin prototype UI is reached by direct navigation to `/admin/face-registration`; it is not linked from Customer Home. It loads its selection list from:
+
+```text
+GET /api/v1/employees/face-registration
+```
+
+The backend response is `{ "employees": [...] }`, where each entry contains only `id`, `employeeCode`, `name`, and `isActive`. Active and inactive employees are shown, but inactive employees cannot start registration. The backend query and response mapper do not select or return `faceEmbedding` or another biometric field.
+
+The UI then asks the Pi for local registration existence:
+
+```text
+POST /face/registration/status
+Content-Type: application/json
+
+{"employeeCodes":["EMP001","EMP002"]}
+```
+
+The request accepts 1–100 valid employee codes, trims and uppercases them, and removes duplicates. HTTP `200` returns `{ "status": "OK", "employees": [{ "employeeCode": "EMP001", "registered": true }] }` with `Cache-Control: no-store`. A valid code with no local template, including a code unknown to the Pi, returns `registered: false`. Invalid input returns HTTP `400 INVALID_REQUEST`; template/model/runtime failure returns HTTP `503 UNAVAILABLE`. This endpoint returns no paths, model metadata, template contents, embeddings, images, crops, landmarks, or detections.
+
+After an active employee is selected, the UI revalidates through the backend before capture:
 
 ```text
 POST /api/v1/employees/face-registration/validate
@@ -188,7 +207,7 @@ Content-Type: application/json
 {"employeeCode":"EMP001"}
 ```
 
-The backend uses its authoritative employee record. HTTP `200` returns only `{ "employee": { "id", "name", "employeeCode" } }` for an existing active employee. A missing or inactive employee returns HTTP `401`; malformed input returns HTTP `400`; an operational failure fails closed. No biometric value is read or written by this endpoint.
+The backend uses its authoritative employee record. HTTP `200` returns only `{ "employee": { "id", "name", "employeeCode" } }` for an existing active employee. A missing or inactive employee returns HTTP `401`; malformed input returns HTTP `400`; an operational failure fails closed. This manual-code validation endpoint remains available for existing tooling, but it is not the primary admin UX. No biometric value is read or written by either backend endpoint.
 
 After a successful backend validation, the UI starts local enrollment:
 
@@ -214,7 +233,7 @@ Responses are deliberately bounded and contain no biometric material:
 
 Registration does not read, increment, reset, or bypass face-authentication `failedAttempts` or lockout state. A successfully registered employee is recognized through the unchanged `POST /face/authenticate` route; the backend still performs active-employee validation after a match.
 
-Frames are processed in memory and are not persisted. HTTP bodies and service logs do not include captured images, crops, landmarks, detections, embeddings, or template contents. Models and templates remain in the Git-ignored `edge/face/data/` directory.
+Frames are processed in memory and are not persisted. HTTP bodies and service logs do not include captured images, crops, landmarks, detections, embeddings, template paths, model data, or template contents. Models and templates remain in the Git-ignored `edge/face/data/` directory. Registration-existence booleans remain Pi-authoritative and are not persisted in the backend.
 
 Prototype limitations: this UI does not yet include a separate admin sign-in/authorization mechanism, employee validation and capture are two frontend-orchestrated requests rather than one backend-issued enrollment grant, and aborting browser navigation does not cancel a capture already running in the Pi process. Enrollment has automated coverage but has not been claimed as validated on physical Raspberry Pi camera hardware by Task 37.
 

@@ -293,7 +293,7 @@
 }
 
 .employee-registration-card {
-  width: min(100%, 680px);
+  width: min(100%, 860px);
   padding: clamp(32px, 7vw, 64px);
   border: 1px solid rgba(167, 139, 250, 0.45);
   border-radius: 32px;
@@ -339,37 +339,12 @@
   font-weight: 850;
 }
 
-.employee-registration-form,
 .employee-registration-actions {
   display: grid;
   gap: 14px;
   margin-top: 24px;
 }
 
-.employee-registration-form label {
-  color: #334155;
-  font-weight: 800;
-  text-align: left;
-}
-
-.employee-registration-form input {
-  min-height: 56px;
-  padding: 0 18px;
-  border: 2px solid #cbd5e1;
-  border-radius: 16px;
-  color: #172033;
-  background: #ffffff;
-  font: inherit;
-  font-size: 1.1rem;
-  text-transform: uppercase;
-}
-
-.employee-registration-form input:focus {
-  border-color: #7c3aed;
-  outline: 3px solid rgba(124, 58, 237, 0.15);
-}
-
-.employee-registration-form button,
 .employee-registration-submit,
 .employee-registration-secondary,
 .employee-registration-back {
@@ -381,14 +356,12 @@
   touch-action: manipulation;
 }
 
-.employee-registration-form button,
 .employee-registration-submit {
   border: 0;
   color: #ffffff;
   background: #7c3aed;
 }
 
-.employee-registration-form button:disabled,
 .employee-registration-secondary:disabled {
   color: #64748b;
   background: #e2e8f0;
@@ -405,6 +378,136 @@
 .employee-registration-back {
   width: 100%;
   margin-top: 14px;
+}
+
+.directory-message,
+.registration-status-banner {
+  margin: 20px 0 0;
+  padding: 18px;
+  border-radius: 16px;
+  color: #475569;
+  background: #f8fafc;
+  font-weight: 750;
+}
+
+.directory-message--error,
+.registration-status-banner--warning {
+  color: #92400e;
+  background: #fffbeb;
+}
+
+.directory-message p {
+  margin: 0 0 12px;
+}
+
+.directory-message button,
+.registration-status-banner button {
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid #c4b5fd;
+  border-radius: 12px;
+  color: #5b21b6;
+  background: #ffffff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.registration-status-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.employee-directory-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.employee-directory-item {
+  display: flex;
+  min-height: 86px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+  border: 1px solid #ddd6fe;
+  border-radius: 18px;
+  color: #172033;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.employee-directory-item:hover:not(:disabled) {
+  border-color: #8b5cf6;
+  background: #faf5ff;
+}
+
+.employee-directory-item:disabled {
+  opacity: 0.68;
+  cursor: not-allowed;
+}
+
+.employee-directory-identity,
+.employee-directory-badges {
+  display: flex;
+  gap: 8px;
+}
+
+.employee-directory-identity {
+  min-width: 0;
+  flex-direction: column;
+}
+
+.employee-directory-identity strong {
+  overflow: hidden;
+  font-size: 1.12rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employee-directory-identity > span {
+  color: #64748b;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.employee-directory-badges {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.employee-state-badge,
+.registration-state-badge {
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.employee-state-badge--active,
+.registration-state-badge--registered {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.employee-state-badge--inactive {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.registration-state-badge--unregistered {
+  color: #5b21b6;
+  background: #ede9fe;
+}
+
+.registration-state-badge--unknown {
+  color: #92400e;
+  background: #fef3c7;
 }
 
 .employee-auth-submit {
@@ -791,6 +894,16 @@
 
   .confirm-restock-button {
     width: 100%;
+  }
+
+  .employee-directory-item,
+  .registration-status-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .employee-directory-badges {
+    justify-content: flex-start;
   }
 
   .slot-card {
