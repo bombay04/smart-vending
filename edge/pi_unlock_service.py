@@ -14,14 +14,26 @@ from flask import Flask, Response, jsonify, request
 
 if __package__:
     from .face.engine import FaceEngine
-    from .face.errors import FaceEngineError, MultipleFacesError, NoFaceError
+    from .face.errors import (
+        AlreadyRegisteredError,
+        FaceEngineError,
+        MultipleFacesError,
+        NoFaceError,
+    )
     from .face.models import RecognitionResult
+    from .face.storage import EMPLOYEE_CODE_PATTERN
     from .serial_client import Esp32SerialClient, SerialClientError
 else:
     # Keep direct `python edge/pi_unlock_service.py` execution working on the Pi.
     from face.engine import FaceEngine
-    from face.errors import FaceEngineError, MultipleFacesError, NoFaceError
+    from face.errors import (
+        AlreadyRegisteredError,
+        FaceEngineError,
+        MultipleFacesError,
+        NoFaceError,
+    )
     from face.models import RecognitionResult
+    from face.storage import EMPLOYEE_CODE_PATTERN
     from serial_client import Esp32SerialClient, SerialClientError
 
 
@@ -44,6 +56,8 @@ face_authentication_lock = threading.Lock()
 
 class FaceRecognizer(Protocol):
     def recognize(self) -> RecognitionResult: ...
+
+    def register(self, employee_code: str) -> object: ...
 
 
 face_engine: FaceRecognizer | None = None
@@ -265,6 +279,21 @@ def locked_response(lockout_status: dict[str, int | str]) -> tuple[Response, int
     )
 
 
+def normalized_employee_code_from_request() -> str | None:
+    if not request.is_json:
+        return None
+    body: Any = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return None
+    employee_code = body.get("employeeCode")
+    if not isinstance(employee_code, str):
+        return None
+    normalized = employee_code.strip().upper()
+    if not EMPLOYEE_CODE_PATTERN.fullmatch(normalized):
+        return None
+    return normalized
+
+
 @app.get("/face/auth/status")
 def face_authentication_status() -> Response:
     response = jsonify(face_authentication_lockout.status())
@@ -383,6 +412,60 @@ def authenticate_face() -> tuple[Response, int] | Response:
             distance=result.distance,
             threshold=result.threshold,
         )
+    finally:
+        face_authentication_lock.release()
+
+
+@app.post("/face/register")
+def register_face() -> tuple[Response, int] | Response:
+    employee_code = normalized_employee_code_from_request()
+    if employee_code is None:
+        return (
+            jsonify(
+                status="INVALID_REQUEST",
+                error="employeeCode must use 1-64 letters, digits, underscores, or hyphens.",
+            ),
+            400,
+        )
+
+    # Enrollment and authentication share one non-blocking camera mutex. An
+    # expected registration outcome never reads or mutates authentication lockout.
+    if not face_authentication_lock.acquire(blocking=False):
+        return jsonify(status="BUSY"), 409
+
+    try:
+        try:
+            get_face_engine().register(employee_code)
+        except AlreadyRegisteredError:
+            logger.info("Face registration outcome: ALREADY_REGISTERED")
+            return jsonify(status="ALREADY_REGISTERED"), 409
+        except NoFaceError:
+            logger.info("Face registration capture outcome: NO_FACE")
+            return jsonify(status="NO_FACE"), 422
+        except MultipleFacesError:
+            logger.info("Face registration capture outcome: MULTIPLE_FACES")
+            return jsonify(status="MULTIPLE_FACES"), 422
+        except FaceEngineError as error:
+            logger.error("Face registration unavailable (%s)", type(error).__name__)
+            return (
+                jsonify(
+                    status="UNAVAILABLE",
+                    error="Face registration service is unavailable.",
+                ),
+                503,
+            )
+        except Exception as error:
+            logger.error("Unexpected face registration failure (%s)", type(error).__name__)
+            return (
+                jsonify(
+                    status="UNAVAILABLE",
+                    error="Face registration service is unavailable.",
+                ),
+                503,
+            )
+
+        logger.info("Face registration completed")
+        return jsonify(status="REGISTERED", employeeCode=employee_code)
     finally:
         face_authentication_lock.release()
 

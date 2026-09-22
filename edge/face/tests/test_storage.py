@@ -13,6 +13,7 @@ from edge.face.config import (
     YUNET_MODEL_FILENAME,
 )
 from edge.face.errors import (
+    AlreadyRegisteredError,
     CorruptTemplateError,
     IncompatibleTemplateError,
     TemplateNotFoundError,
@@ -65,6 +66,18 @@ class TemplateStoreTests(unittest.TestCase):
         for forbidden in ("image", "frame", "crop", "landmarks", "representations"):
             self.assertNotIn(forbidden, document)
         self.assertEqual(self.store.load("EMP001"), template)
+        self.assertTrue(self.store.exists("EMP001"))
+        self.assertFalse(self.store.exists("EMP002"))
+
+    def test_existing_template_is_never_overwritten(self) -> None:
+        original = face_template()
+        path = self.store.save(original)
+        original_bytes = path.read_bytes()
+
+        with self.assertRaises(AlreadyRegisteredError):
+            self.store.save(original)
+
+        self.assertEqual(path.read_bytes(), original_bytes)
 
     def test_schema_v2_lbp_template_is_explicitly_incompatible(self) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)

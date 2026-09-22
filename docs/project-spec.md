@@ -140,6 +140,22 @@ The optional `Employee.faceEmbedding` field still present in the backend Prisma 
 
 The YuNet/SFace pipeline, sampling and comparison rules, schema-v3 storage, local Pi HTTP endpoint, privacy-safe response shape, and Git ignore rule are **implemented**. See [pi-face-recognition.md](pi-face-recognition.md) and [pi-unlock-service.md](pi-unlock-service.md) for technical operation details.
 
+### Employee face registration
+
+Prototype employee face registration is **implemented** with this flow:
+
+`Home → Admin: Register Employee Face → enter employeeCode → trim and uppercase → backend validates existing active employee → ready state → Pi captures five valid samples → schema-v3 template saved locally`
+
+The backend is authoritative for identity and active status. `POST /api/v1/employees/face-registration/validate` returns only `id`, `name`, and normalized `employeeCode`; unknown and inactive employees fail closed. The frontend visibly separates validation, ready, capture, success, `NO_FACE`, `MULTIPLE_FACES`, `ALREADY_REGISTERED`, camera `BUSY`, backend unavailable, and Pi unavailable states.
+
+The Pi is authoritative for biometric enrollment and calls the same Task 34 `FaceEngine`, YuNet detector, SFace embedder, validation rules, five-sample default, and schema-v3 `TemplateStore`. It does not invoke a subprocess or create a second enrollment pipeline. An existing template returns explicit `ALREADY_REGISTERED` and is never silently overwritten; replacement and re-enrollment are out of scope.
+
+Registration and authentication share one camera mutex, so simultaneous operations fail safely with `BUSY`. Registration outcomes never mutate authentication failure or lockout state. After registration, the unchanged `/face/authenticate` flow reads the new local template; backend validation remains required before Restock Mode.
+
+Only the normalized employee code crosses the Pi registration HTTP boundary. Frames, detections, aligned crops, landmarks, embeddings, and template contents are neither returned nor sent to the backend/frontend; original captures are not persisted. Runtime templates remain under Git-ignored `edge/face/data/` storage.
+
+Task 37 is a prototype admin flow, not a production enrollment station: it has no separate admin authorization, no liveness/anti-spoofing, no replacement workflow, and no server-side cancellation of a capture already started when the browser leaves. Backend validation and Pi capture are sequential frontend-orchestrated calls, so a status change between those calls is not transactionally locked. Automated tests cover the flow; real Raspberry Pi camera validation has not been recorded for this task.
+
 ## Restock flow
 
 An employee enters Restock Mode only after successful authentication. Confirm Restock is disabled until all three slots are ready.
@@ -210,6 +226,7 @@ The following are out of scope for Phase 1:
 | Unlock request after the current mock sale | Implemented |
 | Real Omise/Opn QR payment and provider-confirmed success flow | Required/pending |
 | Local YuNet/SFace recognition and Pi face-auth HTTP endpoint | Implemented |
+| Active-employee face registration with local-only templates | Implemented (automated tests; physical Task 37 validation not recorded) |
 | Backend validation of matched active employee | Implemented |
 | Fail-closed employee-auth outcomes | Implemented |
 | Three-slot restock readiness and stable-closed gating | Implemented |

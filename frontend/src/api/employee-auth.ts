@@ -3,6 +3,7 @@ import type { AuthenticatedEmployee } from "../types/employee";
 
 const mockEmployeeAuthUrl = `${API_BASE_URL}/api/v1/employees/auth/mock`;
 const faceEmployeeAuthUrl = `${API_BASE_URL}/api/v1/employees/auth/face`;
+const faceRegistrationValidationUrl = `${API_BASE_URL}/api/v1/employees/face-registration/validate`;
 
 export class EmployeeValidationError extends Error {
   constructor(readonly rejected: boolean) {
@@ -73,6 +74,13 @@ export function validateFaceAuthenticatedEmployee(
   signal?: AbortSignal,
 ): Promise<AuthenticatedEmployee> {
   return postEmployeeCode(faceEmployeeAuthUrl, employeeCode, signal);
+}
+
+export function validateEmployeeForFaceRegistration(
+  employeeCode: string,
+  signal?: AbortSignal,
+): Promise<AuthenticatedEmployee> {
+  return postEmployeeCode(faceRegistrationValidationUrl, employeeCode, signal);
 }
 
 export async function authenticateMockEmployee(

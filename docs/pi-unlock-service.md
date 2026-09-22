@@ -1,6 +1,6 @@
-# Pi Local Hardware and Face Authentication Service
+# Pi Local Hardware and Face Service
 
-The Pi local service exposes HTTP APIs for ESP32 vending hardware and employee face authentication. It translates unlock requests into commands sent over USB Serial and runs the local YuNet/SFace recognition engine without sending biometric data off the Pi.
+The Pi local service exposes HTTP APIs for ESP32 vending hardware, employee face authentication, and prototype employee face registration. It translates unlock requests into commands sent over USB Serial and runs the local YuNet/SFace engine without sending biometric data off the Pi.
 
 The customer frontend calls this service after a backend purchase succeeds. A successful response means the command was sent; it does not synchronously wait for the ESP32 `ACK` or `ERROR:BUSY` response.
 
@@ -175,6 +175,47 @@ An unlocked response contains `status: "READY"`, `failedAttempts`, and `remainin
 
 Lockout state is concurrency-safe but exists only in Pi service process memory. Restarting the service clears it. This is an accepted prototype limitation; nothing is persisted to the backend, browser storage, or biometric template files.
 
-Only one face scan can run at a time. The endpoint never returns embeddings, template contents, images, aligned crops, or landmarks. `employeeCode` is only a recognition result; the backend `/api/v1/employees/auth/face` endpoint must still validate that the employee exists and is active before Restock Mode is authorized.
+Only one face operation can run at a time. Authentication and registration share the same non-blocking camera mutex. The endpoint never returns embeddings, template contents, images, aligned crops, or landmarks. `employeeCode` is only a recognition result; the backend `/api/v1/employees/auth/face` endpoint must still validate that the employee exists and is active before Restock Mode is authorized.
+
+## Employee face registration
+
+The Admin prototype UI first normalizes the entered code with `trim()` plus uppercase and calls:
+
+```text
+POST /api/v1/employees/face-registration/validate
+Content-Type: application/json
+
+{"employeeCode":"EMP001"}
+```
+
+The backend uses its authoritative employee record. HTTP `200` returns only `{ "employee": { "id", "name", "employeeCode" } }` for an existing active employee. A missing or inactive employee returns HTTP `401`; malformed input returns HTTP `400`; an operational failure fails closed. No biometric value is read or written by this endpoint.
+
+After a successful backend validation, the UI starts local enrollment:
+
+```bash
+curl -X POST http://localhost:5000/face/register \
+  -H "Content-Type: application/json" \
+  -d '{"employeeCode":"EMP001"}'
+```
+
+The Pi normalizes the code again, then calls the existing `FaceEngine.register` path. Enrollment uses the existing YuNet single-face validation, SFace embedding generation, bounded retries, camera stabilization, and five independent valid captures. Each accepted capture must contain exactly one face. The resulting schema-v3 JSON template is atomically created under `edge/face/data/templates/`; an existing file is never replaced.
+
+Responses are deliberately bounded and contain no biometric material:
+
+| HTTP | Status | Meaning |
+| --- | --- | --- |
+| `200` | `REGISTERED` | Template created; response contains normalized `employeeCode`. |
+| `400` | `INVALID_REQUEST` | JSON or `employeeCode` is missing or violates the existing 1–64 character template identifier rule. |
+| `409` | `ALREADY_REGISTERED` | A template already exists; no capture occurs and no file is replaced. |
+| `409` | `BUSY` | Authentication or another registration request owns the camera. |
+| `422` | `NO_FACE` | A valid enrollment sample could not be collected within bounded retries; the admin may retry. |
+| `422` | `MULTIPLE_FACES` | More than one face remained visible within bounded retries; the admin may retry. |
+| `503` | `UNAVAILABLE` | Camera, model, storage, runtime, or another operational dependency failed. |
+
+Registration does not read, increment, reset, or bypass face-authentication `failedAttempts` or lockout state. A successfully registered employee is recognized through the unchanged `POST /face/authenticate` route; the backend still performs active-employee validation after a match.
+
+Frames are processed in memory and are not persisted. HTTP bodies and service logs do not include captured images, crops, landmarks, detections, embeddings, or template contents. Models and templates remain in the Git-ignored `edge/face/data/` directory.
+
+Prototype limitations: this UI does not yet include a separate admin sign-in/authorization mechanism, employee validation and capture are two frontend-orchestrated requests rather than one backend-issued enrollment grant, and aborting browser navigation does not cancel a capture already running in the Pi process. Enrollment has automated coverage but has not been claimed as validated on physical Raspberry Pi camera hardware by Task 37.
 
 `ERROR:BUSY` handling will be added when the service supports synchronously matching ESP32 responses to commands. The current API intentionally reports only that the command was written to Serial.

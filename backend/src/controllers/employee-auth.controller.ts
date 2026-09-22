@@ -18,3 +18,4 @@ async function authenticateEmployeeRequest(
 
 export const faceAuthenticateEmployee = authenticateEmployeeRequest;
 export const mockAuthenticateEmployee = authenticateEmployeeRequest;
+export const validateEmployeeForFaceRegistration = authenticateEmployeeRequest;

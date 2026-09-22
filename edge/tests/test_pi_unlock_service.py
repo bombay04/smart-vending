@@ -4,7 +4,13 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from edge.face.errors import CameraError, ModelError, MultipleFacesError, NoFaceError
+from edge.face.errors import (
+    AlreadyRegisteredError,
+    CameraError,
+    ModelError,
+    MultipleFacesError,
+    NoFaceError,
+)
 from edge.face.models import RecognitionResult
 from edge import pi_unlock_service
 
@@ -14,10 +20,13 @@ class StubFaceEngine:
         self,
         result: RecognitionResult | None = None,
         error: Exception | None = None,
+        registration_error: Exception | None = None,
     ) -> None:
         self.result = result
         self.error = error
         self.recognize_calls = 0
+        self.registration_error = registration_error
+        self.register_calls: list[str] = []
 
     def recognize(self) -> RecognitionResult:
         self.recognize_calls += 1
@@ -26,6 +35,12 @@ class StubFaceEngine:
         if self.result is None:
             raise AssertionError("StubFaceEngine requires a result or error.")
         return self.result
+
+    def register(self, employee_code: str) -> object:
+        self.register_calls.append(employee_code)
+        if self.registration_error is not None:
+            raise self.registration_error
+        return object()
 
 
 class FakeClock:
@@ -64,6 +79,20 @@ class InternalRetryNoFaceEngine:
         raise NoFaceError("No face after bounded internal retries.")
 
 
+class BlockingRegistrationEngine(StubFaceEngine):
+    def __init__(self) -> None:
+        super().__init__(result=recognition_result(matched=True))
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def register(self, employee_code: str) -> object:
+        self.register_calls.append(employee_code)
+        self.started.set()
+        if not self.release.wait(timeout=2):
+            raise AssertionError("Timed out waiting to finish registration.")
+        return object()
+
+
 def recognition_result(*, matched: bool) -> RecognitionResult:
     return RecognitionResult(
         matched=matched,
@@ -92,6 +121,9 @@ class PiUnlockServiceTests(unittest.TestCase):
 
     def post_face_authentication(self):
         return self.client.post("/face/authenticate")
+
+    def post_face_registration(self, employee_code: object = "EMP001"):
+        return self.client.post("/face/register", json={"employeeCode": employee_code})
 
     def set_face_outcome(
         self,
@@ -366,6 +398,130 @@ class PiUnlockServiceTests(unittest.TestCase):
                 "landmark",
             ):
                 self.assertNotIn(forbidden, serialized)
+
+    def test_successful_registration_normalizes_code_and_returns_safe_fields(self) -> None:
+        engine = StubFaceEngine(result=recognition_result(matched=True))
+        pi_unlock_service.face_engine = engine
+
+        response = self.post_face_registration("  emp001  ")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json(), {"status": "REGISTERED", "employeeCode": "EMP001"}
+        )
+        self.assertEqual(engine.register_calls, ["EMP001"])
+        serialized = response.get_data(as_text=True).lower()
+        for forbidden in ("embedding", "template", "image", "landmark", "crop"):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_registration_rejects_invalid_employee_code_without_camera_use(self) -> None:
+        engine = StubFaceEngine(result=recognition_result(matched=True))
+        pi_unlock_service.face_engine = engine
+
+        for employee_code in ("", "bad code", 123, None):
+            response = self.post_face_registration(employee_code)
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.get_json()["status"], "INVALID_REQUEST")
+
+        self.assertEqual(engine.register_calls, [])
+
+    def test_registration_returns_expected_retryable_capture_statuses(self) -> None:
+        for error, expected_status in (
+            (NoFaceError("sensitive"), "NO_FACE"),
+            (MultipleFacesError("sensitive"), "MULTIPLE_FACES"),
+        ):
+            pi_unlock_service.face_engine = StubFaceEngine(
+                result=recognition_result(matched=True), registration_error=error
+            )
+            response = self.post_face_registration()
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(response.get_json(), {"status": expected_status})
+            self.assertNotIn("sensitive", response.get_data(as_text=True))
+
+    def test_registration_does_not_overwrite_existing_template(self) -> None:
+        engine = StubFaceEngine(
+            result=recognition_result(matched=True),
+            registration_error=AlreadyRegisteredError("already exists"),
+        )
+        pi_unlock_service.face_engine = engine
+
+        response = self.post_face_registration()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json(), {"status": "ALREADY_REGISTERED"})
+
+    def test_registration_never_changes_authentication_failures_or_lockout(self) -> None:
+        self.set_face_outcome(matched=False)
+        self.post_face_authentication()
+        before = self.client.get("/face/auth/status").get_json()
+        pi_unlock_service.face_engine = StubFaceEngine(
+            result=recognition_result(matched=True),
+            registration_error=NoFaceError("no face"),
+        )
+
+        self.post_face_registration()
+        after = self.client.get("/face/auth/status").get_json()
+
+        self.assertEqual(before, after)
+        self.assertEqual(after["failedAttempts"], 1)
+
+    def test_registration_does_not_clear_an_active_authentication_lockout(self) -> None:
+        for _ in range(3):
+            self.set_face_outcome(matched=False)
+            self.post_face_authentication()
+        pi_unlock_service.face_engine = StubFaceEngine(
+            result=recognition_result(matched=True)
+        )
+
+        registration_response = self.post_face_registration()
+        status_response = self.client.get("/face/auth/status")
+        authentication_response = self.post_face_authentication()
+
+        self.assertEqual(registration_response.status_code, 200)
+        self.assertEqual(status_response.get_json()["status"], "LOCKED")
+        self.assertEqual(authentication_response.status_code, 423)
+
+    def test_registered_employee_uses_existing_authentication_endpoint(self) -> None:
+        engine = StubFaceEngine(result=recognition_result(matched=True))
+        pi_unlock_service.face_engine = engine
+
+        registration_response = self.post_face_registration()
+        authentication_response = self.post_face_authentication()
+
+        self.assertEqual(registration_response.status_code, 200)
+        self.assertEqual(authentication_response.status_code, 200)
+        self.assertEqual(authentication_response.get_json()["employeeCode"], "EMP001")
+        self.assertEqual(engine.register_calls, ["EMP001"])
+        self.assertEqual(engine.recognize_calls, 1)
+
+    def test_registration_and_authentication_share_camera_mutex(self) -> None:
+        engine = BlockingRegistrationEngine()
+        pi_unlock_service.face_engine = engine
+        response_holder: list[int] = []
+
+        def register() -> None:
+            with pi_unlock_service.app.test_client() as thread_client:
+                response_holder.append(
+                    thread_client.post(
+                        "/face/register", json={"employeeCode": "EMP001"}
+                    ).status_code
+                )
+
+        request_thread = threading.Thread(target=register)
+        request_thread.start()
+        self.assertTrue(engine.started.wait(timeout=2))
+
+        authentication_response = self.post_face_authentication()
+        second_registration_response = self.post_face_registration("EMP002")
+        engine.release.set()
+        request_thread.join(timeout=2)
+
+        self.assertEqual(authentication_response.status_code, 409)
+        self.assertEqual(authentication_response.get_json(), {"status": "BUSY"})
+        self.assertEqual(second_registration_response.status_code, 409)
+        self.assertEqual(second_registration_response.get_json(), {"status": "BUSY"})
+        self.assertEqual(response_holder, [200])
+        self.assertEqual(engine.recognize_calls, 0)
 
     def test_mock_unlock_and_status_endpoints_still_work(self) -> None:
         with patch.object(pi_unlock_service, "MOCK_HARDWARE", True):

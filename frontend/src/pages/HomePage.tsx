@@ -4,6 +4,7 @@ import { createMockPurchase } from "../api/transaction";
 import { unlockSlot } from "../api/unlock";
 import type { MockRestockResult } from "../api/restock";
 import EmployeeAuthentication from "../components/EmployeeAuthentication";
+import EmployeeFaceRegistration from "../components/EmployeeFaceRegistration";
 import RestockMode from "../components/RestockMode";
 import type { AuthenticatedEmployee } from "../types/employee";
 import type { Slot } from "../types/slot";
@@ -14,9 +15,9 @@ interface PurchaseSuccess {
 }
 
 function HomePage() {
-  const [activeMode, setActiveMode] = useState<"customer" | "employee-auth" | "restock">(
-    "customer",
-  );
+  const [activeMode, setActiveMode] = useState<
+    "customer" | "employee-auth" | "face-registration" | "restock"
+  >("customer");
   const [authenticatedEmployee, setAuthenticatedEmployee] =
     useState<AuthenticatedEmployee | null>(null);
   const [slots, setSlots] = useState<Slot[]>([]);
@@ -161,6 +162,10 @@ function HomePage() {
     );
   }
 
+  if (activeMode === "face-registration") {
+    return <EmployeeFaceRegistration onCancel={cancelEmployeeAuthentication} />;
+  }
+
   if (activeMode === "restock" && authenticatedEmployee !== null) {
     return (
       <RestockMode
@@ -207,6 +212,13 @@ function HomePage() {
             }}
           >
             Employee Mode
+          </button>
+          <button
+            className="admin-registration-button"
+            type="button"
+            onClick={() => setActiveMode("face-registration")}
+          >
+            Admin: Register Employee Face
           </button>
         </header>
 

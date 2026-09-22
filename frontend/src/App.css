@@ -109,6 +109,7 @@
 }
 
 .employee-mode-button,
+.admin-registration-button,
 .restock-exit-button {
   min-height: 52px;
   padding: 0 22px;
@@ -125,7 +126,16 @@
   margin-top: 24px;
 }
 
+.admin-registration-button {
+  display: block;
+  margin: 12px auto 0;
+  border-color: #ddd6fe;
+  color: #6d28d9;
+  background: #f5f3ff;
+}
+
 .employee-mode-button:hover,
+.admin-registration-button:hover,
 .restock-exit-button:hover {
   border-color: #64748b;
   background: #f8fafc;
@@ -282,6 +292,129 @@
   font-weight: 850;
   cursor: pointer;
   touch-action: manipulation;
+}
+
+.employee-registration-page {
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at top right, rgba(124, 58, 237, 0.14), transparent 32rem),
+    linear-gradient(145deg, #fafaff 0%, #eeeaf8 100%);
+}
+
+.employee-registration-card {
+  width: min(100%, 680px);
+  padding: clamp(32px, 7vw, 64px);
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  border-radius: 32px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 24px 64px rgba(55, 40, 90, 0.14);
+  text-align: center;
+}
+
+.mode-label--admin {
+  border-color: #ddd6fe;
+  color: #6d28d9;
+  background: #f5f3ff;
+}
+
+.employee-registration-card h1 {
+  margin: 0;
+  color: #2e1065;
+  font-size: clamp(2.1rem, 6vw, 3.75rem);
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+
+.employee-registration-status {
+  min-height: 132px;
+  margin-top: 28px;
+}
+
+.employee-registration-status h2 {
+  margin: 0;
+  color: #4c1d95;
+  font-size: clamp(1.35rem, 3vw, 1.75rem);
+}
+
+.employee-registration-status p {
+  margin: 12px auto 0;
+  color: #52627a;
+  font-size: clamp(1.05rem, 2.5vw, 1.2rem);
+  line-height: 1.5;
+}
+
+.employee-registration-status .employee-registration-identity {
+  color: #166534;
+  font-weight: 850;
+}
+
+.employee-registration-form,
+.employee-registration-actions {
+  display: grid;
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.employee-registration-form label {
+  color: #334155;
+  font-weight: 800;
+  text-align: left;
+}
+
+.employee-registration-form input {
+  min-height: 56px;
+  padding: 0 18px;
+  border: 2px solid #cbd5e1;
+  border-radius: 16px;
+  color: #172033;
+  background: #ffffff;
+  font: inherit;
+  font-size: 1.1rem;
+  text-transform: uppercase;
+}
+
+.employee-registration-form input:focus {
+  border-color: #7c3aed;
+  outline: 3px solid rgba(124, 58, 237, 0.15);
+}
+
+.employee-registration-form button,
+.employee-registration-submit,
+.employee-registration-secondary,
+.employee-registration-back {
+  min-height: 58px;
+  border-radius: 18px;
+  font-size: 1.02rem;
+  font-weight: 850;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.employee-registration-form button,
+.employee-registration-submit {
+  border: 0;
+  color: #ffffff;
+  background: #7c3aed;
+}
+
+.employee-registration-form button:disabled,
+.employee-registration-secondary:disabled {
+  color: #64748b;
+  background: #e2e8f0;
+  cursor: not-allowed;
+}
+
+.employee-registration-secondary,
+.employee-registration-back {
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  background: #ffffff;
+}
+
+.employee-registration-back {
+  width: 100%;
+  margin-top: 14px;
 }
 
 .employee-auth-submit {
