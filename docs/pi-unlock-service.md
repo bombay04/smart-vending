@@ -179,15 +179,18 @@ Only one face operation can run at a time. Authentication and registration share
 
 ## Employee face registration
 
-The Admin prototype UI is reached by direct navigation to `/admin/face-registration`; it is not linked from Customer Home. It loads its selection list from:
+Task 37 separates cloud employee management from local biometric setup:
+
+- `/staff` is a cloud-only prototype portal. It lists employees and sends only an employee name to `POST /api/v1/employees`. The backend generates the next `EMP###` code, initializes `faceRegistered: false`, and returns safe metadata. The staff portal never calls this Pi service, opens a camera, or starts a scan.
+- `/admin/face-registration` is the Pi-local setup UI reached by direct navigation. It is not linked from Customer Home and loads its employee selection list from:
 
 ```text
 GET /api/v1/employees/face-registration
 ```
 
-The backend response is `{ "employees": [...] }`, where each entry contains only `id`, `employeeCode`, `name`, and `isActive`. Active and inactive employees are shown, but inactive employees cannot start registration. The backend query and response mapper do not select or return `faceEmbedding` or another biometric field.
+The backend response is `{ "employees": [...] }`, where each entry contains only `id`, `employeeCode`, `name`, `isActive`, and the non-biometric workflow flag `faceRegistered`. Active and inactive employees are shown, but inactive employees cannot start registration. The backend query and response mapper do not select or return the legacy `faceEmbedding` field or another biometric field.
 
-The UI then asks the Pi for local registration existence:
+The local UI then asks the Pi for actual template existence:
 
 ```text
 POST /face/registration/status
@@ -196,7 +199,7 @@ Content-Type: application/json
 {"employeeCodes":["EMP001","EMP002"]}
 ```
 
-The request accepts 1–100 valid employee codes, trims and uppercases them, and removes duplicates. HTTP `200` returns `{ "status": "OK", "employees": [{ "employeeCode": "EMP001", "registered": true }] }` with `Cache-Control: no-store`. A valid code with no local template, including a code unknown to the Pi, returns `registered: false`. Invalid input returns HTTP `400 INVALID_REQUEST`; template/model/runtime failure returns HTTP `503 UNAVAILABLE`. This endpoint returns no paths, model metadata, template contents, embeddings, images, crops, landmarks, or detections.
+The request accepts 1–100 valid employee codes, trims and uppercases them, and removes duplicates. HTTP `200` returns `{ "status": "OK", "employees": [{ "employeeCode": "EMP001", "registered": true }] }` with `Cache-Control: no-store`. A valid code with no local template, including a code unknown to the Pi, returns `registered: false`. Invalid input returns HTTP `400 INVALID_REQUEST`; template/model/runtime failure returns HTTP `503 UNAVAILABLE`. This endpoint returns no paths, model metadata, template contents, embeddings, images, crops, landmarks, or detections. The Pi result is authoritative for local template existence; backend `faceRegistered` is only last-reported cloud workflow metadata.
 
 After an active employee is selected, the UI revalidates through the backend before capture:
 
@@ -207,7 +210,7 @@ Content-Type: application/json
 {"employeeCode":"EMP001"}
 ```
 
-The backend uses its authoritative employee record. HTTP `200` returns only `{ "employee": { "id", "name", "employeeCode" } }` for an existing active employee. A missing or inactive employee returns HTTP `401`; malformed input returns HTTP `400`; an operational failure fails closed. This manual-code validation endpoint remains available for existing tooling, but it is not the primary admin UX. No biometric value is read or written by either backend endpoint.
+The backend uses its authoritative employee record. HTTP `200` returns only `{ "employee": { "id", "name", "employeeCode" } }` for an existing active employee. A missing or inactive employee returns HTTP `401`; malformed input returns HTTP `400`; an operational failure fails closed. This manual-code validation endpoint remains available for existing tooling, but it is not the primary admin UX. No biometric value is read or written by this endpoint.
 
 After a successful backend validation, the UI starts local enrollment:
 
@@ -231,10 +234,21 @@ Responses are deliberately bounded and contain no biometric material:
 | `422` | `MULTIPLE_FACES` | More than one face remained visible within bounded retries; the admin may retry. |
 | `503` | `UNAVAILABLE` | Camera, model, storage, runtime, or another operational dependency failed. |
 
+Only after HTTP `200 REGISTERED`, the frontend reports completion to the cloud backend:
+
+```text
+POST /api/v1/employees/face-registration/complete
+Content-Type: application/json
+
+{"employeeCode":"EMP001"}
+```
+
+That endpoint accepts exactly `employeeCode`, rechecks that the employee exists and is active, and changes only `faceRegistered` to `true`. Image data, embeddings, template content, template paths, model data, measurements, and arbitrary extra fields are rejected. If the backend call fails, the already-created Pi template is retained. The local UI shows a sync-only recovery action; retrying does not open the camera or replace the template. If local registration reports `ALREADY_REGISTERED` while backend metadata is stale, the UI uses the same sync-only recovery path.
+
 Registration does not read, increment, reset, or bypass face-authentication `failedAttempts` or lockout state. A successfully registered employee is recognized through the unchanged `POST /face/authenticate` route; the backend still performs active-employee validation after a match.
 
-Frames are processed in memory and are not persisted. HTTP bodies and service logs do not include captured images, crops, landmarks, detections, embeddings, template paths, model data, or template contents. Models and templates remain in the Git-ignored `edge/face/data/` directory. Registration-existence booleans remain Pi-authoritative and are not persisted in the backend.
+Frames are processed in memory and are not persisted. HTTP bodies and service logs do not include captured images, crops, landmarks, detections, embeddings, template paths, model data, or template contents. Models and templates remain in the Git-ignored `edge/face/data/` directory. Actual registration existence remains Pi-authoritative. The backend persists only a `faceRegistered` workflow Boolean and cannot reconstruct, validate, or use a face template from it.
 
-Prototype limitations: this UI does not yet include a separate admin sign-in/authorization mechanism, employee validation and capture are two frontend-orchestrated requests rather than one backend-issued enrollment grant, and aborting browser navigation does not cancel a capture already running in the Pi process. Enrollment has automated coverage but has not been claimed as validated on physical Raspberry Pi camera hardware by Task 37.
+Prototype limitations: these UIs do not include separate staff/admin sign-in or authorization, employee create/edit/delete beyond name-only creation, re-enrollment/replacement, liveness, or multi-Pi reconciliation. Employee validation, capture, and metadata completion are frontend-orchestrated requests rather than one backend-issued enrollment grant, and aborting browser navigation does not cancel a capture already running in the Pi process. Enrollment has automated coverage but has not been claimed as validated on physical Raspberry Pi camera hardware by Task 37.
 
 `ERROR:BUSY` handling will be added when the service supports synchronously matching ESP32 responses to commands. The current API intentionally reports only that the command was written to Serial.

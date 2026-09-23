@@ -510,6 +510,175 @@
   background: #fef3c7;
 }
 
+.staff-portal-page {
+  background:
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.12), transparent 34rem),
+    #f4f7fb;
+}
+
+.staff-portal-container {
+  width: min(100%, 1080px);
+  margin: 0 auto;
+}
+
+.staff-portal-header,
+.staff-section-heading,
+.staff-add-row,
+.staff-message--error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.staff-portal-header h1 {
+  margin: 8px 0;
+  color: #172033;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  letter-spacing: -0.04em;
+}
+
+.staff-portal-header p,
+.staff-add-employee p,
+.staff-section-heading p {
+  margin: 0;
+  color: #64748b;
+}
+
+.staff-portal-header button,
+.staff-section-heading button,
+.staff-message button {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  color: #334155;
+  background: #ffffff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.staff-add-employee,
+.staff-employee-section {
+  margin-top: 28px;
+  padding: clamp(22px, 4vw, 34px);
+  border: 1px solid #dbe5f0;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 40px rgba(30, 55, 90, 0.08);
+}
+
+.staff-add-employee h2,
+.staff-section-heading h2 {
+  margin: 0 0 8px;
+  color: #1e293b;
+}
+
+.staff-add-employee form {
+  margin-top: 22px;
+}
+
+.staff-add-employee label {
+  display: block;
+  margin-bottom: 8px;
+  color: #334155;
+  font-weight: 800;
+}
+
+.staff-add-row input {
+  min-width: 0;
+  min-height: 52px;
+  flex: 1;
+  padding: 0 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  color: #172033;
+  background: #ffffff;
+  font: inherit;
+}
+
+.staff-add-row button {
+  min-height: 52px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: 14px;
+  color: #ffffff;
+  background: #2563eb;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.staff-add-row button:disabled,
+.staff-section-heading button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.staff-message {
+  margin: 20px 0 0;
+  padding: 16px;
+  border-radius: 14px;
+  color: #475569;
+  background: #f8fafc;
+  font-weight: 750;
+}
+
+.staff-message--error {
+  color: #991b1b;
+  background: #fff1f2;
+}
+
+.staff-message--success {
+  color: #166534;
+  background: #f0fdf4;
+}
+
+.staff-employee-table {
+  margin-top: 22px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+}
+
+.staff-employee-row {
+  display: grid;
+  grid-template-columns: 0.8fr 1.7fr 0.8fr 1.3fr;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 18px;
+  border-top: 1px solid #e2e8f0;
+  color: #334155;
+}
+
+.staff-employee-row:first-child {
+  border-top: 0;
+}
+
+.staff-employee-row--header {
+  color: #64748b;
+  background: #f8fafc;
+  font-size: 0.8rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.staff-active,
+.staff-registered {
+  color: #166534;
+  font-weight: 850;
+}
+
+.staff-inactive {
+  color: #991b1b;
+  font-weight: 850;
+}
+
+.staff-setup-required {
+  color: #6d28d9;
+  font-weight: 850;
+}
+
 .employee-auth-submit {
   border: 0;
   color: #ffffff;
@@ -904,6 +1073,22 @@
 
   .employee-directory-badges {
     justify-content: flex-start;
+  }
+
+  .staff-portal-header,
+  .staff-section-heading,
+  .staff-add-row,
+  .staff-message--error {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .staff-employee-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .staff-employee-row--header {
+    display: none;
   }
 
   .slot-card {

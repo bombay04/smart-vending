@@ -3,6 +3,11 @@ import {
   authenticateEmployee,
   listEmployeesForFaceRegistration,
 } from "../services/employee-auth.service";
+import {
+  completeFaceRegistration,
+  createEmployee,
+  parseCreateEmployeeRequest,
+} from "../services/employee-management.service";
 
 async function authenticateEmployeeRequest(
   request: Request,
@@ -31,6 +36,33 @@ export async function getEmployeesForFaceRegistration(
   try {
     const employees = await listEmployeesForFaceRegistration();
     response.status(200).json({ employees });
+  } catch (error: unknown) {
+    next(error);
+  }
+}
+
+export async function createEmployeeRequest(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const name = parseCreateEmployeeRequest(request.body);
+    const employee = await createEmployee(name);
+    response.status(201).json({ employee });
+  } catch (error: unknown) {
+    next(error);
+  }
+}
+
+export async function completeFaceRegistrationRequest(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const employee = await completeFaceRegistration(request.body);
+    response.status(200).json({ employee });
   } catch (error: unknown) {
     next(error);
   }

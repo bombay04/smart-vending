@@ -142,25 +142,32 @@ The YuNet/SFace pipeline, sampling and comparison rules, schema-v3 storage, loca
 
 ### Employee face registration
 
-Prototype employee face registration is **implemented** with this flow:
+Task 37 uses two deliberately separate prototype surfaces:
 
-`Direct navigation to /admin/face-registration → load backend employee list → combine it with Pi-local registered/unregistered status → select employee → backend revalidates active status → ready state → Pi captures five valid samples → schema-v3 template saved locally`
+- `/staff` is the cloud employee-management portal. It lists backend employee records and creates an employee from a name only. The backend allocates sequential `EMP###` codes, marks new employees active, and initializes `faceRegistered: false`. This portal never calls the Pi service and has no camera or face-scan action.
+- `/admin/face-registration` is the vending-machine-local face-setup UI. It combines cloud employee metadata with Pi-local template existence, blocks inactive employees, revalidates active status, and enrolls through the Pi camera.
 
-The dedicated prototype admin route is not linked or otherwise exposed from Customer Home. Its back action returns to Customer Home. Production admin authentication and authorization remain out of scope; the route separation is an interface boundary, not an access-control mechanism.
+The local enrollment flow is:
 
-The backend is authoritative for identity and active status. `GET /api/v1/employees/face-registration` returns only `id`, `employeeCode`, `name`, and `isActive` for the selection list. `POST /api/v1/employees/face-registration/validate` remains the final active-employee check before capture and returns only `id`, `name`, and normalized `employeeCode`; unknown and inactive employees fail closed. Inactive employees remain visible but cannot be selected for enrollment.
+`Direct navigation to /admin/face-registration → load backend employee list → combine it with Pi-local registered/unregistered status → select employee → backend revalidates active status → ready state → Pi captures five valid samples → schema-v3 template saved locally → frontend reports non-biometric completion metadata to backend`
 
-The Pi alone is authoritative for registration existence. `POST /face/registration/status` accepts a bounded list of employee codes and returns only normalized codes with `registered: true|false`. The frontend joins those booleans with backend metadata so an existing local template can be labeled Registered without placing biometric state in the backend. If Pi status is unavailable, the list remains usable with an explicit unknown state; the non-overwriting registration endpoint remains the final protection.
+Neither route is linked or otherwise exposed from Customer Home, and local face setup returns to Customer Home. Production staff/admin authentication and authorization remain out of scope; route separation is an interface boundary, not an access-control mechanism.
 
-The frontend visibly separates employee-list loading, empty list, backend unavailable, Pi-status unavailable, validation, ready, capture, success, `NO_FACE`, `MULTIPLE_FACES`, `ALREADY_REGISTERED`, camera `BUSY`, and Pi unavailable states.
+The backend is authoritative for employee identity and active status. `POST /api/v1/employees` accepts exactly `{ "name": string }`; clients cannot supply an employee code, active flag, registration flag, or biometric field. Code allocation runs in a serializable transaction and retries uniqueness/serialization conflicts. `GET /api/v1/employees/face-registration` returns only `id`, `employeeCode`, `name`, `isActive`, and `faceRegistered`. `POST /api/v1/employees/face-registration/validate` remains the final active-employee check before capture and returns only `id`, `name`, and normalized `employeeCode`; unknown and inactive employees fail closed. Inactive employees remain visible but cannot be selected for enrollment.
+
+The Pi alone is authoritative for actual template existence. `POST /face/registration/status` accepts a bounded list of employee codes and returns only normalized codes with `registered: true|false`. The backend `faceRegistered` Boolean is non-biometric, last-reported workflow metadata for the cloud staff portal; it is not proof that a usable template exists on a particular Pi. The local UI joins both values, so a Pi template with stale backend metadata becomes `Status Sync Required`, while backend metadata without a local template becomes `Local Setup Required`. If Pi status is unavailable, the list remains usable with an explicit unknown state; the non-overwriting registration endpoint remains the final protection.
+
+After the Pi returns `REGISTERED`, the frontend calls `POST /api/v1/employees/face-registration/complete` with exactly `{ "employeeCode": string }`. The backend again requires an existing active employee and updates only `faceRegistered`. It rejects extra fields, including any biometric payload. If this metadata call fails after local enrollment, the template remains on the Pi and the UI offers sync-only recovery. A retry does not recapture or overwrite the template; `ALREADY_REGISTERED` also routes a stale record to the same sync-only state.
+
+The frontend visibly separates employee-list loading, empty list, backend unavailable, Pi-status unavailable, validation, ready, capture, metadata sync, sync failure, success, `NO_FACE`, `MULTIPLE_FACES`, `ALREADY_REGISTERED`, camera `BUSY`, and Pi unavailable states.
 
 The Pi is authoritative for biometric enrollment and calls the same Task 34 `FaceEngine`, YuNet detector, SFace embedder, validation rules, five-sample default, and schema-v3 `TemplateStore`. It does not invoke a subprocess or create a second enrollment pipeline. An existing template returns explicit `ALREADY_REGISTERED` and is never silently overwritten; replacement and re-enrollment are out of scope.
 
 Registration and authentication share one camera mutex, so simultaneous operations fail safely with `BUSY`. Registration outcomes never mutate authentication failure or lockout state. After registration, the unchanged `/face/authenticate` flow reads the new local template; backend validation remains required before Restock Mode.
 
-Only normalized employee codes and registration-existence booleans cross the Pi registration HTTP boundary. Frames, detections, aligned crops, landmarks, embeddings, template paths, model data, and template contents are neither returned nor sent to the backend/frontend; original captures are not persisted. Runtime templates remain under Git-ignored `edge/face/data/` storage.
+Only normalized employee codes and registration-existence booleans cross the Pi registration HTTP boundary. The backend stores only the non-biometric Boolean `faceRegistered`; it never receives evidence, embeddings, measurements, paths, or template contents. Frames, detections, aligned crops, landmarks, embeddings, template paths, model data, and template contents are neither returned nor sent to the backend/frontend; original captures are not persisted. Runtime templates remain under Git-ignored `edge/face/data/` storage.
 
-Task 37 is a prototype admin flow, not a production enrollment station: it has no separate admin authorization, no liveness/anti-spoofing, no replacement workflow, and no server-side cancellation of a capture already started when the browser leaves. Backend validation and Pi capture are sequential frontend-orchestrated calls, so a status change between those calls is not transactionally locked. Automated tests cover the flow; real Raspberry Pi camera validation has not been recorded for this task.
+Task 37 is a prototype staff/admin flow, not a production HR system or enrollment station: it has no separate staff/admin authorization, employee edit/deactivate/delete UI, liveness/anti-spoofing, multi-Pi metadata reconciliation, or replacement workflow, and no server-side cancellation of a capture already started when the browser leaves. Backend validation, Pi capture, and completion metadata are sequential frontend-orchestrated calls, so an employee status change between those calls is not transactionally locked. Automated tests cover the flow; real Raspberry Pi camera validation has not been recorded for this task.
 
 ## Restock flow
 
@@ -232,7 +239,7 @@ The following are out of scope for Phase 1:
 | Unlock request after the current mock sale | Implemented |
 | Real Omise/Opn QR payment and provider-confirmed success flow | Required/pending |
 | Local YuNet/SFace recognition and Pi face-auth HTTP endpoint | Implemented |
-| Active-employee face registration with local-only templates | Implemented (automated tests; physical Task 37 validation not recorded) |
+| Cloud employee management plus active-employee local face registration | Implemented (automated tests; physical Task 37 validation not recorded) |
 | Backend validation of matched active employee | Implemented |
 | Fail-closed employee-auth outcomes | Implemented |
 | Three-slot restock readiness and stable-closed gating | Implemented |
@@ -245,7 +252,7 @@ The following are out of scope for Phase 1:
 
 ## Known technical debt and implementation discrepancies
 
-1. **Legacy backend biometric field:** `backend/prisma/schema.prisma` still defines an optional `Employee.faceEmbedding` JSON field. The current architecture must neither use nor populate it; biometric templates and embeddings remain exclusively local to the Pi. Removing it is deferred to a separate schema/migration task.
+1. **Legacy backend biometric field:** `backend/prisma/schema.prisma` still defines an optional `Employee.faceEmbedding` JSON field. The current architecture must neither use nor populate it; new employee creation leaves it `NULL`, API selects omit it, and biometric templates and embeddings remain exclusively local to the Pi. Removing it is deferred to a separate schema/migration task. The separate `faceRegistered` Boolean is privacy-safe workflow metadata and is not biometric template authority.
 2. **Stale threshold documentation:** [pi-face-recognition.md](pi-face-recognition.md) still describes `1.128` only as an upstream reference that is uncalibrated for this project. Task 34 later validated it for the limited prototype dataset described above. The technical document is stale; the Task 34 result is not a business-rule conflict.
 3. **Delayed authentication clearing:** after a successful restock is committed, the current frontend retains the authenticated employee in memory during the approximately 3.5-second success screen. It clears authentication when returning to Customer Home, while the target behavior is immediate clearing at successful commit.
 

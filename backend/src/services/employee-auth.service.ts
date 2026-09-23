@@ -9,7 +9,11 @@ interface EmployeeAuthenticationRecord {
 }
 
 type FindEmployeeByCode = (employeeCode: string) => Promise<EmployeeAuthenticationRecord | null>;
-type ListEmployees = () => Promise<EmployeeAuthenticationRecord[]>;
+interface EmployeeRegistrationListRecord extends EmployeeAuthenticationRecord {
+  faceRegistered: boolean;
+}
+
+type ListEmployees = () => Promise<EmployeeRegistrationListRecord[]>;
 
 export function normalizeEmployeeCode(employeeCode: unknown): string {
   if (typeof employeeCode !== "string" || employeeCode.trim().length === 0) {
@@ -58,6 +62,7 @@ export async function listEmployeesForFaceRegistrationWithLookup(listEmployees: 
     employeeCode: employee.employeeCode,
     name: employee.name,
     isActive: employee.isActive,
+    faceRegistered: employee.faceRegistered,
   }));
 }
 
@@ -70,6 +75,7 @@ export async function listEmployeesForFaceRegistration() {
         employeeCode: true,
         name: true,
         isActive: true,
+        faceRegistered: true,
       },
     }),
   );

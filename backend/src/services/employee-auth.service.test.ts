@@ -72,12 +72,13 @@ test("empty and malformed employee codes are rejected with HTTP 400", async () =
 
 test("registration employee list returns active and inactive safe metadata", async () => {
   const employees = await listEmployeesForFaceRegistrationWithLookup(async () => [
-    { ...activeEmployee, faceEmbedding: [0.1, 0.2] },
+    { ...activeEmployee, faceRegistered: true, faceEmbedding: [0.1, 0.2] },
     {
       id: 2,
       name: "Inactive Employee",
       employeeCode: "EMP002",
       isActive: false,
+      faceRegistered: false,
       faceEmbedding: [0.3, 0.4],
     },
   ]);
@@ -88,12 +89,14 @@ test("registration employee list returns active and inactive safe metadata", asy
       name: "Prototype Employee",
       employeeCode: "EMP001",
       isActive: true,
+      faceRegistered: true,
     },
     {
       id: 2,
       name: "Inactive Employee",
       employeeCode: "EMP002",
       isActive: false,
+      faceRegistered: false,
     },
   ]);
   for (const employee of employees) {

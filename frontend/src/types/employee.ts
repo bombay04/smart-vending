@@ -6,4 +6,5 @@ export interface AuthenticatedEmployee {
 
 export interface RegistrationEmployee extends AuthenticatedEmployee {
   isActive: boolean;
+  faceRegistered: boolean;
 }

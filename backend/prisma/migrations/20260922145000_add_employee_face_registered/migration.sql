@@ -1,0 +1,2 @@
+ALTER TABLE "Employee"
+ADD COLUMN "faceRegistered" BOOLEAN NOT NULL DEFAULT false;

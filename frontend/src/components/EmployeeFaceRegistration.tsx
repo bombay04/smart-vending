@@ -5,6 +5,7 @@ import {
   registerEmployeeFace,
 } from "../api/face-registration";
 import {
+  completeEmployeeFaceRegistration,
   EmployeeValidationError,
   fetchEmployeesForFaceRegistration,
   validateEmployeeForFaceRegistration,
@@ -24,6 +25,9 @@ type RegistrationState =
   | "NO_FACE"
   | "MULTIPLE_FACES"
   | "ALREADY_REGISTERED"
+  | "SYNC_REQUIRED"
+  | "SYNCING"
+  | "SYNC_ERROR"
   | "BUSY"
   | "PI_UNAVAILABLE";
 
@@ -54,7 +58,7 @@ const STATE_CONTENT: Record<RegistrationState, { title: string; instruction: str
   },
   SUCCESS: {
     title: "Registration complete",
-    instruction: "The local face template was saved on this Raspberry Pi.",
+    instruction: "The local face template was saved and its non-biometric status was synced.",
   },
   NO_FACE: {
     title: "No face detected",
@@ -67,6 +71,18 @@ const STATE_CONTENT: Record<RegistrationState, { title: string; instruction: str
   ALREADY_REGISTERED: {
     title: "Already registered",
     instruction: "This employee already has a local face template. It was not replaced.",
+  },
+  SYNC_REQUIRED: {
+    title: "Status sync required",
+    instruction: "A local template already exists. Sync its status without capturing again.",
+  },
+  SYNCING: {
+    title: "Syncing status",
+    instruction: "The template is safe on this Pi while backend metadata is updated...",
+  },
+  SYNC_ERROR: {
+    title: "Status sync incomplete",
+    instruction: "The local template was saved, but backend status was not updated. Retry sync without recapturing.",
   },
   BUSY: {
     title: "Camera busy",
@@ -169,7 +185,7 @@ function EmployeeFaceRegistration({ onCancel }: EmployeeFaceRegistrationProps) {
       return;
     }
     if (registrationStatuses[employee.employeeCode] === true) {
-      setRegistrationState("ALREADY_REGISTERED");
+      setRegistrationState(employee.faceRegistered ? "ALREADY_REGISTERED" : "SYNC_REQUIRED");
       return;
     }
 
@@ -205,16 +221,67 @@ function EmployeeFaceRegistration({ onCancel }: EmployeeFaceRegistrationProps) {
         ...current,
         [selectedEmployee.employeeCode]: true,
       }));
-      setRegistrationState("SUCCESS");
+      setRegistrationState("SYNCING");
+      try {
+        const updatedEmployee = await completeEmployeeFaceRegistration(
+          selectedEmployee.employeeCode,
+          controller.signal,
+        );
+        setEmployees((current) =>
+          current.map((employee) =>
+            employee.id === updatedEmployee.id ? updatedEmployee : employee,
+          ),
+        );
+        setSelectedEmployee(updatedEmployee);
+        setRegistrationState("SUCCESS");
+      } catch {
+        if (!controller.signal.aborted) setRegistrationState("SYNC_ERROR");
+      }
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
       if (error instanceof FaceRegistrationError) {
-        setRegistrationState(
-          error.status === "UNAVAILABLE" ? "PI_UNAVAILABLE" : error.status,
-        );
+        if (error.status === "ALREADY_REGISTERED") {
+          setRegistrationStatuses((current) => ({
+            ...current,
+            [selectedEmployee.employeeCode]: true,
+          }));
+          setRegistrationState(
+            selectedEmployee.faceRegistered ? "ALREADY_REGISTERED" : "SYNC_REQUIRED",
+          );
+        } else {
+          setRegistrationState(
+            error.status === "UNAVAILABLE" ? "PI_UNAVAILABLE" : error.status,
+          );
+        }
       } else {
         setRegistrationState("PI_UNAVAILABLE");
       }
+    } finally {
+      if (activeRequestRef.current === controller) activeRequestRef.current = null;
+    }
+  }
+
+  async function handleStatusSync() {
+    if (selectedEmployee === null) return;
+    const controller = new AbortController();
+    activeRequestRef.current?.abort();
+    activeRequestRef.current = controller;
+    setRegistrationState("SYNCING");
+
+    try {
+      const updatedEmployee = await completeEmployeeFaceRegistration(
+        selectedEmployee.employeeCode,
+        controller.signal,
+      );
+      setEmployees((current) =>
+        current.map((employee) =>
+          employee.id === updatedEmployee.id ? updatedEmployee : employee,
+        ),
+      );
+      setSelectedEmployee(updatedEmployee);
+      setRegistrationState("SUCCESS");
+    } catch {
+      if (!controller.signal.aborted) setRegistrationState("SYNC_ERROR");
     } finally {
       if (activeRequestRef.current === controller) activeRequestRef.current = null;
     }
@@ -232,7 +299,7 @@ function EmployeeFaceRegistration({ onCancel }: EmployeeFaceRegistrationProps) {
     onCancel();
   }
 
-  const isCapturing = registrationState === "CAPTURING";
+  const isBusy = ["VALIDATING", "CAPTURING", "SYNCING"].includes(registrationState);
   const canRetryCapture = ["NO_FACE", "MULTIPLE_FACES", "BUSY", "PI_UNAVAILABLE"].includes(
     registrationState,
   );
@@ -241,7 +308,7 @@ function EmployeeFaceRegistration({ onCancel }: EmployeeFaceRegistrationProps) {
     <main className="home-page employee-registration-page">
       <section className="employee-registration-card" aria-labelledby="registration-title">
         <p className="mode-label mode-label--admin">Admin Prototype</p>
-        <h1 id="registration-title">Employee Face Registration</h1>
+        <h1 id="registration-title">Employee Face Setup</h1>
 
         {selectedEmployee === null ? (
           <div className="employee-directory" aria-live="polite">
@@ -276,21 +343,29 @@ function EmployeeFaceRegistration({ onCancel }: EmployeeFaceRegistrationProps) {
                 )}
                 <div className="employee-directory-list">
                   {employees.map((employee) => {
-                    const registered = registrationStatuses[employee.employeeCode];
+                    const locallyRegistered = registrationStatuses[employee.employeeCode];
                     const registrationLabel =
                       piStatusState === "LOADING"
                         ? "Checking..."
-                        : registered === true
+                        : locallyRegistered === true && employee.faceRegistered
                           ? "Registered"
-                          : registered === false
-                            ? "Not registered"
+                          : locallyRegistered === true
+                            ? "Status Sync Required"
+                            : locallyRegistered === false
+                              ? employee.faceRegistered
+                                ? "Local Setup Required"
+                                : "Face Setup Required"
                             : "Status unavailable";
                     return (
                       <button
                         className="employee-directory-item"
                         type="button"
                         key={employee.id}
-                        disabled={!employee.isActive || piStatusState === "LOADING"}
+                        disabled={
+                          !employee.isActive ||
+                          piStatusState === "LOADING" ||
+                          (locallyRegistered === true && employee.faceRegistered)
+                        }
                         onClick={() => void validateSelection(employee)}
                       >
                         <span className="employee-directory-identity">
@@ -301,7 +376,7 @@ function EmployeeFaceRegistration({ onCancel }: EmployeeFaceRegistrationProps) {
                           <span className={`employee-state-badge employee-state-badge--${employee.isActive ? "active" : "inactive"}`}>
                             {employee.isActive ? "Active" : "Inactive"}
                           </span>
-                          <span className={`registration-state-badge registration-state-badge--${registered === true ? "registered" : registered === false ? "unregistered" : "unknown"}`}>
+                          <span className={`registration-state-badge registration-state-badge--${locallyRegistered === true && employee.faceRegistered ? "registered" : locallyRegistered === false ? "unregistered" : "unknown"}`}>
                             {registrationLabel}
                           </span>
                         </span>
@@ -314,7 +389,7 @@ function EmployeeFaceRegistration({ onCancel }: EmployeeFaceRegistrationProps) {
           </div>
         ) : (
           <>
-            <div className="employee-registration-status" aria-live="polite" aria-busy={isCapturing}>
+            <div className="employee-registration-status" aria-live="polite" aria-busy={isBusy}>
               <h2>{STATE_CONTENT[registrationState].title}</h2>
               <p>{STATE_CONTENT[registrationState].instruction}</p>
               <p className="employee-registration-identity">
@@ -341,10 +416,21 @@ function EmployeeFaceRegistration({ onCancel }: EmployeeFaceRegistrationProps) {
                   Retry Validation
                 </button>
               )}
+              {(registrationState === "SYNC_REQUIRED" || registrationState === "SYNC_ERROR") && (
+                <button
+                  className="employee-registration-submit"
+                  type="button"
+                  onClick={() => void handleStatusSync()}
+                >
+                  {registrationState === "SYNC_REQUIRED"
+                    ? "Sync Registration Status"
+                    : "Retry Status Sync"}
+                </button>
+              )}
               <button
                 className="employee-registration-secondary"
                 type="button"
-                disabled={isCapturing || registrationState === "VALIDATING"}
+                disabled={isBusy}
                 onClick={chooseAnotherEmployee}
               >
                 Choose Another Employee
