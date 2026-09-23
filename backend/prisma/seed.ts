@@ -2,9 +2,9 @@ import { SlotStatus } from "@prisma/client";
 import { prisma } from "../src/lib/prisma";
 
 const products = [
-  { name: "Tissue", price: "10.00", slotNumber: 1 },
-  { name: "Sanitary Pad", price: "15.00", slotNumber: 2 },
-  { name: "Wet Wipes", price: "20.00", slotNumber: 3 },
+  { name: "Tissue", price: "20.00", slotNumber: 1 },
+  { name: "Sanitary Pad", price: "25.00", slotNumber: 2 },
+  { name: "Wet Wipes", price: "30.00", slotNumber: 3 },
 ] as const;
 
 async function main(): Promise<void> {

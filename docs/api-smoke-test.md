@@ -38,7 +38,7 @@ Expected response:
     {
       "id": 1,
       "name": "Tissue",
-      "price": "10",
+      "price": "20",
       "imageUrl": null,
       "isActive": true
     }
@@ -64,7 +64,7 @@ Expected response:
       "product": {
         "id": 1,
         "name": "Tissue",
-        "price": "10",
+        "price": "20",
         "imageUrl": null
       }
     }
@@ -72,12 +72,12 @@ Expected response:
 }
 ```
 
-## Mock purchase
+## PromptPay payment
 
-Use an available slot. A successful request changes that slot to `SOLD_OUT`.
+Set `OMISE_SECRET_KEY` in `backend/.env` to an Opn test key and use an available slot. Creating the payment returns a real PromptPay QR and starts in `PENDING`; it does not mark the slot sold out.
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/transactions/mock-purchase \
+curl -X POST http://localhost:3000/api/v1/transactions/payments \
   -H "Content-Type: application/json" \
   -d '{"slotNumber": 1}'
 ```
@@ -90,12 +90,23 @@ Expected response:
     "transactionId": 1,
     "slotNumber": 1,
     "productName": "Tissue",
-    "amount": "10",
-    "paymentStatus": "SUCCESS",
-    "slotStatus": "SOLD_OUT"
+    "amount": "20.00",
+    "paymentStatus": "PENDING",
+    "slotStatus": "AVAILABLE",
+    "qrImageUrl": "https://api.omise.co/...",
+    "expiresAt": "2026-09-23T10:00:00.000Z",
+    "paidAt": null
   }
 }
 ```
+
+Check status through the backend (the browser must never call Opn directly):
+
+```bash
+curl http://localhost:3000/api/v1/transactions/1/payment-status
+```
+
+After the Opn charge is `successful` and `paid`, this response becomes `SUCCESS` and the selected slot becomes `SOLD_OUT`. In test mode, use the Opn dashboard to mark the test charge successful or failed. See [opn-payments.md](opn-payments.md) for webhook and local-development details.
 
 ## Mock restock
 

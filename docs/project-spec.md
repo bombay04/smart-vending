@@ -73,9 +73,13 @@ The required customer flow is:
 
 The payment-success transition is authoritative. Unlocking follows that transition, and an unlock failure must not reverse or defer the completed sale. The system does not wait for the IR sensor to report product removal.
 
-Real Omise/Opn QR payment is required prototype scope. A successful provider-confirmed payment must trigger the sale state transition and the selected-slot unlock through the established purchase flow. Automatic refunds are not implemented requirements and are out of Phase 1 scope.
+The implemented provider is Omise/Opn Payments using PromptPay QR. The backend creates the PromptPay source and charge together from the database-owned slot, product, and decimal price; it converts THB to integer satang without floating-point arithmetic. Provider secrets remain backend-only. The browser receives only the local transaction identifier, customer-facing purchase data, the provider QR image URL, status, and expiry.
 
-Current repository status is **partial**: the mock purchase path atomically creates a successful transaction and changes the selected slot to `SOLD_OUT`; the frontend then requests the Pi unlock service and preserves the completed sale if unlock fails. The repository does not contain a real Omise/Opn QR creation, payment confirmation, or webhook flow.
+Payment authority flows `Omise/Opn → backend reconciliation → local Transaction state`. A signed `charge.complete` webhook can trigger reconciliation on a deployed backend, and the frontend polls the local backend status endpoint so local development does not depend on public webhook delivery. In both paths the backend retrieves the stored Opn charge with its secret key and verifies its identifier, THB amount, currency, paid flag, and status; the webhook body or browser never declares success.
+
+Provider-confirmed success atomically changes the transaction to `SUCCESS` and the selected slot to `SOLD_OUT`. Repeated polling and duplicate webhook delivery are idempotent. Only after observing backend-confirmed success does the Pi-hosted frontend call the local `POST /unlock` endpoint with `{ "slotNumber": n }`. Unlock failure displays a staff-contact message and never reverses the successful transaction, restores inventory, or triggers an automatic refund.
+
+Automated tests cover the provider boundary and customer flow with mocked provider responses. Real PromptPay end-to-end payment, webhook delivery, account enablement, and physical bank-app validation still require an Opn test/live account and deployment-specific validation; they are not claimed as physically validated.
 
 ## Inventory
 
@@ -86,7 +90,7 @@ Customer-visible inventory has exactly two states:
 
 A successful sale changes only the purchased slot to `SOLD_OUT`. A successful restock changes Slots 1–3 to `AVAILABLE`. Sensor readings support physical validation but do not replace the backend inventory state and do not determine whether a paid sale is complete.
 
-The two-state inventory model, sold-out selection guard, mock sale transition, and all-slot restock transition are **implemented**.
+The two-state inventory model, sold-out selection guard, provider-confirmed sale transition, and all-slot restock transition are **implemented**.
 
 ## Employee authentication flow
 
@@ -235,9 +239,9 @@ The following are out of scope for Phase 1:
 | --- | --- |
 | Three-slot product mapping and two-state inventory | Implemented |
 | ESP32 lock outputs and IR/reed sensor behavior | Completed/externally hardware-validated; tracked evidence unavailable |
-| Mock successful-sale transition and sold-out selection guard | Implemented |
-| Unlock request after the current mock sale | Implemented |
-| Real Omise/Opn QR payment and provider-confirmed success flow | Required/pending |
+| Provider-confirmed successful-sale transition and sold-out selection guard | Implemented (automated tests; real provider E2E pending) |
+| Pi-local unlock request after backend-confirmed payment | Implemented |
+| Real Omise/Opn PromptPay QR creation, polling, and webhook reconciliation | Implemented (automated tests; real provider E2E pending) |
 | Local YuNet/SFace recognition and Pi face-auth HTTP endpoint | Implemented |
 | Cloud employee management plus active-employee local face registration | Implemented (automated tests; physical Task 37 validation not recorded) |
 | Backend validation of matched active employee | Implemented |
@@ -261,4 +265,5 @@ The following are out of scope for Phase 1:
 - [ESP32 serial protocol](serial-protocol.md)
 - [Raspberry Pi face recognition](pi-face-recognition.md)
 - [Pi local hardware and face-authentication service](pi-unlock-service.md)
+- [Omise/Opn PromptPay integration](opn-payments.md)
 - [Full-system test guide](full-system-test-guide.md)
