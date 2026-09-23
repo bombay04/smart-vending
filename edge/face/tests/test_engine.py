@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -13,8 +15,9 @@ from edge.face.config import (
 )
 from edge.face.diagnostics import ConsensusDecisionDiagnostics
 from edge.face.engine import FaceEngine, validate_sample_count
-from edge.face.errors import NoFaceError
+from edge.face.errors import AlreadyRegisteredError, NoFaceError
 from edge.face.models import FaceTemplate
+from edge.face.storage import TemplateStore
 
 
 def embedding(value: float) -> tuple[float, ...]:
@@ -41,8 +44,12 @@ class FakeTemplateStore:
 
 
 class RecordingTemplateStore:
-    def __init__(self) -> None:
+    def __init__(self, *, exists: bool = False) -> None:
         self.saved: FaceTemplate | None = None
+        self.template_exists = exists
+
+    def exists(self, _employee_code: str) -> bool:
+        return self.template_exists
 
     def save(self, face_template: FaceTemplate) -> None:
         self.saved = face_template
@@ -97,6 +104,28 @@ class RecognitionEngine(FaceEngine):
         return self.live
 
 
+class ScriptedCollectionEngine(FaceEngine):
+    def __init__(
+        self,
+        template_store: TemplateStore,
+        collections: list[tuple[tuple[float, ...], ...]],
+    ) -> None:
+        super().__init__(
+            sface_l2_threshold=0.5,
+            template_store=template_store,
+            detector=PassthroughDetector(),  # type: ignore[arg-type]
+            embedder=FakeEmbedder(),  # type: ignore[arg-type]
+        )
+        self.collections = iter(collections)
+
+    def _collect_embeddings(
+        self, *, phase: str, sample_count: int
+    ) -> tuple[tuple[float, ...], ...]:
+        collection = next(self.collections)
+        self.collection_request = (phase, sample_count)
+        return collection
+
+
 class EngineConfigurationTests(unittest.TestCase):
     def test_enrollment_sample_count_validation(self) -> None:
         self.assertEqual(
@@ -119,22 +148,36 @@ class EngineConfigurationTests(unittest.TestCase):
 
     def test_registration_collects_and_retains_distinct_embeddings(self) -> None:
         store = RecordingTemplateStore()
-        embeddings = (embedding(0.1), embedding(0.2), embedding(0.3))
+        embeddings = tuple(embedding(value) for value in (0.1, 0.2, 0.3, 0.4, 0.5))
         engine = FaceEngine(
-            enrollment_sample_count=3,
             template_store=store,  # type: ignore[arg-type]
             detector=PassthroughDetector(),  # type: ignore[arg-type]
             embedder=FakeEmbedder(embeddings),  # type: ignore[arg-type]
         )
         with patch(
-            "edge.face.engine.capture_frame", side_effect=["a", "b", "c"]
+            "edge.face.engine.capture_frame", side_effect=["a", "b", "c", "d", "e"]
         ) as capture:
             registered = engine.register("EMP001")
 
-        self.assertEqual(capture.call_count, 3)
+        self.assertEqual(capture.call_count, 5)
         self.assertEqual(registered.embeddings, embeddings)
         self.assertEqual(registered.similarity_metric, SFACE_SIMILARITY_METRIC)
         self.assertIs(store.saved, registered)
+
+    def test_existing_template_is_rejected_before_camera_capture(self) -> None:
+        store = RecordingTemplateStore(exists=True)
+        engine = FaceEngine(
+            template_store=store,  # type: ignore[arg-type]
+            detector=PassthroughDetector(),  # type: ignore[arg-type]
+            embedder=FakeEmbedder(),  # type: ignore[arg-type]
+        )
+
+        with patch("edge.face.engine.capture_frame") as capture:
+            with self.assertRaises(AlreadyRegisteredError):
+                engine.register("EMP001")
+
+        capture.assert_not_called()
+        self.assertIsNone(store.saved)
 
     def test_failed_registration_does_not_replace_existing_template(self) -> None:
         store = RecordingTemplateStore()
@@ -149,6 +192,21 @@ class EngineConfigurationTests(unittest.TestCase):
                 engine.register("EMP001")
         self.assertEqual(capture.call_count, 3)
         self.assertIsNone(store.saved)
+
+    def test_registered_template_is_used_by_existing_recognition_path(self) -> None:
+        enrollment = tuple(
+            embedding(value) for value in (0.1, 0.2, 0.3, 0.4, 0.5)
+        )
+        live = tuple(embedding(value) for value in (0.1, 0.2, 0.3))
+        with tempfile.TemporaryDirectory() as directory:
+            store = TemplateStore(Path(directory))
+            engine = ScriptedCollectionEngine(store, [enrollment, live])
+
+            engine.register("EMP001")
+            result = engine.recognize()
+
+        self.assertTrue(result.matched)
+        self.assertEqual(result.employee_code, "EMP001")
 
 
 class RecognitionConsensusTests(unittest.TestCase):

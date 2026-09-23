@@ -284,6 +284,401 @@
   touch-action: manipulation;
 }
 
+.employee-registration-page {
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at top right, rgba(124, 58, 237, 0.14), transparent 32rem),
+    linear-gradient(145deg, #fafaff 0%, #eeeaf8 100%);
+}
+
+.employee-registration-card {
+  width: min(100%, 860px);
+  padding: clamp(32px, 7vw, 64px);
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  border-radius: 32px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 24px 64px rgba(55, 40, 90, 0.14);
+  text-align: center;
+}
+
+.mode-label--admin {
+  border-color: #ddd6fe;
+  color: #6d28d9;
+  background: #f5f3ff;
+}
+
+.employee-registration-card h1 {
+  margin: 0;
+  color: #2e1065;
+  font-size: clamp(2.1rem, 6vw, 3.75rem);
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+
+.employee-registration-status {
+  min-height: 132px;
+  margin-top: 28px;
+}
+
+.employee-registration-status h2 {
+  margin: 0;
+  color: #4c1d95;
+  font-size: clamp(1.35rem, 3vw, 1.75rem);
+}
+
+.employee-registration-status p {
+  margin: 12px auto 0;
+  color: #52627a;
+  font-size: clamp(1.05rem, 2.5vw, 1.2rem);
+  line-height: 1.5;
+}
+
+.employee-registration-status .employee-registration-identity {
+  color: #166534;
+  font-weight: 850;
+}
+
+.employee-registration-actions {
+  display: grid;
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.employee-registration-submit,
+.employee-registration-secondary,
+.employee-registration-back {
+  min-height: 58px;
+  border-radius: 18px;
+  font-size: 1.02rem;
+  font-weight: 850;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.employee-registration-submit {
+  border: 0;
+  color: #ffffff;
+  background: #7c3aed;
+}
+
+.employee-registration-secondary:disabled {
+  color: #64748b;
+  background: #e2e8f0;
+  cursor: not-allowed;
+}
+
+.employee-registration-secondary,
+.employee-registration-back {
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  background: #ffffff;
+}
+
+.employee-registration-back {
+  width: 100%;
+  margin-top: 14px;
+}
+
+.directory-message,
+.registration-status-banner {
+  margin: 20px 0 0;
+  padding: 18px;
+  border-radius: 16px;
+  color: #475569;
+  background: #f8fafc;
+  font-weight: 750;
+}
+
+.directory-message--error,
+.registration-status-banner--warning {
+  color: #92400e;
+  background: #fffbeb;
+}
+
+.directory-message p {
+  margin: 0 0 12px;
+}
+
+.directory-message button,
+.registration-status-banner button {
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid #c4b5fd;
+  border-radius: 12px;
+  color: #5b21b6;
+  background: #ffffff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.registration-status-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.employee-directory-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.employee-directory-item {
+  display: flex;
+  min-height: 86px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+  border: 1px solid #ddd6fe;
+  border-radius: 18px;
+  color: #172033;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.employee-directory-item:hover:not(:disabled) {
+  border-color: #8b5cf6;
+  background: #faf5ff;
+}
+
+.employee-directory-item:disabled {
+  opacity: 0.68;
+  cursor: not-allowed;
+}
+
+.employee-directory-identity,
+.employee-directory-badges {
+  display: flex;
+  gap: 8px;
+}
+
+.employee-directory-identity {
+  min-width: 0;
+  flex-direction: column;
+}
+
+.employee-directory-identity strong {
+  overflow: hidden;
+  font-size: 1.12rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employee-directory-identity > span {
+  color: #64748b;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.employee-directory-badges {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.employee-state-badge,
+.registration-state-badge {
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.employee-state-badge--active,
+.registration-state-badge--registered {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.employee-state-badge--inactive {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.registration-state-badge--unregistered {
+  color: #5b21b6;
+  background: #ede9fe;
+}
+
+.registration-state-badge--unknown {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.staff-portal-page {
+  background:
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.12), transparent 34rem),
+    #f4f7fb;
+}
+
+.staff-portal-container {
+  width: min(100%, 1080px);
+  margin: 0 auto;
+}
+
+.staff-portal-header,
+.staff-section-heading,
+.staff-add-row,
+.staff-message--error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.staff-portal-header h1 {
+  margin: 8px 0;
+  color: #172033;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  letter-spacing: -0.04em;
+}
+
+.staff-portal-header p,
+.staff-add-employee p,
+.staff-section-heading p {
+  margin: 0;
+  color: #64748b;
+}
+
+.staff-portal-header button,
+.staff-section-heading button,
+.staff-message button {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  color: #334155;
+  background: #ffffff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.staff-add-employee,
+.staff-employee-section {
+  margin-top: 28px;
+  padding: clamp(22px, 4vw, 34px);
+  border: 1px solid #dbe5f0;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 40px rgba(30, 55, 90, 0.08);
+}
+
+.staff-add-employee h2,
+.staff-section-heading h2 {
+  margin: 0 0 8px;
+  color: #1e293b;
+}
+
+.staff-add-employee form {
+  margin-top: 22px;
+}
+
+.staff-add-employee label {
+  display: block;
+  margin-bottom: 8px;
+  color: #334155;
+  font-weight: 800;
+}
+
+.staff-add-row input {
+  min-width: 0;
+  min-height: 52px;
+  flex: 1;
+  padding: 0 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  color: #172033;
+  background: #ffffff;
+  font: inherit;
+}
+
+.staff-add-row button {
+  min-height: 52px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: 14px;
+  color: #ffffff;
+  background: #2563eb;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.staff-add-row button:disabled,
+.staff-section-heading button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.staff-message {
+  margin: 20px 0 0;
+  padding: 16px;
+  border-radius: 14px;
+  color: #475569;
+  background: #f8fafc;
+  font-weight: 750;
+}
+
+.staff-message--error {
+  color: #991b1b;
+  background: #fff1f2;
+}
+
+.staff-message--success {
+  color: #166534;
+  background: #f0fdf4;
+}
+
+.staff-employee-table {
+  margin-top: 22px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+}
+
+.staff-employee-row {
+  display: grid;
+  grid-template-columns: 0.8fr 1.7fr 0.8fr 1.3fr;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 18px;
+  border-top: 1px solid #e2e8f0;
+  color: #334155;
+}
+
+.staff-employee-row:first-child {
+  border-top: 0;
+}
+
+.staff-employee-row--header {
+  color: #64748b;
+  background: #f8fafc;
+  font-size: 0.8rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.staff-active,
+.staff-registered {
+  color: #166534;
+  font-weight: 850;
+}
+
+.staff-inactive {
+  color: #991b1b;
+  font-weight: 850;
+}
+
+.staff-setup-required {
+  color: #6d28d9;
+  font-weight: 850;
+}
+
 .employee-auth-submit {
   border: 0;
   color: #ffffff;
@@ -668,6 +1063,32 @@
 
   .confirm-restock-button {
     width: 100%;
+  }
+
+  .employee-directory-item,
+  .registration-status-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .employee-directory-badges {
+    justify-content: flex-start;
+  }
+
+  .staff-portal-header,
+  .staff-section-heading,
+  .staff-add-row,
+  .staff-message--error {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .staff-employee-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .staff-employee-row--header {
+    display: none;
   }
 
   .slot-card {

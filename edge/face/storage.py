@@ -21,6 +21,7 @@ from .config import (
     YUNET_MODEL_FILENAME,
 )
 from .errors import (
+    AlreadyRegisteredError,
     CorruptTemplateError,
     IncompatibleTemplateError,
     TemplateNotFoundError,
@@ -48,6 +49,11 @@ class TemplateStore:
         path = self._path_for(template.employee_code)
         self._validate_template(template, path)
         self.directory.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            raise AlreadyRegisteredError(
+                f"A face template is already registered for employeeCode "
+                f"{template.employee_code}."
+            )
         document = {
             "schemaVersion": TEMPLATE_SCHEMA_VERSION,
             "employeeCode": template.employee_code,
@@ -74,12 +80,25 @@ class TemplateStore:
                 json.dump(document, temporary_file, separators=(",", ":"))
                 temporary_file.write("\n")
             os.chmod(temporary_path, 0o600)
-            os.replace(temporary_path, path)
+            # Linking a complete temporary file into place is atomic and fails if
+            # another process registered the same employee in the meantime.
+            os.link(temporary_path, path)
+            temporary_path.unlink()
+        except FileExistsError as error:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+            raise AlreadyRegisteredError(
+                f"A face template is already registered for employeeCode "
+                f"{template.employee_code}."
+            ) from error
         except OSError as error:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
             raise TemplateStorageError(f"Unable to save template: {path}") from error
         return path
+
+    def exists(self, employee_code: str) -> bool:
+        return self._path_for(employee_code).is_file()
 
     def load(self, employee_code: str) -> FaceTemplate:
         path = self._path_for(employee_code)

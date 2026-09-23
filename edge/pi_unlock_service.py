@@ -14,14 +14,26 @@ from flask import Flask, Response, jsonify, request
 
 if __package__:
     from .face.engine import FaceEngine
-    from .face.errors import FaceEngineError, MultipleFacesError, NoFaceError
+    from .face.errors import (
+        AlreadyRegisteredError,
+        FaceEngineError,
+        MultipleFacesError,
+        NoFaceError,
+    )
     from .face.models import RecognitionResult
+    from .face.storage import EMPLOYEE_CODE_PATTERN
     from .serial_client import Esp32SerialClient, SerialClientError
 else:
     # Keep direct `python edge/pi_unlock_service.py` execution working on the Pi.
     from face.engine import FaceEngine
-    from face.errors import FaceEngineError, MultipleFacesError, NoFaceError
+    from face.errors import (
+        AlreadyRegisteredError,
+        FaceEngineError,
+        MultipleFacesError,
+        NoFaceError,
+    )
     from face.models import RecognitionResult
+    from face.storage import EMPLOYEE_CODE_PATTERN
     from serial_client import Esp32SerialClient, SerialClientError
 
 
@@ -32,6 +44,7 @@ ALLOWED_ORIGIN = "http://localhost:5173"
 HARDWARE_STATUS_TIMEOUT_SECONDS = 3.0
 MAX_FAILED_ATTEMPTS = 3
 LOCKOUT_DURATION_SECONDS = 180
+MAX_REGISTRATION_STATUS_CODES = 100
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("pi-unlock-service")
@@ -44,6 +57,10 @@ face_authentication_lock = threading.Lock()
 
 class FaceRecognizer(Protocol):
     def recognize(self) -> RecognitionResult: ...
+
+    def register(self, employee_code: str) -> object: ...
+
+    def is_registered(self, employee_code: str) -> bool: ...
 
 
 face_engine: FaceRecognizer | None = None
@@ -265,6 +282,48 @@ def locked_response(lockout_status: dict[str, int | str]) -> tuple[Response, int
     )
 
 
+def normalize_employee_code(employee_code: object) -> str | None:
+    if not isinstance(employee_code, str):
+        return None
+    normalized = employee_code.strip().upper()
+    if not EMPLOYEE_CODE_PATTERN.fullmatch(normalized):
+        return None
+    return normalized
+
+
+def normalized_employee_code_from_request() -> str | None:
+    if not request.is_json:
+        return None
+    body: Any = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return None
+    return normalize_employee_code(body.get("employeeCode"))
+
+
+def normalized_employee_codes_from_request() -> list[str] | None:
+    if not request.is_json:
+        return None
+    body: Any = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return None
+    employee_codes = body.get("employeeCodes")
+    if not isinstance(employee_codes, list) or not (
+        1 <= len(employee_codes) <= MAX_REGISTRATION_STATUS_CODES
+    ):
+        return None
+
+    normalized_codes: list[str] = []
+    seen: set[str] = set()
+    for employee_code in employee_codes:
+        normalized = normalize_employee_code(employee_code)
+        if normalized is None:
+            return None
+        if normalized not in seen:
+            normalized_codes.append(normalized)
+            seen.add(normalized)
+    return normalized_codes
+
+
 @app.get("/face/auth/status")
 def face_authentication_status() -> Response:
     response = jsonify(face_authentication_lockout.status())
@@ -385,6 +444,97 @@ def authenticate_face() -> tuple[Response, int] | Response:
         )
     finally:
         face_authentication_lock.release()
+
+
+@app.post("/face/register")
+def register_face() -> tuple[Response, int] | Response:
+    employee_code = normalized_employee_code_from_request()
+    if employee_code is None:
+        return (
+            jsonify(
+                status="INVALID_REQUEST",
+                error="employeeCode must use 1-64 letters, digits, underscores, or hyphens.",
+            ),
+            400,
+        )
+
+    # Enrollment and authentication share one non-blocking camera mutex. An
+    # expected registration outcome never reads or mutates authentication lockout.
+    if not face_authentication_lock.acquire(blocking=False):
+        return jsonify(status="BUSY"), 409
+
+    try:
+        try:
+            get_face_engine().register(employee_code)
+        except AlreadyRegisteredError:
+            logger.info("Face registration outcome: ALREADY_REGISTERED")
+            return jsonify(status="ALREADY_REGISTERED"), 409
+        except NoFaceError:
+            logger.info("Face registration capture outcome: NO_FACE")
+            return jsonify(status="NO_FACE"), 422
+        except MultipleFacesError:
+            logger.info("Face registration capture outcome: MULTIPLE_FACES")
+            return jsonify(status="MULTIPLE_FACES"), 422
+        except FaceEngineError as error:
+            logger.error("Face registration unavailable (%s)", type(error).__name__)
+            return (
+                jsonify(
+                    status="UNAVAILABLE",
+                    error="Face registration service is unavailable.",
+                ),
+                503,
+            )
+        except Exception as error:
+            logger.error("Unexpected face registration failure (%s)", type(error).__name__)
+            return (
+                jsonify(
+                    status="UNAVAILABLE",
+                    error="Face registration service is unavailable.",
+                ),
+                503,
+            )
+
+        logger.info("Face registration completed")
+        return jsonify(status="REGISTERED", employeeCode=employee_code)
+    finally:
+        face_authentication_lock.release()
+
+
+@app.post("/face/registration/status")
+def face_registration_status() -> tuple[Response, int] | Response:
+    employee_codes = normalized_employee_codes_from_request()
+    if employee_codes is None:
+        return (
+            jsonify(
+                status="INVALID_REQUEST",
+                error="employeeCodes must contain 1-100 valid employee codes.",
+            ),
+            400,
+        )
+
+    try:
+        engine = get_face_engine()
+        employees = [
+            {
+                "employeeCode": employee_code,
+                "registered": engine.is_registered(employee_code),
+            }
+            for employee_code in employee_codes
+        ]
+    except FaceEngineError as error:
+        logger.error(
+            "Face registration status unavailable (%s)", type(error).__name__
+        )
+        return jsonify(status="UNAVAILABLE"), 503
+    except Exception as error:
+        logger.error(
+            "Unexpected face registration status failure (%s)", type(error).__name__
+        )
+        return jsonify(status="UNAVAILABLE"), 503
+
+    response = jsonify(status="OK", employees=employees)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.post("/unlock")

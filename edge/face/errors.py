@@ -41,6 +41,10 @@ class TemplateStorageError(FaceEngineError):
     code = "TEMPLATE_ERROR"
 
 
+class AlreadyRegisteredError(TemplateStorageError):
+    code = "ALREADY_REGISTERED"
+
+
 class TemplateNotFoundError(TemplateStorageError):
     pass
 

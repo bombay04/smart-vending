@@ -9,6 +9,11 @@ interface EmployeeAuthenticationRecord {
 }
 
 type FindEmployeeByCode = (employeeCode: string) => Promise<EmployeeAuthenticationRecord | null>;
+interface EmployeeRegistrationListRecord extends EmployeeAuthenticationRecord {
+  faceRegistered: boolean;
+}
+
+type ListEmployees = () => Promise<EmployeeRegistrationListRecord[]>;
 
 export function normalizeEmployeeCode(employeeCode: unknown): string {
   if (typeof employeeCode !== "string" || employeeCode.trim().length === 0) {
@@ -45,6 +50,32 @@ export async function authenticateEmployee(employeeCode: unknown) {
         name: true,
         employeeCode: true,
         isActive: true,
+      },
+    }),
+  );
+}
+
+export async function listEmployeesForFaceRegistrationWithLookup(listEmployees: ListEmployees) {
+  const employees = await listEmployees();
+  return employees.map((employee) => ({
+    id: employee.id,
+    employeeCode: employee.employeeCode,
+    name: employee.name,
+    isActive: employee.isActive,
+    faceRegistered: employee.faceRegistered,
+  }));
+}
+
+export async function listEmployeesForFaceRegistration() {
+  return listEmployeesForFaceRegistrationWithLookup(() =>
+    prisma.employee.findMany({
+      orderBy: { employeeCode: "asc" },
+      select: {
+        id: true,
+        employeeCode: true,
+        name: true,
+        isActive: true,
+        faceRegistered: true,
       },
     }),
   );

@@ -19,6 +19,7 @@ async function main(): Promise<void> {
         name: "Prototype Employee",
         employeeCode: "EMP001",
         isActive: true,
+        faceRegistered: false,
       },
     });
 

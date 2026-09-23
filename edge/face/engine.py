@@ -30,7 +30,7 @@ from .diagnostics import (
     LiveSampleDistanceDiagnostics,
     SampleCollectionDiagnostics,
 )
-from .errors import MultipleFacesError, NoFaceError
+from .errors import AlreadyRegisteredError, MultipleFacesError, NoFaceError
 from .matching import (
     all_live_samples_match,
     is_match,
@@ -93,6 +93,11 @@ class FaceEngine:
         self.diagnostic_sink = diagnostic_sink
 
     def register(self, employee_code: str) -> FaceTemplate:
+        if self.template_store.exists(employee_code):
+            raise AlreadyRegisteredError(
+                f"A face template is already registered for employeeCode "
+                f"{employee_code}."
+            )
         embeddings = self._collect_embeddings(
             phase="enrollment", sample_count=self.enrollment_sample_count
         )
@@ -106,6 +111,9 @@ class FaceEngine:
         )
         self.template_store.save(template)
         return template
+
+    def is_registered(self, employee_code: str) -> bool:
+        return self.template_store.exists(employee_code)
 
     def recognize(self) -> RecognitionResult:
         templates = self.template_store.load_all()
