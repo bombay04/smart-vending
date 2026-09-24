@@ -1,46 +1,69 @@
 import { API_BASE_URL } from "../config/api";
 
-interface MockPurchaseResult {
+export type PaymentStatus = "PENDING" | "SUCCESS" | "FAILED" | "EXPIRED";
+
+export interface PaymentResult {
   transactionId: number;
   slotNumber: number;
   productName: string;
   amount: string;
-  paymentStatus: "SUCCESS";
-  slotStatus: "SOLD_OUT";
+  paymentStatus: PaymentStatus;
+  slotStatus: "AVAILABLE" | "SOLD_OUT";
+  qrImageUrl?: string;
+  expiresAt: string | null;
+  paidAt: string | null;
 }
 
-interface MockPurchaseResponse {
-  data: MockPurchaseResult;
+interface PaymentResponse {
+  data: PaymentResult;
 }
 
-const mockPurchaseUrl = `${API_BASE_URL}/api/v1/transactions/mock-purchase`;
-
-export async function createMockPurchase(slotNumber: number): Promise<MockPurchaseResult> {
-  const response = await fetch(mockPurchaseUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ slotNumber }),
-  });
-
+async function readPaymentResponse(
+  response: Response,
+  fallbackMessage: string,
+) {
   if (!response.ok) {
-    let errorMessage = "Failed to complete purchase.";
-
+    let errorMessage = fallbackMessage;
     try {
       const errorResponse = (await response.json()) as { error?: unknown };
-
       if (typeof errorResponse.error === "string") {
         errorMessage = errorResponse.error;
       }
     } catch {
-      // Use the generic error message when the response is not JSON.
+      // Keep the customer-safe fallback for a non-JSON response.
     }
-
     throw new Error(errorMessage);
   }
 
-  const responseData = (await response.json()) as MockPurchaseResponse;
+  return ((await response.json()) as PaymentResponse).data;
+}
 
-  return responseData.data;
+export async function createPromptPayPayment(
+  slotNumber: number,
+): Promise<PaymentResult> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/transactions/payments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ slotNumber }),
+  });
+
+  return readPaymentResponse(
+    response,
+    "Unable to start payment. Please try again.",
+  );
+}
+
+export async function fetchPaymentStatus(
+  transactionId: number,
+  signal?: AbortSignal,
+): Promise<PaymentResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/transactions/${transactionId}/payment-status`,
+    { signal },
+  );
+
+  return readPaymentResponse(
+    response,
+    "Unable to check payment. We will keep trying.",
+  );
 }

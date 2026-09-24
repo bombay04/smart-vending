@@ -59,7 +59,9 @@ model Transaction {
   amount           Decimal         @db.Decimal(10, 2)
   paymentStatus    PaymentStatus   @default(PENDING)
   paymentProvider  PaymentProvider
-  providerChargeId String?
+  providerChargeId String?         @unique
+  providerStatus   String?
+  expiresAt        DateTime?
   paidAt           DateTime?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt

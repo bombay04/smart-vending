@@ -1,8 +1,10 @@
 import { Router } from "express";
-import { mockPurchase } from "../controllers/transaction.controller";
+import { createPayment, omiseWebhook, paymentStatus } from "../controllers/transaction.controller";
 
 const transactionRouter = Router();
 
-transactionRouter.post("/mock-purchase", mockPurchase);
+transactionRouter.post("/payments", createPayment);
+transactionRouter.get("/:transactionId/payment-status", paymentStatus);
+transactionRouter.post("/omise/webhook", omiseWebhook);
 
 export default transactionRouter;

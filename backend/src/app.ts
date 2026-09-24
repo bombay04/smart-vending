@@ -22,7 +22,13 @@ app.use((request, response, next) => {
   next();
 });
 
-app.use(express.json());
+app.use(
+  express.json({
+    verify(request, _response, buffer) {
+      (request as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+    },
+  }),
+);
 app.use("/health", healthRouter);
 app.use("/api/v1/employees", employeeRouter);
 app.use("/api/v1/products", productRouter);
