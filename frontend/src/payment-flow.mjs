@@ -1,7 +1,15 @@
+import { AUDIO_EVENTS, sendAudioFeedback } from "./audio-feedback.mjs";
+
 export async function handleConfirmedPaymentOnce(
   payment,
   attemptedTransactionIds,
-  { onSaleConfirmed, unlock, onUnlocked, onUnlockFailed },
+  {
+    onSaleConfirmed,
+    unlock,
+    onUnlocked,
+    onUnlockFailed,
+    playAudio = () => undefined,
+  },
 ) {
   if (payment.paymentStatus !== "SUCCESS") {
     return false;
@@ -13,11 +21,13 @@ export async function handleConfirmedPaymentOnce(
 
   attemptedTransactionIds.add(payment.transactionId);
   onSaleConfirmed(payment);
+  sendAudioFeedback(playAudio, AUDIO_EVENTS.PAYMENT_SUCCESS);
 
   try {
     await unlock(payment.slotNumber);
     await onUnlocked(payment);
   } catch {
+    sendAudioFeedback(playAudio, AUDIO_EVENTS.UNLOCK_FAILED);
     await onUnlockFailed(payment);
   }
 

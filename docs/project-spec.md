@@ -54,7 +54,7 @@ The touchscreen UI uses React, Vite, and TypeScript and runs in Chromium on the 
 | Link | Protocol and purpose |
 | --- | --- |
 | Frontend ↔ Backend | HTTP for products, inventory, employee validation, payment/sale, and restock business operations |
-| Frontend ↔ Pi local service | HTTP for hardware-local operations such as face scanning, slot status, and unlock requests |
+| Frontend ↔ Pi local service | HTTP for hardware-local operations such as face scanning, slot status, unlock requests, and local audio feedback |
 | Pi ↔ Backend | HTTP where Pi-originated backend communication is required |
 | Pi ↔ ESP32 | USB serial at 115200 baud, UTF-8, LF-terminated messages |
 
@@ -216,7 +216,13 @@ The current repository does not contain the mitigation design record or regressi
 
 ## Audio
 
-Raspberry Pi audio/voice output is required prototype scope and is planned for Task 39. It is **required/pending**; the current repository contains no verified implementation.
+Task 39 implements best-effort local Raspberry Pi voice feedback. The Pi-hosted frontend sends an allowlisted semantic event to `POST /audio/play` on the existing Pi service; the service maps that event to a fixed PCM WAV file under `edge/audio/assets/` and invokes the local ALSA `aplay` utility. Audio never passes through the cloud backend or ESP32.
+
+The supported events are `PAYMENT_SUCCESS`, `UNLOCK_FAILED`, `EMPLOYEE_AUTH_SUCCESS`, and `RESTOCK_COMPLETE`. Payment success is deduplicated by the same per-transaction guard that prevents repeated unlock attempts. Employee success is emitted only after backend active-employee validation, and restock success only after the backend restock commit returns successfully.
+
+Playback is feedback only and is not business-state authority. Missing assets, an unavailable player/device, timeout, and concurrent playback rejection do not change payment, inventory, unlock, authentication, or restock outcomes. The service rejects a second request with `409 BUSY` while one clip is active; it does not maintain an audio queue.
+
+The architecture and automated failure-isolation tests are **implemented**. The four real Thai WAV recordings are not included, so physical speaker output remains **required/pending physical validation** after the recordings are installed on the Raspberry Pi.
 
 ## Phase 1 exclusions
 
@@ -251,7 +257,7 @@ The following are out of scope for Phase 1:
 | Three-failure, three-minute face-auth lockout | Implemented |
 | LINE notification after sale | Required/pending |
 | LINE notification after restock | Required/pending |
-| Raspberry Pi audio/voice | Required/pending (Task 39) |
+| Raspberry Pi audio/voice | Implemented architecture/tests; real WAV assets and physical speaker validation pending |
 | PCB-noise mitigation and hardware regression | Completed/externally hardware-validated; tracked evidence unavailable |
 
 ## Known technical debt and implementation discrepancies

@@ -10,6 +10,8 @@ import {
   type FaceAuthenticationFailureStatus,
 } from "../api/face-auth";
 import type { AuthenticatedEmployee } from "../types/employee";
+import { playAudioFeedback } from "../api/audio";
+import { validateEmployeeAndNotify } from "../audio-feedback.mjs";
 
 interface EmployeeAuthenticationProps {
   onAuthenticated: (employee: AuthenticatedEmployee) => void;
@@ -194,9 +196,13 @@ function EmployeeAuthentication({ onAuthenticated, onCancel }: EmployeeAuthentic
     try {
       const faceMatch = await requestFaceAuthentication(requestController.signal);
       setRemainingAttempts(null);
-      const employee = await validateFaceAuthenticatedEmployee(
+      const employee = await validateEmployeeAndNotify(
         faceMatch.employeeCode,
         requestController.signal,
+        {
+          validateEmployee: validateFaceAuthenticatedEmployee,
+          playAudio: playAudioFeedback,
+        },
       );
 
       if (requestController.signal.aborted) {

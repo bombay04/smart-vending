@@ -4,6 +4,8 @@ import { createMockRestock } from "../api/restock";
 import type { MockRestockResult } from "../api/restock";
 import type { AuthenticatedEmployee } from "../types/employee";
 import type { HardwareSlotStatus } from "../types/hardware";
+import { playAudioFeedback } from "../api/audio";
+import { commitRestockAndNotify } from "../audio-feedback.mjs";
 
 const POLLING_INTERVAL_MS = 2000;
 const REQUEST_TIMEOUT_MS = 3000;
@@ -137,7 +139,10 @@ function RestockMode({ authenticatedEmployee, onExit, onRestockSuccess }: Restoc
     let restock: MockRestockResult;
 
     try {
-      restock = await createMockRestock(authenticatedEmployee.id);
+      restock = await commitRestockAndNotify(authenticatedEmployee.id, {
+        commitRestock: createMockRestock,
+        playAudio: playAudioFeedback,
+      });
     } catch (error: unknown) {
       setRestockError(
         error instanceof Error ? error.message : "Failed to confirm restock. Please try again.",

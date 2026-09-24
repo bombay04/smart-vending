@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+import subprocess
+import tempfile
 import threading
 import unittest
 from unittest.mock import patch
@@ -608,6 +611,174 @@ class PiUnlockServiceTests(unittest.TestCase):
         self.assertEqual(unlock_response.status_code, 200)
         self.assertEqual(
             unlock_response.get_json()["data"]["status"], "UNLOCK_COMMAND_SENT"
+        )
+
+
+class AudioPlaybackTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = pi_unlock_service.app.test_client()
+        self.assets_directory = tempfile.TemporaryDirectory()
+        self.asset_path = Path(self.assets_directory.name)
+        self.asset_directory_patch = patch.object(
+            pi_unlock_service, "AUDIO_ASSET_DIRECTORY", self.asset_path
+        )
+        self.mock_audio_patch = patch.object(pi_unlock_service, "MOCK_AUDIO", False)
+        self.asset_directory_patch.start()
+        self.mock_audio_patch.start()
+
+    def tearDown(self) -> None:
+        self.asset_directory_patch.stop()
+        self.mock_audio_patch.stop()
+        self.assets_directory.cleanup()
+        if pi_unlock_service.audio_playback_lock.locked():
+            pi_unlock_service.audio_playback_lock.release()
+
+    def create_asset(self, event: str) -> Path:
+        asset = self.asset_path / pi_unlock_service.AUDIO_EVENT_FILES[event]
+        asset.touch()
+        return asset
+
+    def test_each_semantic_event_maps_to_its_fixed_asset(self) -> None:
+        expected_files = {
+            "PAYMENT_SUCCESS": "payment_success.wav",
+            "UNLOCK_FAILED": "unlock_failed.wav",
+            "EMPLOYEE_AUTH_SUCCESS": "employee_auth_success.wav",
+            "RESTOCK_COMPLETE": "restock_complete.wav",
+        }
+
+        for event, filename in expected_files.items():
+            with self.subTest(event=event):
+                expected_path = self.create_asset(event)
+                with patch.object(pi_unlock_service, "play_audio_asset") as player:
+                    response = self.client.post("/audio/play", json={"event": event})
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response.get_json(), {"status": "AUDIO_PLAYED", "event": event}
+                )
+                self.assertEqual(expected_path.name, filename)
+                player.assert_called_once_with(expected_path)
+
+    def test_invalid_event_and_client_controlled_paths_are_rejected(self) -> None:
+        invalid_requests = (
+            {"event": "../../etc/passwd"},
+            {"event": "https://example.com/audio.wav"},
+            {"event": "payment_success.wav"},
+            {"event": "PAYMENT_SUCCESS", "filename": "../../tmp/attack.wav"},
+        )
+
+        with patch.object(pi_unlock_service, "play_audio_asset") as player:
+            for body in invalid_requests:
+                with self.subTest(body=body):
+                    response = self.client.post("/audio/play", json=body)
+                    self.assertEqual(response.status_code, 400)
+
+        player.assert_not_called()
+
+    def test_missing_asset_returns_safe_unavailable_response(self) -> None:
+        response = self.client.post(
+            "/audio/play", json={"event": "PAYMENT_SUCCESS"}
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.get_json(),
+            {
+                "status": "UNAVAILABLE",
+                "event": "PAYMENT_SUCCESS",
+                "error": "Audio playback is unavailable.",
+            },
+        )
+        self.assertNotIn(str(self.asset_path), response.get_data(as_text=True))
+
+    def test_unavailable_or_failing_player_returns_safe_failure(self) -> None:
+        self.create_asset("PAYMENT_SUCCESS")
+        failures = (
+            FileNotFoundError("sensitive executable path"),
+            subprocess.CalledProcessError(1, ["aplay"], stderr="sensitive output"),
+        )
+
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                with patch.object(
+                    pi_unlock_service, "play_audio_asset", side_effect=failure
+                ):
+                    response = self.client.post(
+                        "/audio/play", json={"event": "PAYMENT_SUCCESS"}
+                    )
+
+                self.assertEqual(response.status_code, 503)
+                self.assertNotIn("sensitive", response.get_data(as_text=True))
+
+    def test_playback_timeout_returns_safe_failure(self) -> None:
+        self.create_asset("RESTOCK_COMPLETE")
+        timeout = subprocess.TimeoutExpired(["aplay"], 10, stderr="sensitive output")
+
+        with patch.object(pi_unlock_service, "play_audio_asset", side_effect=timeout):
+            response = self.client.post(
+                "/audio/play", json={"event": "RESTOCK_COMPLETE"}
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("sensitive", response.get_data(as_text=True))
+
+    def test_concurrent_playback_is_rejected_as_busy(self) -> None:
+        self.create_asset("UNLOCK_FAILED")
+        self.assertTrue(pi_unlock_service.audio_playback_lock.acquire(blocking=False))
+
+        response = self.client.post(
+            "/audio/play", json={"event": "UNLOCK_FAILED"}
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["status"], "BUSY")
+
+    def test_audio_failure_does_not_crash_service(self) -> None:
+        self.create_asset("EMPLOYEE_AUTH_SUCCESS")
+        with patch.object(
+            pi_unlock_service,
+            "play_audio_asset",
+            side_effect=OSError("sensitive device failure"),
+        ):
+            audio_response = self.client.post(
+                "/audio/play", json={"event": "EMPLOYEE_AUTH_SUCCESS"}
+            )
+
+        with patch.object(pi_unlock_service, "MOCK_HARDWARE", True):
+            health_response = self.client.get("/health")
+
+        self.assertEqual(audio_response.status_code, 503)
+        self.assertEqual(health_response.status_code, 200)
+
+    def test_player_uses_fixed_command_without_a_shell(self) -> None:
+        asset = self.create_asset("PAYMENT_SUCCESS")
+
+        with patch.object(pi_unlock_service.subprocess, "run") as run:
+            pi_unlock_service.play_audio_asset(asset)
+
+        run.assert_called_once_with(
+            ["aplay", "--quiet", str(asset)],
+            check=True,
+            timeout=pi_unlock_service.AUDIO_PLAYBACK_TIMEOUT_SECONDS,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def test_explicit_mock_audio_mode_is_disclosed(self) -> None:
+        with patch.object(pi_unlock_service, "MOCK_AUDIO", True):
+            response = self.client.post(
+                "/audio/play", json={"event": "PAYMENT_SUCCESS"}
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json(),
+            {
+                "status": "AUDIO_PLAYED",
+                "event": "PAYMENT_SUCCESS",
+                "mockAudio": True,
+            },
         )
 
 

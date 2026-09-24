@@ -6,6 +6,7 @@ import {
   type PaymentResult,
 } from "../api/transaction";
 import { unlockSlot } from "../api/unlock";
+import { playAudioFeedback } from "../api/audio";
 import EmployeeAuthentication from "../components/EmployeeAuthentication";
 import RestockMode from "../components/RestockMode";
 import { handleConfirmedPaymentOnce } from "../payment-flow.mjs";
@@ -76,6 +77,7 @@ function HomePage() {
             setPaymentScreen({ phase: "unlocking", payment: confirmedPayment });
           },
           unlock: unlockSlot,
+          playAudio: playAudioFeedback,
           async onUnlocked(confirmedPayment) {
             await refreshSlotsAfterSale(confirmedPayment.slotNumber);
             setPaymentScreen(null);
