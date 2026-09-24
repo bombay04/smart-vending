@@ -222,7 +222,7 @@ The supported events are `PAYMENT_SUCCESS`, `UNLOCK_FAILED`, `EMPLOYEE_AUTH_SUCC
 
 Playback is feedback only and is not business-state authority. Missing assets, an unavailable player/device, timeout, and concurrent playback rejection do not change payment, inventory, unlock, authentication, or restock outcomes. The service rejects a second request with `409 BUSY` while one clip is active; it does not maintain an audio queue.
 
-The architecture and automated failure-isolation tests are **implemented**. The four real Thai WAV recordings are not included, so physical speaker output remains **required/pending physical validation** after the recordings are installed on the Raspberry Pi.
+The architecture and automated failure-isolation tests are **implemented**. The cabinet USB speaker route has been physically validated with an ALSA test WAV by explicitly selecting `plughw:CARD=UACDemoV10,DEV=0`; relying on the ALSA default was inaudible. The four real Thai WAV recordings are not included, so event-by-event production prompt validation remains **required/pending** after the recordings are installed on the Raspberry Pi.
 
 ## Phase 1 exclusions
 

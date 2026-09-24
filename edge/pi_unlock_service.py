@@ -602,8 +602,14 @@ def unlock() -> tuple[Response, int] | Response:
 def play_audio_asset(asset_path: Path) -> None:
     """Play one trusted local WAV file with a bounded system command."""
 
+    command = list(AUDIO_PLAYER_COMMAND)
+    alsa_device = os.getenv("AUDIO_ALSA_DEVICE", "").strip()
+    if alsa_device:
+        command.extend(("-D", alsa_device))
+    command.append(str(asset_path))
+
     subprocess.run(
-        [*AUDIO_PLAYER_COMMAND, str(asset_path)],
+        command,
         check=True,
         timeout=AUDIO_PLAYBACK_TIMEOUT_SECONDS,
         stdin=subprocess.DEVNULL,

@@ -665,6 +665,9 @@ class AudioPlaybackTests(unittest.TestCase):
             {"event": "https://example.com/audio.wav"},
             {"event": "payment_success.wav"},
             {"event": "PAYMENT_SUCCESS", "filename": "../../tmp/attack.wav"},
+            {"event": "PAYMENT_SUCCESS", "alsaDevice": "default"},
+            {"event": "PAYMENT_SUCCESS", "arguments": ["-D", "default"]},
+            {"event": "PAYMENT_SUCCESS", "executable": "/tmp/attack"},
         )
 
         with patch.object(pi_unlock_service, "play_audio_asset") as player:
@@ -750,14 +753,32 @@ class AudioPlaybackTests(unittest.TestCase):
         self.assertEqual(audio_response.status_code, 503)
         self.assertEqual(health_response.status_code, 200)
 
-    def test_player_uses_fixed_command_without_a_shell(self) -> None:
+    def test_player_uses_default_alsa_device_when_configuration_is_absent(self) -> None:
         asset = self.create_asset("PAYMENT_SUCCESS")
 
-        with patch.object(pi_unlock_service.subprocess, "run") as run:
-            pi_unlock_service.play_audio_asset(asset)
+        with patch.dict("os.environ", {"AUDIO_ALSA_DEVICE": ""}):
+            with patch.object(pi_unlock_service.subprocess, "run") as run:
+                pi_unlock_service.play_audio_asset(asset)
 
         run.assert_called_once_with(
             ["aplay", "--quiet", str(asset)],
+            check=True,
+            timeout=pi_unlock_service.AUDIO_PLAYBACK_TIMEOUT_SECONDS,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def test_configured_alsa_device_is_passed_with_fixed_device_argument(self) -> None:
+        asset = self.create_asset("PAYMENT_SUCCESS")
+        configured_device = "plughw:CARD=UACDemoV10,DEV=0"
+
+        with patch.dict("os.environ", {"AUDIO_ALSA_DEVICE": configured_device}):
+            with patch.object(pi_unlock_service.subprocess, "run") as run:
+                pi_unlock_service.play_audio_asset(asset)
+
+        run.assert_called_once_with(
+            ["aplay", "--quiet", "-D", configured_device, str(asset)],
             check=True,
             timeout=pi_unlock_service.AUDIO_PLAYBACK_TIMEOUT_SECONDS,
             stdin=subprocess.DEVNULL,
