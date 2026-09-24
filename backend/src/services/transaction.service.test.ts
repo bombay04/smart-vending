@@ -5,6 +5,11 @@ import type {
   PaymentProvider,
   ProviderPayment,
 } from "../payments/payment-provider";
+import type {
+  NotificationProvider,
+  RestockNotification,
+  SaleNotification,
+} from "../notifications/notification-provider";
 import { HttpError } from "../utils/http-error";
 import {
   createPromptPayPaymentWithDependencies,
@@ -48,6 +53,8 @@ class MemoryStore implements PaymentStore {
   savedProviderChargeId: string | null = null;
   creationFailed = false;
   applyCount = 0;
+  saleNotificationClaimed = false;
+  saleNotificationClaimCount = 0;
   createdSlotNumber: number | null = null;
 
   constructor(record: PaymentRecord | null = baseRecord()) {
@@ -112,6 +119,16 @@ class MemoryStore implements PaymentStore {
     };
     return { ...this.record };
   }
+
+  async claimSaleNotification(transactionId: number) {
+    assert.equal(transactionId, this.record?.id);
+    if (this.record?.paymentStatus !== "SUCCESS" || this.saleNotificationClaimed) {
+      return false;
+    }
+    this.saleNotificationClaimed = true;
+    this.saleNotificationClaimCount += 1;
+    return true;
+  }
 }
 
 class MockProvider implements PaymentProvider {
@@ -133,6 +150,23 @@ class MockProvider implements PaymentProvider {
   async retrievePayment() {
     this.retrieveCount += 1;
     return this.retrieveResult;
+  }
+}
+
+class MockNotificationProvider implements NotificationProvider {
+  saleNotifications: SaleNotification[] = [];
+  restockNotifications: RestockNotification[] = [];
+
+  constructor(private readonly failure: Error | null = null) {}
+
+  async sendSaleNotification(notification: SaleNotification) {
+    this.saleNotifications.push(notification);
+    if (this.failure) throw this.failure;
+  }
+
+  async sendRestockNotification(notification: RestockNotification) {
+    this.restockNotifications.push(notification);
+    if (this.failure) throw this.failure;
   }
 }
 
@@ -195,38 +229,107 @@ test("provider pending status remains pending and does not sell out the slot", a
 test("provider success immediately completes the sale and marks the slot sold out", async () => {
   const success: ProviderPayment = { ...providerPending, status: "successful", paid: true };
   const store = new MemoryStore(baseRecord({ providerChargeId: success.chargeId }));
+  const notificationProvider = new MockNotificationProvider();
   const result = await getPaymentStatusWithDependencies(
     91,
     store,
     new MockProvider(providerPending, success),
+    { provider: notificationProvider },
   );
   assert.equal(result.paymentStatus, "SUCCESS");
   assert.equal(result.slotStatus, "SOLD_OUT");
   assert.ok(result.paidAt);
+  assert.deepEqual(notificationProvider.saleNotifications, [
+    {
+      productName: "Authoritative Tissue",
+      slotNumber: 1,
+      priceThb: "20.00",
+    },
+  ]);
 });
 
 test("repeated success polling is idempotent", async () => {
   const success: ProviderPayment = { ...providerPending, status: "successful", paid: true };
   const store = new MemoryStore(baseRecord({ providerChargeId: success.chargeId }));
   const provider = new MockProvider(providerPending, success);
-  await getPaymentStatusWithDependencies(91, store, provider);
-  await getPaymentStatusWithDependencies(91, store, provider);
+  const notificationProvider = new MockNotificationProvider();
+  const notifications = { provider: notificationProvider };
+  await getPaymentStatusWithDependencies(91, store, provider, notifications);
+  await getPaymentStatusWithDependencies(91, store, provider, notifications);
   assert.equal(store.applyCount, 1);
   assert.equal(provider.retrieveCount, 1);
+  assert.equal(store.saleNotificationClaimCount, 1);
+  assert.equal(notificationProvider.saleNotifications.length, 1);
 });
 
 test("failed and expired provider payments never sell out the slot", async () => {
   for (const status of ["failed", "expired"] as const) {
     const providerPayment = { ...providerPending, status };
     const store = new MemoryStore(baseRecord({ providerChargeId: providerPayment.chargeId }));
+    const notificationProvider = new MockNotificationProvider();
     const result = await getPaymentStatusWithDependencies(
       91,
       store,
       new MockProvider(providerPending, providerPayment),
+      { provider: notificationProvider },
     );
     assert.equal(result.paymentStatus, status === "failed" ? "FAILED" : "EXPIRED");
     assert.equal(result.slotStatus, "AVAILABLE");
+    assert.equal(notificationProvider.saleNotifications.length, 0);
   }
+});
+
+test("pending payments do not send sale notifications", async () => {
+  const store = new MemoryStore(baseRecord({ providerChargeId: providerPending.chargeId }));
+  const notificationProvider = new MockNotificationProvider();
+  const result = await getPaymentStatusWithDependencies(91, store, new MockProvider(), {
+    provider: notificationProvider,
+  });
+
+  assert.equal(result.paymentStatus, "PENDING");
+  assert.equal(notificationProvider.saleNotifications.length, 0);
+  assert.equal(store.saleNotificationClaimCount, 0);
+});
+
+test("notification failure preserves the completed sale and sold-out slot", async () => {
+  const success: ProviderPayment = { ...providerPending, status: "successful", paid: true };
+  const store = new MemoryStore(baseRecord({ providerChargeId: success.chargeId }));
+  const notificationProvider = new MockNotificationProvider(new Error("secret-token-value"));
+  const logEntries: unknown[][] = [];
+
+  const result = await getPaymentStatusWithDependencies(
+    91,
+    store,
+    new MockProvider(providerPending, success),
+    {
+      provider: notificationProvider,
+      logger: { error: (...entry: unknown[]) => logEntries.push(entry) },
+    },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(result.paymentStatus, "SUCCESS");
+  assert.equal(result.slotStatus, "SOLD_OUT");
+  assert.equal(store.record?.paymentStatus, "SUCCESS");
+  assert.equal(store.record?.slotStatus, "SOLD_OUT");
+  assert.equal(notificationProvider.saleNotifications.length, 1);
+  assert.equal(JSON.stringify(logEntries).includes("secret-token-value"), false);
+});
+
+test("sale notification is completed without any physical unlock dependency", async () => {
+  const success: ProviderPayment = { ...providerPending, status: "successful", paid: true };
+  const store = new MemoryStore(baseRecord({ providerChargeId: success.chargeId }));
+  const notificationProvider = new MockNotificationProvider();
+
+  const result = await getPaymentStatusWithDependencies(
+    91,
+    store,
+    new MockProvider(providerPending, success),
+    { provider: notificationProvider },
+  );
+
+  assert.equal(result.paymentStatus, "SUCCESS");
+  assert.equal(notificationProvider.saleNotifications.length, 1);
 });
 
 test("unknown transactions are rejected", async () => {
@@ -262,13 +365,16 @@ test("duplicate provider notifications do not duplicate sale completion", async 
   const success: ProviderPayment = { ...providerPending, status: "successful", paid: true };
   const store = new MemoryStore(baseRecord({ providerChargeId: success.chargeId }));
   const provider = new MockProvider(providerPending, success);
+  const notificationProvider = new MockNotificationProvider();
+  const notifications = { provider: notificationProvider };
   assert.deepEqual(
-    await reconcileWebhookChargeWithDependencies(success.chargeId, store, provider),
+    await reconcileWebhookChargeWithDependencies(success.chargeId, store, provider, notifications),
     { processed: true },
   );
   assert.deepEqual(
-    await reconcileWebhookChargeWithDependencies(success.chargeId, store, provider),
+    await reconcileWebhookChargeWithDependencies(success.chargeId, store, provider, notifications),
     { processed: false },
   );
   assert.equal(store.applyCount, 1);
+  assert.equal(notificationProvider.saleNotifications.length, 1);
 });
