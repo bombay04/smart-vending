@@ -14,7 +14,7 @@ export const AUDIO_EVENTS: Readonly<{
 export function sendAudioFeedback(
   playAudio: (event: AudioEvent) => unknown,
   event: AudioEvent,
-): void;
+): Promise<void>;
 
 export function validateEmployeeAndNotify<T>(
   employeeCode: string,

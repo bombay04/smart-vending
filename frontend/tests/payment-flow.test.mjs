@@ -11,11 +11,15 @@ import {
 test("pending, failed, and expired payments never unlock", async () => {
   for (const paymentStatus of ["PENDING", "FAILED", "EXPIRED"]) {
     let unlockCount = 0;
+    const audioEvents = [];
     const handled = await handleConfirmedPaymentOnce(
       { transactionId: 1, slotNumber: 2, paymentStatus },
       new Set(),
       {
         onSaleConfirmed() {},
+        playAudio(event) {
+          audioEvents.push(event);
+        },
         async unlock() {
           unlockCount += 1;
         },
@@ -25,6 +29,7 @@ test("pending, failed, and expired payments never unlock", async () => {
     );
     assert.equal(handled, false);
     assert.equal(unlockCount, 0);
+    assert.deepEqual(audioEvents, []);
   }
 });
 
@@ -65,11 +70,132 @@ test("success unlocks the correct slot exactly once and completes the Thank You 
   assert.equal(completed, 1);
 });
 
-test("unlock failure preserves confirmed-sale messaging and does not become payment failure", async () => {
+test("unlock HTTP failure emits both events once and preserves the failure outcome", async () => {
+  const attempted = new Set();
   let confirmed = 0;
   let unlockFailed = 0;
   let unlocked = 0;
   const audioEvents = [];
+  const payment = {
+    transactionId: 82,
+    slotNumber: 1,
+    paymentStatus: "SUCCESS",
+  };
+  const dependencies = {
+    onSaleConfirmed() {
+      confirmed += 1;
+    },
+    playAudio(event) {
+      audioEvents.push(event);
+    },
+    async unlock() {
+      throw new Error("Hardware status unavailable (HTTP 503)");
+    },
+    onUnlocked() {
+      unlocked += 1;
+    },
+    onUnlockFailed() {
+      unlockFailed += 1;
+    },
+  };
+
+  assert.equal(
+    await handleConfirmedPaymentOnce(payment, attempted, dependencies),
+    true,
+  );
+  assert.equal(
+    await handleConfirmedPaymentOnce(payment, attempted, dependencies),
+    false,
+  );
+
+  assert.equal(confirmed, 1);
+  assert.equal(unlockFailed, 1);
+  assert.equal(unlocked, 0);
+  assert.deepEqual(audioEvents, [
+    AUDIO_EVENTS.PAYMENT_SUCCESS,
+    AUDIO_EVENTS.UNLOCK_FAILED,
+  ]);
+});
+
+test("unlock network rejection emits UNLOCK_FAILED through the same UI failure path", async () => {
+  let unlockFailed = 0;
+  const audioEvents = [];
+
+  await handleConfirmedPaymentOnce(
+    { transactionId: 84, slotNumber: 1, paymentStatus: "SUCCESS" },
+    new Set(),
+    {
+      onSaleConfirmed() {},
+      playAudio(event) {
+        audioEvents.push(event);
+      },
+      async unlock() {
+        throw new TypeError("fetch failed");
+      },
+      onUnlocked() {
+        assert.fail("network rejection must not use the successful-unlock path");
+      },
+      onUnlockFailed() {
+        unlockFailed += 1;
+      },
+    },
+  );
+
+  assert.equal(unlockFailed, 1);
+  assert.deepEqual(audioEvents, [
+    AUDIO_EVENTS.PAYMENT_SUCCESS,
+    AUDIO_EVENTS.UNLOCK_FAILED,
+  ]);
+});
+
+test("UNLOCK_FAILED waits for PAYMENT_SUCCESS audio without delaying failure UI", async () => {
+  const audioEvents = [];
+  let unlockFailed = 0;
+  let finishPaymentAudio;
+  const paymentAudio = new Promise((resolve) => {
+    finishPaymentAudio = resolve;
+  });
+
+  await handleConfirmedPaymentOnce(
+    { transactionId: 85, slotNumber: 1, paymentStatus: "SUCCESS" },
+    new Set(),
+    {
+      onSaleConfirmed() {},
+      playAudio(event) {
+        audioEvents.push(event);
+        return event === AUDIO_EVENTS.PAYMENT_SUCCESS
+          ? paymentAudio
+          : Promise.resolve();
+      },
+      async unlock() {
+        throw new Error("Pi hardware unavailable");
+      },
+      onUnlocked() {},
+      onUnlockFailed() {
+        unlockFailed += 1;
+      },
+    },
+  );
+
+  assert.equal(unlockFailed, 1);
+  assert.deepEqual(audioEvents, [AUDIO_EVENTS.PAYMENT_SUCCESS]);
+
+  finishPaymentAudio();
+  await paymentAudio;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(audioEvents, [
+    AUDIO_EVENTS.PAYMENT_SUCCESS,
+    AUDIO_EVENTS.UNLOCK_FAILED,
+  ]);
+});
+
+test("UNLOCK_FAILED audio rejection does not change the existing failure outcome", async () => {
+  let confirmed = 0;
+  let unlockFailed = 0;
+  let unlocked = 0;
+  const audioEvents = [];
+
   await handleConfirmedPaymentOnce(
     { transactionId: 82, slotNumber: 1, paymentStatus: "SUCCESS" },
     new Set(),
@@ -79,9 +205,12 @@ test("unlock failure preserves confirmed-sale messaging and does not become paym
       },
       playAudio(event) {
         audioEvents.push(event);
+        if (event === AUDIO_EVENTS.UNLOCK_FAILED) {
+          return Promise.reject(new Error("speaker unavailable"));
+        }
       },
       async unlock() {
-        throw new Error("Pi offline");
+        throw new Error("Pi hardware unavailable");
       },
       onUnlocked() {
         unlocked += 1;

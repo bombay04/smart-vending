@@ -21,13 +21,18 @@ export async function handleConfirmedPaymentOnce(
 
   attemptedTransactionIds.add(payment.transactionId);
   onSaleConfirmed(payment);
-  sendAudioFeedback(playAudio, AUDIO_EVENTS.PAYMENT_SUCCESS);
+  const paymentSuccessAudio = sendAudioFeedback(
+    playAudio,
+    AUDIO_EVENTS.PAYMENT_SUCCESS,
+  );
 
   try {
     await unlock(payment.slotNumber);
     await onUnlocked(payment);
   } catch {
-    sendAudioFeedback(playAudio, AUDIO_EVENTS.UNLOCK_FAILED);
+    void paymentSuccessAudio.then(() =>
+      sendAudioFeedback(playAudio, AUDIO_EVENTS.UNLOCK_FAILED),
+    );
     await onUnlockFailed(payment);
   }
 

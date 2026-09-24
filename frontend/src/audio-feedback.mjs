@@ -7,9 +7,10 @@ export const AUDIO_EVENTS = Object.freeze({
 
 export function sendAudioFeedback(playAudio, event) {
   try {
-    Promise.resolve(playAudio(event)).catch(() => {});
+    return Promise.resolve(playAudio(event)).catch(() => {});
   } catch {
     // Audio is feedback only and never changes the completed business action.
+    return Promise.resolve();
   }
 }
 
