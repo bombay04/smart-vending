@@ -1,5 +1,10 @@
 import type { PaymentStatus, Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import {
+  dispatchSaleNotification,
+  type NotificationDependencies,
+} from "../notifications/notification-dispatch";
+import { getNotificationProvider } from "../notifications/line-notification.provider";
 import { getPaymentProvider } from "../payments/omise-payment.provider";
 import {
   type PaymentProvider,
@@ -39,6 +44,7 @@ export interface PaymentStore {
   findPayment(transactionId: number): Promise<PaymentRecord | null>;
   findPaymentByProviderChargeId(providerChargeId: string): Promise<PaymentRecord | null>;
   applyProviderStatus(transactionId: number, payment: ProviderPayment): Promise<PaymentRecord>;
+  claimSaleNotification(transactionId: number): Promise<boolean>;
 }
 
 type TransactionWithRelations = Prisma.TransactionGetPayload<{
@@ -219,6 +225,18 @@ const prismaPaymentStore: PaymentStore = {
       ),
     );
   },
+
+  async claimSaleNotification(transactionId) {
+    const result = await prisma.transaction.updateMany({
+      where: {
+        id: transactionId,
+        paymentStatus: "SUCCESS",
+        saleNotificationAttemptedAt: null,
+      },
+      data: { saleNotificationAttemptedAt: new Date() },
+    });
+    return result.count === 1;
+  },
 };
 
 export function thbAmountToSatang(amount: string): number {
@@ -270,8 +288,10 @@ async function reconcilePaymentRecord(
   payment: PaymentRecord,
   store: PaymentStore,
   provider: PaymentProvider,
+  notifications?: NotificationDependencies,
 ) {
   if (payment.paymentStatus !== "PENDING") {
+    await notifyCompletedSale(payment, store, notifications);
     return toSafePaymentResponse(payment);
   }
   if (!payment.providerChargeId) {
@@ -281,13 +301,36 @@ async function reconcilePaymentRecord(
   const providerPayment = await provider.retrievePayment(payment.providerChargeId);
   validateProviderPayment(payment, providerPayment);
   const updated = await store.applyProviderStatus(payment.id, providerPayment);
+  await notifyCompletedSale(updated, store, notifications);
   return toSafePaymentResponse(updated, providerPayment.qrImageUrl);
+}
+
+async function notifyCompletedSale(
+  payment: PaymentRecord,
+  store: PaymentStore,
+  notifications?: NotificationDependencies,
+): Promise<void> {
+  if (!notifications || payment.paymentStatus !== "SUCCESS" || payment.slotStatus !== "SOLD_OUT") {
+    return;
+  }
+
+  await dispatchSaleNotification(
+    payment.id,
+    {
+      productName: payment.productName,
+      slotNumber: payment.slotNumber,
+      priceThb: payment.amount,
+    },
+    () => store.claimSaleNotification(payment.id),
+    notifications,
+  );
 }
 
 export async function createPromptPayPaymentWithDependencies(
   slotNumber: number,
   store: PaymentStore,
   provider: PaymentProvider,
+  notifications?: NotificationDependencies,
 ) {
   const pendingPayment = await store.createPendingPayment(slotNumber);
   const amount = thbAmountToSatang(pendingPayment.amount);
@@ -319,6 +362,7 @@ export async function createPromptPayPaymentWithDependencies(
     providerPayment.status === "pending"
       ? saved
       : await store.applyProviderStatus(saved.id, providerPayment);
+  await notifyCompletedSale(finalPayment, store, notifications);
   return toSafePaymentResponse(finalPayment, providerPayment.qrImageUrl);
 }
 
@@ -327,6 +371,7 @@ export function createPromptPayPayment(slotNumber: number) {
     slotNumber,
     prismaPaymentStore,
     getPaymentProvider(),
+    { provider: getNotificationProvider() },
   );
 }
 
@@ -334,6 +379,7 @@ export async function getPaymentStatusWithDependencies(
   transactionId: number,
   store: PaymentStore,
   provider: PaymentProvider,
+  notifications?: NotificationDependencies,
 ) {
   const payment = await store.findPayment(transactionId);
   if (!payment) {
@@ -341,7 +387,7 @@ export async function getPaymentStatusWithDependencies(
   }
 
   try {
-    return await reconcilePaymentRecord(payment, store, provider);
+    return await reconcilePaymentRecord(payment, store, provider, notifications);
   } catch (error: unknown) {
     if (error instanceof HttpError) {
       throw error;
@@ -351,20 +397,28 @@ export async function getPaymentStatusWithDependencies(
 }
 
 export function getPaymentStatus(transactionId: number) {
-  return getPaymentStatusWithDependencies(transactionId, prismaPaymentStore, getPaymentProvider());
+  return getPaymentStatusWithDependencies(transactionId, prismaPaymentStore, getPaymentProvider(), {
+    provider: getNotificationProvider(),
+  });
 }
 
 export async function reconcileWebhookChargeWithDependencies(
   providerChargeId: string,
   store: PaymentStore,
   provider: PaymentProvider,
+  notifications?: NotificationDependencies,
 ) {
   const payment = await store.findPaymentByProviderChargeId(providerChargeId);
-  if (!payment || payment.paymentStatus !== "PENDING") {
+  if (!payment) {
     return { processed: false };
   }
 
-  await reconcilePaymentRecord(payment, store, provider);
+  if (payment.paymentStatus !== "PENDING") {
+    await notifyCompletedSale(payment, store, notifications);
+    return { processed: false };
+  }
+
+  await reconcilePaymentRecord(payment, store, provider, notifications);
   return { processed: true };
 }
 
@@ -373,5 +427,6 @@ export function reconcileWebhookCharge(providerChargeId: string) {
     providerChargeId,
     prismaPaymentStore,
     getPaymentProvider(),
+    { provider: getNotificationProvider() },
   );
 }

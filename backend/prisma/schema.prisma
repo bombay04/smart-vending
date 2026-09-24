@@ -53,45 +53,47 @@ model Slot {
 }
 
 model Transaction {
-  id               Int             @id @default(autoincrement())
-  slotId           Int
-  productId        Int
-  amount           Decimal         @db.Decimal(10, 2)
-  paymentStatus    PaymentStatus   @default(PENDING)
-  paymentProvider  PaymentProvider
-  providerChargeId String?         @unique
-  providerStatus   String?
-  expiresAt        DateTime?
-  paidAt           DateTime?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
-  slot             Slot            @relation(fields: [slotId], references: [id])
-  product          Product         @relation(fields: [productId], references: [id])
+  id                          Int             @id @default(autoincrement())
+  slotId                      Int
+  productId                   Int
+  amount                      Decimal         @db.Decimal(10, 2)
+  paymentStatus               PaymentStatus   @default(PENDING)
+  paymentProvider             PaymentProvider
+  providerChargeId            String?         @unique
+  providerStatus              String?
+  expiresAt                   DateTime?
+  paidAt                      DateTime?
+  saleNotificationAttemptedAt DateTime?
+  createdAt                   DateTime        @default(now())
+  updatedAt                   DateTime        @updatedAt
+  slot                        Slot            @relation(fields: [slotId], references: [id])
+  product                     Product         @relation(fields: [productId], references: [id])
 
   @@index([slotId])
   @@index([productId])
 }
 
 model Employee {
-  id            Int          @id @default(autoincrement())
-  name          String
-  employeeCode  String       @unique
-  faceEmbedding Json?
-  faceRegistered Boolean     @default(false)
-  isActive      Boolean      @default(true)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  restockLogs   RestockLog[]
+  id             Int          @id @default(autoincrement())
+  name           String
+  employeeCode   String       @unique
+  faceEmbedding  Json?
+  faceRegistered Boolean      @default(false)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  restockLogs    RestockLog[]
 }
 
 model RestockLog {
-  id           Int      @id @default(autoincrement())
-  employeeId   Int
-  note         String?
-  beforeStatus Json?
-  afterStatus  Json?
-  createdAt    DateTime @default(now())
-  employee     Employee @relation(fields: [employeeId], references: [id])
+  id                      Int       @id @default(autoincrement())
+  employeeId              Int
+  note                    String?
+  beforeStatus            Json?
+  afterStatus             Json?
+  notificationAttemptedAt DateTime?
+  createdAt               DateTime  @default(now())
+  employee                Employee  @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
 }
