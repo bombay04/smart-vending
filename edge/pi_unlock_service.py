@@ -6,6 +6,8 @@ import atexit
 import logging
 import math
 import os
+from pathlib import Path
+import subprocess
 import threading
 import time
 from typing import Any, Callable, Protocol
@@ -45,6 +47,15 @@ HARDWARE_STATUS_TIMEOUT_SECONDS = 3.0
 MAX_FAILED_ATTEMPTS = 3
 LOCKOUT_DURATION_SECONDS = 180
 MAX_REGISTRATION_STATUS_CODES = 100
+AUDIO_PLAYBACK_TIMEOUT_SECONDS = 10
+AUDIO_PLAYER_COMMAND = ("aplay", "--quiet")
+AUDIO_ASSET_DIRECTORY = Path(__file__).resolve().parent / "audio" / "assets"
+AUDIO_EVENT_FILES = {
+    "PAYMENT_SUCCESS": "payment_success.wav",
+    "UNLOCK_FAILED": "unlock_failed.wav",
+    "EMPLOYEE_AUTH_SUCCESS": "employee_auth_success.wav",
+    "RESTOCK_COMPLETE": "restock_complete.wav",
+}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("pi-unlock-service")
@@ -53,6 +64,7 @@ app = Flask(__name__)
 serial_client: Esp32SerialClient | None = None
 serial_operation_lock = threading.Lock()
 face_authentication_lock = threading.Lock()
+audio_playback_lock = threading.Lock()
 
 
 class FaceRecognizer(Protocol):
@@ -156,6 +168,7 @@ def environment_integer(name: str, default: int) -> int:
 
 
 MOCK_HARDWARE = environment_flag("MOCK_HARDWARE")
+MOCK_AUDIO = environment_flag("MOCK_AUDIO")
 
 
 @app.before_request
@@ -584,6 +597,112 @@ def unlock() -> tuple[Response, int] | Response:
             "mockHardware": False,
         }
     )
+
+
+def play_audio_asset(asset_path: Path) -> None:
+    """Play one trusted local WAV file with a bounded system command."""
+
+    command = list(AUDIO_PLAYER_COMMAND)
+    alsa_device = os.getenv("AUDIO_ALSA_DEVICE", "").strip()
+    if alsa_device:
+        command.extend(("-D", alsa_device))
+    command.append(str(asset_path))
+
+    subprocess.run(
+        command,
+        check=True,
+        timeout=AUDIO_PLAYBACK_TIMEOUT_SECONDS,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+@app.post("/audio/play")
+def play_audio() -> tuple[Response, int] | Response:
+    if not request.is_json:
+        return (
+            jsonify(status="INVALID_REQUEST", error="Request body must be JSON."),
+            400,
+        )
+
+    body: Any = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) != {"event"}:
+        return (
+            jsonify(
+                status="INVALID_REQUEST",
+                error="Request body must contain only an audio event.",
+            ),
+            400,
+        )
+
+    event = body.get("event")
+    if not isinstance(event, str) or event not in AUDIO_EVENT_FILES:
+        return jsonify(status="INVALID_EVENT", error="Unsupported audio event."), 400
+
+    if not audio_playback_lock.acquire(blocking=False):
+        return (
+            jsonify(
+                status="BUSY",
+                event=event,
+                error="Audio playback is busy.",
+            ),
+            409,
+        )
+
+    try:
+        if MOCK_AUDIO:
+            logger.info("Mock audio playback accepted for event %s", event)
+            return jsonify(status="AUDIO_PLAYED", event=event, mockAudio=True)
+
+        asset_path = AUDIO_ASSET_DIRECTORY / AUDIO_EVENT_FILES[event]
+        if not asset_path.is_file():
+            logger.error("Audio asset is unavailable for event %s", event)
+            return (
+                jsonify(
+                    status="UNAVAILABLE",
+                    event=event,
+                    error="Audio playback is unavailable.",
+                ),
+                503,
+            )
+
+        try:
+            play_audio_asset(asset_path)
+        except (
+            FileNotFoundError,
+            OSError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+        ) as error:
+            logger.error("Audio playback failed for %s (%s)", event, type(error).__name__)
+            return (
+                jsonify(
+                    status="UNAVAILABLE",
+                    event=event,
+                    error="Audio playback is unavailable.",
+                ),
+                503,
+            )
+        except Exception as error:
+            logger.error(
+                "Unexpected audio playback failure for %s (%s)",
+                event,
+                type(error).__name__,
+            )
+            return (
+                jsonify(
+                    status="UNAVAILABLE",
+                    event=event,
+                    error="Audio playback is unavailable.",
+                ),
+                503,
+            )
+
+        logger.info("Audio playback completed for event %s", event)
+        return jsonify(status="AUDIO_PLAYED", event=event)
+    finally:
+        audio_playback_lock.release()
 
 
 def close_serial_connection() -> None:

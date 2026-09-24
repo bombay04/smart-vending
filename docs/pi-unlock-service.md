@@ -1,6 +1,6 @@
-# Pi Local Hardware and Face Service
+# Pi Local Hardware, Face, and Audio Service
 
-The Pi local service exposes HTTP APIs for ESP32 vending hardware, employee face authentication, and prototype employee face registration. It translates unlock requests into commands sent over USB Serial and runs the local YuNet/SFace engine without sending biometric data off the Pi.
+The Pi local service exposes HTTP APIs for ESP32 vending hardware, employee face authentication, prototype employee face registration, and local audio feedback. It translates unlock requests into commands sent over USB Serial, runs the local YuNet/SFace engine without sending biometric data off the Pi, and plays fixed voice assets through the Pi audio output.
 
 The customer frontend calls this service after a backend purchase succeeds. A successful response means the command was sent; it does not synchronously wait for the ESP32 `ACK` or `ERROR:BUSY` response.
 
@@ -12,6 +12,12 @@ From the project root:
 python -m pip install -r edge/requirements.txt
 ```
 
+On Raspberry Pi OS/Debian, install the small ALSA command-line player used for production audio:
+
+```bash
+sudo apt install alsa-utils
+```
+
 ## Environment variables
 
 | Variable | Required | Default | Description |
@@ -19,6 +25,8 @@ python -m pip install -r edge/requirements.txt
 | `ESP32_SERIAL_PORT` | In real mode | None | ESP32 serial port, such as `COM8`, `/dev/ttyUSB0`, or `/dev/ttyACM0`. |
 | `ESP32_BAUD_RATE` | No | `115200` | Serial baud rate. |
 | `MOCK_HARDWARE` | No | `false` | When `true`, simulate successful unlocks without opening Serial. |
+| `MOCK_AUDIO` | No | `false` | When `true`, explicitly simulate successful audio responses without an asset, player, or speaker. Responses include `mockAudio: true`. |
+| `AUDIO_ALSA_DEVICE` | No | ALSA default | Server-side ALSA playback device passed to `aplay -D`; configure this explicitly on multi-device cabinets. |
 | `PI_UNLOCK_HOST` | No | `127.0.0.1` | Address on which the HTTP service listens. |
 | `PI_UNLOCK_PORT` | No | `5000` | HTTP service port. |
 
@@ -39,7 +47,7 @@ Linux or Raspberry Pi:
 MOCK_HARDWARE=true python3 edge/pi_unlock_service.py
 ```
 
-Mock mode does not require an ESP32 or `pyserial` connection.
+Mock hardware mode does not require an ESP32 or `pyserial` connection. It does not implicitly mock audio. Use `MOCK_AUDIO=true` separately when an explicit audio test double is wanted; otherwise missing assets or playback dependencies continue to return HTTP `503`.
 
 ## Real hardware
 
@@ -120,6 +128,39 @@ A successful mock response is:
 ```
 
 Invalid JSON, a missing `slotNumber`, or a slot outside `1` through `3` returns HTTP `400`. An unavailable real Serial connection returns HTTP `503`.
+
+## Local audio feedback
+
+The frontend sends only a semantic event to the existing Pi service:
+
+```bash
+curl -X POST http://localhost:5000/audio/play \
+  -H "Content-Type: application/json" \
+  -d '{"event":"PAYMENT_SUCCESS"}'
+```
+
+The allowlisted event-to-asset mapping is fixed:
+
+| Event | PCM WAV asset under `edge/audio/assets/` |
+| --- | --- |
+| `PAYMENT_SUCCESS` | `payment_success.wav` |
+| `UNLOCK_FAILED` | `unlock_failed.wav` |
+| `EMPLOYEE_AUTH_SUCCESS` | `employee_auth_success.wav` |
+| `RESTOCK_COMPLETE` | `restock_complete.wav` |
+
+The current cabinet has multiple ALSA playback devices. Its validated USB audio output is configured in the Pi service environment as:
+
+```ini
+AUDIO_ALSA_DEVICE=plughw:CARD=UACDemoV10,DEV=0
+```
+
+With that setting, the service invokes `aplay --quiet -D plughw:CARD=UACDemoV10,DEV=0 <allowlisted-wav-file>`. If `AUDIO_ALSA_DEVICE` is absent or blank, it preserves portable ALSA-default behavior and invokes `aplay --quiet <allowlisted-wav-file>`. Cabinet deployment must configure the explicit USB device because its ALSA default is not audible through the cabinet speaker.
+
+Both command forms use a subprocess argument array without a shell and have a ten-second timeout. `AUDIO_ALSA_DEVICE` is read only from the server environment. Client-supplied devices, paths, filenames, URLs, executables, arguments, extra JSON fields, and unknown events are rejected with HTTP `400`. A successful playback returns `{"status":"AUDIO_PLAYED","event":"PAYMENT_SUCCESS"}`. Missing assets, missing `aplay`, audio-device/player failure, or timeout return a path-free HTTP `503 UNAVAILABLE` response.
+
+Playback uses one non-blocking mutex. When a clip is active, a second request returns HTTP `409` with `status: "BUSY"`; there is no queue. Every frontend call is fire-and-forget and failure is deliberately ignored, so sound cannot alter payment state, slot state, unlock attempts, employee authorization, restock completion, or navigation.
+
+Task 39 does not fabricate binary recordings. Supply the four named production Thai PCM WAV files before event-by-event physical validation. Automated tests mock the player boundary, and the explicit `MOCK_AUDIO=true` mode supports development without a speaker. The cabinet USB speaker route has been physically validated with `/usr/share/sounds/alsa/Front_Center.wav` and the device configuration above; the four production voice assets still require physical validation.
 
 ## Face authentication
 
