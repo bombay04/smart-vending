@@ -16,6 +16,23 @@ function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
+  useEffect(() => {
+    const preventKioskContextMenu = (event: MouseEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest("input, textarea, [contenteditable='true']")
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+    };
+
+    document.addEventListener("contextmenu", preventKioskContextMenu);
+    return () => document.removeEventListener("contextmenu", preventKioskContextMenu);
+  }, []);
+
   if (pathname === ADMIN_FACE_REGISTRATION_PATH) {
     return (
       <EmployeeFaceRegistration

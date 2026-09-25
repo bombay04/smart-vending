@@ -4,3 +4,4 @@ dist/
 __pycache__/
 *.py[cod]
 /edge/face/data/
+/edge/kiosk/kiosk.env
