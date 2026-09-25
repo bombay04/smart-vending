@@ -60,6 +60,15 @@ class PassthroughDetector:
         return frame
 
 
+class RecordingDetector(PassthroughDetector):
+    def __init__(self) -> None:
+        self.frames: list[object] = []
+
+    def detect_single_face(self, frame: object, **_kwargs: object) -> object:
+        self.frames.append(frame)
+        return frame
+
+
 class NoFaceDetector:
     def detect_single_face(self, _frame: object, **_kwargs: object) -> object:
         raise NoFaceError("No usable face was detected.")
@@ -163,6 +172,24 @@ class EngineConfigurationTests(unittest.TestCase):
         self.assertEqual(registered.embeddings, embeddings)
         self.assertEqual(registered.similarity_metric, SFACE_SIMILARITY_METRIC)
         self.assertIs(store.saved, registered)
+
+    def test_healthy_camera_capture_reaches_existing_detection_pipeline(self) -> None:
+        store = RecordingTemplateStore()
+        detector = RecordingDetector()
+        captured_frame = object()
+        embeddings = tuple(embedding(value) for value in (0.1, 0.2, 0.3))
+        engine = FaceEngine(
+            enrollment_sample_count=3,
+            template_store=store,  # type: ignore[arg-type]
+            detector=detector,  # type: ignore[arg-type]
+            embedder=FakeEmbedder(embeddings),  # type: ignore[arg-type]
+        )
+
+        with patch("edge.face.engine.capture_frame", return_value=captured_frame):
+            registered = engine.register("EMP001")
+
+        self.assertEqual(detector.frames, [captured_frame] * 3)
+        self.assertEqual(registered.embeddings, embeddings)
 
     def test_existing_template_is_rejected_before_camera_capture(self) -> None:
         store = RecordingTemplateStore(exists=True)

@@ -29,13 +29,13 @@ The complete `edge/face/data/` directory is Git-ignored. Application code never 
 
 ## Find a usable camera index
 
-Linux can expose several `/dev/video*` nodes for one physical device. Probe integer indices and require both a successful open and a captured frame:
+Linux can expose several `/dev/video*` nodes for one physical device. Probe integer indices and require both a successful open and a content-healthy captured frame:
 
 ```bash
 python -m edge.face.cli probe-camera --start-index 0 --max-index 10
 ```
 
-Use an index reported as `CAMERA_OK`. `CAMERA_NO_FRAME` means the node opened but did not deliver an image, and `CAMERA_UNAVAILABLE` means it did not open.
+Use an index reported as `CAMERA_OK`. `CAMERA_NO_FRAME` means the node opened but did not deliver a usable, non-dead image, and `CAMERA_UNAVAILABLE` means it did not open.
 
 ## Register EMP001
 
@@ -79,7 +79,7 @@ The camera index can also be set with `FACE_CAMERA_INDEX`. The storage location 
 
 ## Detector, embedding, and matching
 
-- Camera stabilization: for 1.5 seconds after opening the camera, frames are continuously read and discarded. A separate successful frame is then captured. Both stabilization reads and post-stabilization attempts are bounded. Override the duration with `--stabilization-seconds` or `FACE_CAMERA_STABILIZATION_SECONDS`.
+- Camera stabilization and recovery: for 1.5 seconds after opening the camera, frames are continuously read and discarded, subject to a 180-read ceiling. Up to five subsequent frames are inspected. A frame must be a finite numeric, three-channel BGR image at least 32 by 32 pixels. A frame whose maximum channel value is `2` or lower is classified as `BLACK_FRAME`; using the maximum rather than a mean-brightness cutoff deliberately avoids treating an ordinarily dark room with any real sensor detail as a dead stream. Open, read, invalid-frame, and black-frame failures release the capture, wait 250 ms, then reopen, warm up, and revalidate, with at most two recovery attempts (three opens total). Supported OpenCV backends also receive a one-second read-timeout hint. No USB unbind, power reset, or privileged command is used. Override the stabilization duration with `--stabilization-seconds` or `FACE_CAMERA_STABILIZATION_SECONDS`.
 - Detector: OpenCV `FaceDetectorYN` with the official YuNet 2023mar model. Its input size is set to the fresh frame's actual dimensions. Exactly one valid 15-value detection row—box, five landmarks, and confidence—is required.
 - Face normalization: the complete YuNet detection row is passed to `FaceRecognizerSF.alignCrop()`. There is no Haar box, manual square crop, histogram equalization, or old 96 by 96 resize.
 - Embedding: the aligned face is passed to SFace `feature()`. Output must be one floating 128-value feature row with finite values and a non-zero finite norm. The algorithm identifier is `opencv-yunet-2023mar-sface-2021dec`.

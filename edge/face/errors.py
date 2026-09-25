@@ -28,6 +28,10 @@ class DetectionError(FaceEngineError):
 class CameraError(FaceEngineError):
     code = "CAMERA_ERROR"
 
+    def __init__(self, message: str, *, reason: str = "CAMERA_ERROR") -> None:
+        super().__init__(message)
+        self.reason = reason
+
 
 class NoFaceError(FaceEngineError):
     code = "NO_FACE"

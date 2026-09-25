@@ -15,9 +15,12 @@ from typing import Any, Callable, Protocol
 from flask import Flask, Response, jsonify, request
 
 if __package__:
+    from .face.camera import capture_frame
+    from .face.config import DEFAULT_CAMERA_INDEX
     from .face.engine import FaceEngine
     from .face.errors import (
         AlreadyRegisteredError,
+        CameraError,
         FaceEngineError,
         MultipleFacesError,
         NoFaceError,
@@ -27,9 +30,12 @@ if __package__:
     from .serial_client import Esp32SerialClient, SerialClientError
 else:
     # Keep direct `python edge/pi_unlock_service.py` execution working on the Pi.
+    from face.camera import capture_frame
+    from face.config import DEFAULT_CAMERA_INDEX
     from face.engine import FaceEngine
     from face.errors import (
         AlreadyRegisteredError,
+        CameraError,
         FaceEngineError,
         MultipleFacesError,
         NoFaceError,
@@ -55,6 +61,12 @@ AUDIO_EVENT_FILES = {
     "UNLOCK_FAILED": "unlock_failed.wav",
     "EMPLOYEE_AUTH_SUCCESS": "employee_auth_success.wav",
     "RESTOCK_COMPLETE": "restock_complete.wav",
+}
+CAMERA_STATUS_REASONS = {
+    "OPEN_FAILURE",
+    "READ_FAILURE",
+    "INVALID_FRAME",
+    "BLACK_FRAME",
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -165,6 +177,13 @@ def environment_integer(name: str, default: int) -> int:
         return int(value)
     except ValueError as error:
         raise ValueError(f"{name} must be an integer.") from error
+
+
+def configured_camera_index() -> int:
+    camera_index = environment_integer("FACE_CAMERA_INDEX", DEFAULT_CAMERA_INDEX)
+    if camera_index < 0:
+        raise ValueError("FACE_CAMERA_INDEX must be non-negative.")
+    return camera_index
 
 
 MOCK_HARDWARE = environment_flag("MOCK_HARDWARE")
@@ -280,7 +299,7 @@ def get_face_engine() -> FaceRecognizer:
     global face_engine
 
     if face_engine is None:
-        face_engine = FaceEngine()
+        face_engine = FaceEngine(camera_index=configured_camera_index())
         logger.info("Face authentication runtime initialized")
     return face_engine
 
@@ -342,6 +361,40 @@ def face_authentication_status() -> Response:
     response = jsonify(face_authentication_lockout.status())
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@app.get("/camera/status")
+def camera_status() -> tuple[Response, int] | Response:
+    """Check camera input health without running or returning biometrics."""
+
+    if not face_authentication_lock.acquire(blocking=False):
+        response = jsonify(status="UNAVAILABLE", reason="BUSY")
+        response.headers["Cache-Control"] = "no-store"
+        return response, 503
+
+    try:
+        try:
+            capture_frame(configured_camera_index())
+        except CameraError as error:
+            reason = (
+                error.reason
+                if error.reason in CAMERA_STATUS_REASONS
+                else "CAMERA_ERROR"
+            )
+            response = jsonify(status="UNAVAILABLE", reason=reason)
+            response.headers["Cache-Control"] = "no-store"
+            return response, 503
+        except Exception as error:
+            logger.error("Unexpected camera status failure (%s)", type(error).__name__)
+            response = jsonify(status="UNAVAILABLE", reason="CAMERA_ERROR")
+            response.headers["Cache-Control"] = "no-store"
+            return response, 503
+
+        response = jsonify(status="READY")
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    finally:
+        face_authentication_lock.release()
 
 
 @app.post("/face/authenticate")
@@ -727,6 +780,8 @@ def main() -> int:
         host = os.getenv("PI_UNLOCK_HOST", DEFAULT_HOST)
         service_port = environment_integer("PI_UNLOCK_PORT", DEFAULT_PORT)
         baud_rate = environment_integer("ESP32_BAUD_RATE", DEFAULT_BAUD_RATE)
+        camera_index = configured_camera_index()
+        logger.info("Face camera configured at index %s", camera_index)
 
         if MOCK_HARDWARE:
             logger.info("Starting Pi unlock service in mock hardware mode")
