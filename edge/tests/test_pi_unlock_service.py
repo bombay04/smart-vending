@@ -115,6 +115,10 @@ def recognition_result(*, matched: bool) -> RecognitionResult:
 
 class PiUnlockServiceTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.camera_environment_patch = patch.dict(
+            "os.environ", {"FACE_CAMERA_INDEX": "0"}
+        )
+        self.camera_environment_patch.start()
         self.client = pi_unlock_service.app.test_client()
         pi_unlock_service.face_engine = None
         self.clock = FakeClock()
@@ -126,6 +130,7 @@ class PiUnlockServiceTests(unittest.TestCase):
     def tearDown(self) -> None:
         pi_unlock_service.face_engine = None
         pi_unlock_service.face_authentication_lockout = self.original_lockout
+        self.camera_environment_patch.stop()
         if pi_unlock_service.face_authentication_lock.locked():
             pi_unlock_service.face_authentication_lock.release()
 
@@ -348,6 +353,42 @@ class PiUnlockServiceTests(unittest.TestCase):
             self.client.get("/face/auth/status").get_json()["failedAttempts"], 0
         )
 
+    def test_camera_open_read_and_black_failures_return_unavailable(self) -> None:
+        for reason in ("OPEN_FAILURE", "READ_FAILURE", "BLACK_FRAME"):
+            with self.subTest(reason=reason):
+                self.set_face_outcome(
+                    error=CameraError("sensitive camera detail", reason=reason)
+                )
+
+                response = self.post_face_authentication()
+
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.get_json()["status"], "UNAVAILABLE")
+                self.assertEqual(
+                    self.client.get("/face/auth/status").get_json()[
+                        "failedAttempts"
+                    ],
+                    0,
+                )
+
+    def test_camera_failure_after_two_failures_does_not_activate_lockout(self) -> None:
+        for _ in range(2):
+            self.set_face_outcome(matched=False)
+            self.post_face_authentication()
+        self.set_face_outcome(
+            error=CameraError("dead stream", reason="BLACK_FRAME")
+        )
+
+        response = self.post_face_authentication()
+        status = self.client.get("/face/auth/status")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["status"], "UNAVAILABLE")
+        self.assertEqual(
+            status.get_json(),
+            {"status": "READY", "failedAttempts": 2, "remainingAttempts": 1},
+        )
+
     def test_internal_error_does_not_count(self) -> None:
         self.set_face_outcome(error=RuntimeError("Unexpected sensitive failure."))
 
@@ -393,7 +434,69 @@ class PiUnlockServiceTests(unittest.TestCase):
 
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(second_response.status_code, 200)
-        factory.assert_called_once_with()
+        factory.assert_called_once_with(camera_index=0)
+
+    def test_camera_index_is_server_configured(self) -> None:
+        engine = StubFaceEngine(recognition_result(matched=True))
+        with (
+            patch.dict("os.environ", {"FACE_CAMERA_INDEX": "4"}),
+            patch.object(pi_unlock_service, "FaceEngine", return_value=engine) as factory,
+        ):
+            response = self.post_face_authentication()
+
+        self.assertEqual(response.status_code, 200)
+        factory.assert_called_once_with(camera_index=4)
+
+    def test_camera_status_ready_contains_no_biometric_data(self) -> None:
+        with patch.object(pi_unlock_service, "capture_frame", return_value=object()) as capture:
+            response = self.client.get("/camera/status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"status": "READY"})
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        capture.assert_called_once_with(0)
+        serialized = response.get_data(as_text=True).lower()
+        for forbidden in (
+            "embedding",
+            "distance",
+            "threshold",
+            "template",
+            "image",
+            "landmark",
+            "crop",
+        ):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_camera_status_reports_safe_black_frame_reason(self) -> None:
+        with patch.object(
+            pi_unlock_service,
+            "capture_frame",
+            side_effect=CameraError("sensitive detail", reason="BLACK_FRAME"),
+        ):
+            response = self.client.get("/camera/status")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.get_json(),
+            {"status": "UNAVAILABLE", "reason": "BLACK_FRAME"},
+        )
+        self.assertNotIn("sensitive", response.get_data(as_text=True).lower())
+
+    def test_camera_status_does_not_change_authentication_failures(self) -> None:
+        self.set_face_outcome(matched=False)
+        self.post_face_authentication()
+
+        with patch.object(
+            pi_unlock_service,
+            "capture_frame",
+            side_effect=CameraError("read failed", reason="READ_FAILURE"),
+        ):
+            self.client.get("/camera/status")
+
+        self.assertEqual(
+            self.client.get("/face/auth/status").get_json(),
+            {"status": "READY", "failedAttempts": 1, "remainingAttempts": 2},
+        )
 
     def test_failure_and_lockout_responses_contain_no_biometric_material(self) -> None:
         responses = []

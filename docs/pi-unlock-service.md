@@ -27,6 +27,7 @@ sudo apt install alsa-utils
 | `MOCK_HARDWARE` | No | `false` | When `true`, simulate successful unlocks without opening Serial. |
 | `MOCK_AUDIO` | No | `false` | When `true`, explicitly simulate successful audio responses without an asset, player, or speaker. Responses include `mockAudio: true`. |
 | `AUDIO_ALSA_DEVICE` | No | ALSA default | Server-side ALSA playback device passed to `aplay -D`; configure this explicitly on multi-device cabinets. |
+| `FACE_CAMERA_INDEX` | No | `0` | Non-negative server-side OpenCV camera index. It is never accepted from an HTTP request. |
 | `PI_UNLOCK_HOST` | No | `127.0.0.1` | Address on which the HTTP service listens. |
 | `PI_UNLOCK_PORT` | No | `5000` | HTTP service port. |
 
@@ -170,7 +171,9 @@ Start one bounded employee face scan:
 curl -X POST http://localhost:5000/face/authenticate
 ```
 
-The service lazily initializes one `FaceEngine` and reuses its YuNet/SFace runtime for later requests. Recognition retains the engine's schema-v3 templates, default `1.128` SFace L2 threshold, three live samples, all-samples-pass consensus, ambiguous-candidate rejection, and bounded capture retries.
+The service lazily initializes one `FaceEngine` and reuses its YuNet/SFace runtime for later requests. Recognition retains the engine's schema-v3 templates, default `1.128` SFace L2 threshold, three live samples, all-samples-pass consensus, ambiguous-candidate rejection, and bounded capture retries. `FACE_CAMERA_INDEX` selects the camera on the server and defaults to index `0`; request bodies cannot override it.
+
+Every capture validates frame contents before YuNet runs. A usable frame must be a finite numeric, three-channel BGR image at least 32 by 32 pixels. A frame whose maximum channel value is `2` or lower is a dead `BLACK_FRAME`. This conservative maximum-value rule catches the observed all-zero stream while allowing genuinely dark scenes that still contain any pixel detail above that near-zero floor. After an unhealthy open/read/frame result, the service releases the capture, waits 250 ms, reopens it, repeats the bounded 1.5-second/180-read warm-up, and revalidates up to two times. Recovery success continues through the unchanged YuNet/SFace pipeline. Recovery exhaustion is `UNAVAILABLE`, not `NO_FACE`.
 
 Responses are:
 
@@ -195,7 +198,7 @@ A successful match has this shape:
 }
 ```
 
-`NO_MATCH`, `NO_FACE`, and `MULTIPLE_FACES` each count once per completed `POST /face/authenticate`, regardless of the bounded internal capture retries. `BUSY`, `UNAVAILABLE`, malformed/internal errors, and requests that do not complete do not count. A valid `MATCH` resets the accumulated failures. The third counted failure returns:
+`NO_MATCH`, `NO_FACE`, and `MULTIPLE_FACES` each count once per completed `POST /face/authenticate`, regardless of the bounded internal capture retries. Camera open/read failure, invalid or black frames, recovery exhaustion, `BUSY`, `UNAVAILABLE`, malformed/internal errors, and requests that do not complete do not count. In particular, a camera fault after two failures leaves `failedAttempts` at two and does not activate lockout. A valid `MATCH` resets the accumulated failures. The third counted failure returns:
 
 ```json
 {
@@ -215,6 +218,16 @@ curl http://localhost:5000/face/auth/status
 An unlocked response contains `status: "READY"`, `failedAttempts`, and `remainingAttempts`. A locked response contains `status: "LOCKED"` and `retryAfterSeconds`. The frontend checks this endpoint when Employee Mode opens and after its display countdown reaches zero, so navigation or browser refresh cannot bypass an active Pi lockout. The countdown is informational; the Pi remains authoritative.
 
 Lockout state is concurrency-safe but exists only in Pi service process memory. Restarting the service clears it. This is an accepted prototype limitation; nothing is persisted to the backend, browser storage, or biometric template files.
+
+## Camera health
+
+Check the camera without running face detection or returning biometric material:
+
+```bash
+curl http://localhost:5000/camera/status
+```
+
+A healthy capture returns HTTP `200` with `{"status":"READY"}`. A camera that remains unhealthy after bounded recovery returns HTTP `503`, for example `{"status":"UNAVAILABLE","reason":"BLACK_FRAME"}`. Safe reasons are `OPEN_FAILURE`, `READ_FAILURE`, `INVALID_FRAME`, and `BLACK_FRAME`; contention reports `BUSY`, and an unexpected internal status-check failure reports `CAMERA_ERROR`. Responses use `Cache-Control: no-store` and contain no image, crop, detection, landmark, embedding, template, identity, or matching score. The check shares the face-operation mutex and never reads or changes authentication failure/lockout state.
 
 Only one face operation can run at a time. Authentication and registration share the same non-blocking camera mutex. The endpoint never returns embeddings, template contents, images, aligned crops, or landmarks. `employeeCode` is only a recognition result; the backend `/api/v1/employees/auth/face` endpoint must still validate that the employee exists and is active before Restock Mode is authorized.
 

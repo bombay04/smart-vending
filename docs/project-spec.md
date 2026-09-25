@@ -110,6 +110,8 @@ Local face scanning, backend active-employee validation, fail-closed error handl
 
 The three-failure, three-minute employee face-authentication lockout is **implemented**. The Raspberry Pi service is authoritative: each completed `NO_MATCH`, `NO_FACE`, or `MULTIPLE_FACES` HTTP authentication operation counts once, while internal capture retries do not count separately. `BUSY`, `UNAVAILABLE`, malformed/internal errors, and network failures do not count. A valid `MATCH` resets prior failures.
 
+Camera input health is validated before face detection. Empty/invalid frames and near-zero frames with no channel value above `2` trigger a bounded release, delay, reopen, warm-up, and revalidation sequence (two recoveries, three opens maximum). Exhaustion returns HTTP `503 UNAVAILABLE` and never counts toward lockout, including when two failures are already recorded. `GET /camera/status` runs the same non-biometric camera check and returns only operational state/reason. The Pi camera index is server-configurable with `FACE_CAMERA_INDEX` and cannot be supplied by a client request.
+
 The third counted failure starts a 180-second lockout immediately. While locked, the Pi returns HTTP `423` with `status: "LOCKED"` and a positive `retryAfterSeconds` without opening the camera or running face recognition. Lockout state uses a monotonic clock and concurrency-safe process memory. It therefore survives frontend navigation and browser refresh but resets if the Pi service process restarts; persistent or distributed rate limiting is outside the prototype scope.
 
 ## Face recognition and biometric privacy
