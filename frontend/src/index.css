@@ -14,17 +14,47 @@
 html {
   min-width: 320px;
   min-height: 100%;
+  overscroll-behavior: none;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
+  overscroll-behavior: none;
+}
+
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+img {
+  -webkit-user-drag: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 button,
 input {
   font: inherit;
+}
+
+button,
+[role="button"] {
+  touch-action: manipulation;
 }
 
 button:focus-visible {

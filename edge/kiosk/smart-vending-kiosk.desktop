@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Smart Vending Kiosk
+Comment=Start the customer touchscreen in Chromium kiosk mode
+Exec=/bin/sh -lc "$HOME/.local/bin/smart-vending-kiosk"
+Terminal=false
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

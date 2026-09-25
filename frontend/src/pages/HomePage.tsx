@@ -304,7 +304,10 @@ function HomePage() {
     const payment = "payment" in paymentScreen ? paymentScreen.payment : null;
     return (
       <main className="home-page payment-page">
-        <section className="payment-card" aria-live="polite">
+        <section
+          className={`payment-card payment-card--${paymentScreen.phase}`}
+          aria-live="polite"
+        >
           <p className="mode-label">PromptPay</p>
           {paymentScreen.phase === "creating" && (
             <>
