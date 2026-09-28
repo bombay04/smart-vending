@@ -14,11 +14,11 @@ The project is a Smart Vending Machine prototype for an internship demonstration
 
 The physical machine is one vending cabinet with three transparent, stacked acrylic compartments. Each compartment is a slot with a front lid monitored by a magnetic reed sensor.
 
-| Slot | Product |
-| --- | --- |
-| 1 | Tissue |
-| 2 | Sanitary Pad |
-| 3 | Wet Wipes |
+| Slot | Product      |
+| ---- | ------------ |
+| 1    | Tissue       |
+| 2    | Sanitary Pad |
+| 3    | Wet Wipes    |
 
 ## Non-negotiable business rules
 
@@ -30,6 +30,8 @@ The physical machine is one vending cabinet with three transparent, stacked acry
 6. Restock Mode is available only after local face matching and authoritative backend validation of an active employee.
 7. Employee authentication fails closed for every unsuccessful, unavailable, malformed, or uncertain outcome.
 8. Biometric data remains local to the Raspberry Pi. The backend and frontend must never receive biometric embeddings.
+9. Customer Home is customer-only: it exposes no staff navigation, gesture, shortcut, or local employee selector.
+10. Restock and face registration require a short-lived backend-authorized kiosk session started remotely from `/staff`.
 
 ## System architecture and responsibilities
 
@@ -43,20 +45,20 @@ The Raspberry Pi hosts the touchscreen Chromium browser, USB webcam, speaker/aud
 
 ### Backend
 
-The backend uses Node.js, TypeScript, Express, PostgreSQL, and Prisma. It provides the REST API and owns authoritative business data, including inventory, employees, transactions, and restock logs. Real Omise/Opn payment integration and LINE notification integration belong here or behind backend-controlled integrations.
+The backend uses Node.js, TypeScript, Express, PostgreSQL, and Prisma. It provides the REST API and owns authoritative business data, including inventory, employees, transactions, restock logs, and temporary kiosk sessions. Real Omise/Opn payment integration and LINE notification integration belong here or behind backend-controlled integrations.
 
 ### Frontend
 
-The touchscreen UI uses React, Vite, and TypeScript and runs in Chromium on the Raspberry Pi.
+The touchscreen UI uses React, Vite, and TypeScript and runs in Chromium on the Raspberry Pi. Its normal `/` surface is customer-only. The separate responsive `/staff` portal supports phones, tablets, and PCs and remotely initiates staff workflows.
 
 ## Communication boundaries
 
-| Link | Protocol and purpose |
-| --- | --- |
-| Frontend ↔ Backend | HTTP for products, inventory, employee validation, payment/sale, and restock business operations |
+| Link                        | Protocol and purpose                                                                                             |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Frontend ↔ Backend          | HTTP for products, inventory, employee validation, payment/sale, and restock business operations                 |
 | Frontend ↔ Pi local service | HTTP for hardware-local operations such as face scanning, slot status, unlock requests, and local audio feedback |
-| Pi ↔ Backend | HTTP where Pi-originated backend communication is required |
-| Pi ↔ ESP32 | USB serial at 115200 baud, UTF-8, LF-terminated messages |
+| Pi ↔ Backend                | HTTP where Pi-originated backend communication is required                                                       |
+| Pi ↔ ESP32                  | USB serial at 115200 baud, UTF-8, LF-terminated messages                                                         |
 
 The complete serial interface control document is [serial-protocol.md](serial-protocol.md).
 
@@ -94,9 +96,11 @@ The two-state inventory model, sold-out selection guard, provider-confirmed sale
 
 ## Employee authentication flow
 
-The required employee flow is:
+Customer Home has no employee button, face-registration link, keyboard shortcut, hidden gesture, or secret touch sequence. The required employee flow is:
 
-`Home → Employee Mode → face authentication on Pi → backend validates matched employee exists and is active → Restock Mode`
+`Staff Portal -> ACTIVE RESTOCK_AUTH session -> idle Pi kiosk -> Pi-local face authentication -> backend validates the session and matched active employee -> Restock Mode`
+
+The kiosk polls `GET /api/v1/kiosk-sessions/current` every 1.5 seconds with non-overlapping requests. It accepts a session only while safely idle at Customer Home. Payment creation, QR waiting, reconciliation, unlock, failure, and Thank You screens are never interrupted; the session is considered only after the customer flow returns to idle.
 
 The Pi returns `employeeCode` only after a successful local biometric match. That result alone does not authorize Restock Mode. The backend remains authoritative for employee existence and active status.
 
@@ -104,7 +108,17 @@ Authentication must fail closed. None of the following may grant access: `NO_MAT
 
 Employee authentication state must remain in application memory and must not be persisted in `localStorage` or `sessionStorage`. It must be cleared when the employee cancels or exits, when restock completes successfully, and whenever the application returns to the customer flow.
 
-Local face scanning, backend active-employee validation, fail-closed error handling, and memory-only frontend authentication are **implemented**. The target behavior is to clear authentication immediately once a successful restock is committed. The current UI instead retains the authenticated employee in memory during the approximately 3.5-second success screen and clears it when returning to Customer Home. This is a known implementation discrepancy; no application change is made by this specification.
+Local face scanning, backend active-employee validation, session validation, fail-closed error handling, duplicate-poll suppression, and memory-only frontend authentication are **implemented**. An expired, cancelled, completed, missing, wrong-type, or wrong-machine session cannot authorize Restock Mode or a restock commit.
+
+### Temporary kiosk sessions
+
+The PostgreSQL `KioskSession` model records `machineId`, type (`RESTOCK_AUTH` or `FACE_REGISTRATION`), status (`ACTIVE`, `COMPLETED`, `EXPIRED`, or `CANCELLED`), optional `employeeId`, creation/expiry/completion timestamps, and the bound employee relation. The pilot uses `PILOT_KIOSK` by default (configurable with `KIOSK_MACHINE_ID`) and a five-minute expiry. A PostgreSQL partial unique index and serializable creation transaction allow only one `ACTIVE` session for that machine. Elapsed rows are marked `EXPIRED` before reads and new creation.
+
+The REST API exposes current, start-restock, start-face-registration, complete, and cancel operations. Clients cannot submit a session type or arbitrary status transition. Completion is idempotent for an already completed session; invalid cross-state transitions fail with conflict. Network failure fails closed for staff entry and does not affect customer purchasing or delete Pi-local templates.
+
+The `/staff` route currently has **no real authentication or authorization middleware**. Hiding or knowing the route is not security. This is a documented single-machine pilot limitation: the session routes isolate the mutation boundary for future staff-auth middleware, but the portal is not production-secure and this task does not invent a large RBAC system.
+
+For phone/tablet/PC access, build the frontend with `VITE_API_BASE_URL` pointing to the reachable backend and configure the backend comma-separated `CORS_ALLOWED_ORIGINS` with each trusted portal origin. The default CORS origin remains `http://localhost:5173` for local development.
 
 ### Face-authentication lockout
 
@@ -148,24 +162,17 @@ The YuNet/SFace pipeline, sampling and comparison rules, schema-v3 storage, loca
 
 ### Employee face registration
 
-Task 37 uses two deliberately separate prototype surfaces:
+`/staff` lists backend employee records and creates an employee from a name only. Creation allocates a sequential `EMP###` code, marks the record active, initializes `faceRegistered: false`, and does not start enrollment. For an active unregistered employee, **Start Face Registration** creates an employee-bound `FACE_REGISTRATION` session and displays its waiting state, identity, status, expiry, and Cancel action.
 
-- `/staff` is the cloud employee-management portal. It lists backend employee records and creates an employee from a name only. The backend allocates sequential `EMP###` codes, marks new employees active, and initializes `faceRegistered: false`. This portal never calls the Pi service and has no camera or face-scan action.
-- `/admin/face-registration` is the vending-machine-local face-setup UI. It combines cloud employee metadata with Pi-local template existence, blocks inactive employees, revalidates active status, and enrolls through the Pi camera.
+The authorized enrollment flow is:
 
-The local enrollment flow is:
+`Staff Portal -> employee-bound ACTIVE FACE_REGISTRATION session -> idle Pi kiosk -> verify the same live session -> capture five samples -> save schema-v3 template locally -> update faceRegistered and complete the session -> Customer Home`
 
-`Direct navigation to /admin/face-registration → load backend employee list → combine it with Pi-local registered/unregistered status → select employee → backend revalidates active status → ready state → Pi captures five valid samples → schema-v3 template saved locally → frontend reports non-biometric completion metadata to backend`
+The former direct `/admin/face-registration` entry and kiosk-side employee directory/selector are removed. Direct navigation falls through to Customer Home and cannot enroll anyone. Employee identity comes only from the session response; the Pi UI never lets a kiosk user choose or submit an arbitrary employee.
 
-Neither route is linked or otherwise exposed from Customer Home, and local face setup returns to Customer Home. Production staff/admin authentication and authorization remain out of scope; route separation is an interface boundary, not an access-control mechanism.
+The Pi alone remains authoritative for actual template existence. `POST /face/registration/status` returns only normalized codes and registration-existence booleans. After `REGISTERED`, `POST /api/v1/employees/face-registration/complete` accepts only `{ "sessionId": number }`; the backend derives the employee from a matching active unexpired `FACE_REGISTRATION` session, verifies that employee is active, updates only `faceRegistered`, and completes the session transactionally.
 
-The backend is authoritative for employee identity and active status. `POST /api/v1/employees` accepts exactly `{ "name": string }`; clients cannot supply an employee code, active flag, registration flag, or biometric field. Code allocation runs in a serializable transaction and retries uniqueness/serialization conflicts. `GET /api/v1/employees/face-registration` returns only `id`, `employeeCode`, `name`, `isActive`, and `faceRegistered`. `POST /api/v1/employees/face-registration/validate` remains the final active-employee check before capture and returns only `id`, `name`, and normalized `employeeCode`; unknown and inactive employees fail closed. Inactive employees remain visible but cannot be selected for enrollment.
-
-The Pi alone is authoritative for actual template existence. `POST /face/registration/status` accepts a bounded list of employee codes and returns only normalized codes with `registered: true|false`. The backend `faceRegistered` Boolean is non-biometric, last-reported workflow metadata for the cloud staff portal; it is not proof that a usable template exists on a particular Pi. The local UI joins both values, so a Pi template with stale backend metadata becomes `Status Sync Required`, while backend metadata without a local template becomes `Local Setup Required`. If Pi status is unavailable, the list remains usable with an explicit unknown state; the non-overwriting registration endpoint remains the final protection.
-
-After the Pi returns `REGISTERED`, the frontend calls `POST /api/v1/employees/face-registration/complete` with exactly `{ "employeeCode": string }`. The backend again requires an existing active employee and updates only `faceRegistered`. It rejects extra fields, including any biometric payload. If this metadata call fails after local enrollment, the template remains on the Pi and the UI offers sync-only recovery. A retry does not recapture or overwrite the template; `ALREADY_REGISTERED` also routes a stale record to the same sync-only state.
-
-The frontend visibly separates employee-list loading, empty list, backend unavailable, Pi-status unavailable, validation, ready, capture, metadata sync, sync failure, success, `NO_FACE`, `MULTIPLE_FACES`, `ALREADY_REGISTERED`, camera `BUSY`, and Pi unavailable states.
+If local capture succeeds but the backend request or response fails, the template remains on the Pi and the UI offers sync-only recovery. A retry does not recapture or overwrite the template; `ALREADY_REGISTERED` enters the same reconciliation path.
 
 The Pi is authoritative for biometric enrollment and calls the same Task 34 `FaceEngine`, YuNet detector, SFace embedder, validation rules, five-sample default, and schema-v3 `TemplateStore`. It does not invoke a subprocess or create a second enrollment pipeline. An existing template returns explicit `ALREADY_REGISTERED` and is never silently overwritten; replacement and re-enrollment are out of scope.
 
@@ -173,7 +180,7 @@ Registration and authentication share one camera mutex, so simultaneous operatio
 
 Only normalized employee codes and registration-existence booleans cross the Pi registration HTTP boundary. The backend stores only the non-biometric Boolean `faceRegistered`; it never receives evidence, embeddings, measurements, paths, or template contents. Frames, detections, aligned crops, landmarks, embeddings, template paths, model data, and template contents are neither returned nor sent to the backend/frontend; original captures are not persisted. Runtime templates remain under Git-ignored `edge/face/data/` storage.
 
-Task 37 is a prototype staff/admin flow, not a production HR system or enrollment station: it has no separate staff/admin authorization, employee edit/deactivate/delete UI, liveness/anti-spoofing, multi-Pi metadata reconciliation, or replacement workflow, and no server-side cancellation of a capture already started when the browser leaves. Backend validation, Pi capture, and completion metadata are sequential frontend-orchestrated calls, so an employee status change between those calls is not transactionally locked. Automated tests cover the flow; real Raspberry Pi camera validation has not been recorded for this task.
+This remains a prototype enrollment station: it has no liveness/anti-spoofing, multi-Pi metadata reconciliation, replacement workflow, or server-side cancellation of a camera operation already in progress. Automated tests cover the authorization and reconciliation flow; real Raspberry Pi camera validation has not been recorded for this task.
 
 ## Restock flow
 
@@ -189,9 +196,9 @@ An `OPEN` reading resets that slot's stable-closed timer. An `EMPTY` reading mak
 
 When all three slots are ready, the required completion flow is:
 
-`employee confirms restock → create RestockLog → set all three inventory slots AVAILABLE → send LINE restock notification → clear employee authentication → return to customer flow`
+`employee confirms restock -> validate ACTIVE RESTOCK_AUTH session -> create RestockLog -> set all three inventory slots AVAILABLE -> complete session -> send LINE restock notification -> clear employee authentication -> return to customer flow`
 
-Three-slot sensor readiness, the two-second stable-closed rule, readiness clearing on hardware failure, confirmation gating, `RestockLog` creation, and the all-slot `AVAILABLE` transition are **implemented** in the current frontend/backend flow. The current endpoint remains named and described as a mock restock endpoint, and the backend trusts the frontend's readiness gate rather than independently receiving sensor proof. LINE notification is **required/pending**.
+Three-slot sensor readiness, the two-second stable-closed rule, readiness clearing on hardware failure, confirmation gating, session authorization, transactional `RestockLog`/inventory/session completion, the all-slot `AVAILABLE` transition, best-effort LINE notification, and best-effort `RESTOCK_COMPLETE` audio are **implemented**. The endpoint remains mock-named, and the backend trusts the frontend's hardware-readiness gate rather than independently receiving sensor proof.
 
 ## Unlock and hardware status behavior
 
@@ -243,30 +250,33 @@ The following are out of scope for Phase 1:
 
 ## Implementation summary
 
-| Capability | Status |
-| --- | --- |
-| Three-slot product mapping and two-state inventory | Implemented |
-| ESP32 lock outputs and IR/reed sensor behavior | Completed/externally hardware-validated; tracked evidence unavailable |
-| Provider-confirmed successful-sale transition and sold-out selection guard | Implemented (automated tests; real provider E2E pending) |
-| Pi-local unlock request after backend-confirmed payment | Implemented |
-| Real Omise/Opn PromptPay QR creation, polling, and webhook reconciliation | Implemented (automated tests; real provider E2E pending) |
-| Local YuNet/SFace recognition and Pi face-auth HTTP endpoint | Implemented |
-| Cloud employee management plus active-employee local face registration | Implemented (automated tests; physical Task 37 validation not recorded) |
-| Backend validation of matched active employee | Implemented |
-| Fail-closed employee-auth outcomes | Implemented |
-| Three-slot restock readiness and stable-closed gating | Implemented |
-| Restock log and all-slot inventory reset | Implemented through mock-named endpoint |
-| Three-failure, three-minute face-auth lockout | Implemented |
-| LINE notification after sale | Required/pending |
-| LINE notification after restock | Required/pending |
-| Raspberry Pi audio/voice | Implemented architecture/tests; real WAV assets and physical speaker validation pending |
-| PCB-noise mitigation and hardware regression | Completed/externally hardware-validated; tracked evidence unavailable |
+| Capability                                                                 | Status                                                                                  |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Three-slot product mapping and two-state inventory                         | Implemented                                                                             |
+| ESP32 lock outputs and IR/reed sensor behavior                             | Completed/externally hardware-validated; tracked evidence unavailable                   |
+| Provider-confirmed successful-sale transition and sold-out selection guard | Implemented (automated tests; real provider E2E pending)                                |
+| Pi-local unlock request after backend-confirmed payment                    | Implemented                                                                             |
+| Real Omise/Opn PromptPay QR creation, polling, and webhook reconciliation  | Implemented (automated tests; real provider E2E pending)                                |
+| Local YuNet/SFace recognition and Pi face-auth HTTP endpoint               | Implemented                                                                             |
+| Customer-only kiosk plus remote temporary staff sessions                   | Implemented                                                                             |
+| Responsive staff portal remote restock/registration initiation             | Implemented; no portal authentication yet                                               |
+| Cloud employee management plus session-bound local face registration       | Implemented (automated tests; physical validation not recorded)                         |
+| Backend validation of matched active employee                              | Implemented                                                                             |
+| Fail-closed employee-auth outcomes                                         | Implemented                                                                             |
+| Three-slot restock readiness and stable-closed gating                      | Implemented                                                                             |
+| Restock log and all-slot inventory reset                                   | Implemented through mock-named endpoint                                                 |
+| Three-failure, three-minute face-auth lockout                              | Implemented                                                                             |
+| LINE notification after sale                                               | Required/pending                                                                        |
+| LINE notification after restock                                            | Required/pending                                                                        |
+| Raspberry Pi audio/voice                                                   | Implemented architecture/tests; real WAV assets and physical speaker validation pending |
+| PCB-noise mitigation and hardware regression                               | Completed/externally hardware-validated; tracked evidence unavailable                   |
 
 ## Known technical debt and implementation discrepancies
 
 1. **Legacy backend biometric field:** `backend/prisma/schema.prisma` still defines an optional `Employee.faceEmbedding` JSON field. The current architecture must neither use nor populate it; new employee creation leaves it `NULL`, API selects omit it, and biometric templates and embeddings remain exclusively local to the Pi. Removing it is deferred to a separate schema/migration task. The separate `faceRegistered` Boolean is privacy-safe workflow metadata and is not biometric template authority.
 2. **Stale threshold documentation:** [pi-face-recognition.md](pi-face-recognition.md) still describes `1.128` only as an upstream reference that is uncalibrated for this project. Task 34 later validated it for the limited prototype dataset described above. The technical document is stale; the Task 34 result is not a business-rule conflict.
 3. **Delayed authentication clearing:** after a successful restock is committed, the current frontend retains the authenticated employee in memory during the approximately 3.5-second success screen. It clears authentication when returning to Customer Home, while the target behavior is immediate clearing at successful commit.
+4. **Staff Portal authentication:** `/staff` and its session mutation endpoints have no real authentication/authorization middleware in the current pilot. Route separation is not an access-control system; production deployment requires staff identity and authorization to be added at this isolated API boundary.
 
 ## Technical references
 

@@ -19,6 +19,7 @@ interface ValidatedSlotStatus extends HardwareSlotStatus {
 }
 
 interface RestockModeProps {
+  sessionId: number;
   authenticatedEmployee: AuthenticatedEmployee;
   onExit: () => void;
   onRestockSuccess: (restock: MockRestockResult) => void;
@@ -46,7 +47,8 @@ function validateSlots(
       return { ...slot, validationState: "NOT_READY" };
     }
 
-    const hasStableClosedDoor = currentTime - closedSince >= STABLE_CLOSED_DURATION_MS;
+    const hasStableClosedDoor =
+      currentTime - closedSince >= STABLE_CLOSED_DURATION_MS;
 
     return {
       ...slot,
@@ -55,7 +57,12 @@ function validateSlots(
   });
 }
 
-function RestockMode({ authenticatedEmployee, onExit, onRestockSuccess }: RestockModeProps) {
+function RestockMode({
+  sessionId,
+  authenticatedEmployee,
+  onExit,
+  onRestockSuccess,
+}: RestockModeProps) {
   const [slots, setSlots] = useState<ValidatedSlotStatus[] | null>(null);
   const [isUnavailable, setIsUnavailable] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -83,7 +90,9 @@ function RestockMode({ authenticatedEmployee, onExit, onRestockSuccess }: Restoc
         const response = await fetchHardwareStatus(activeRequest.signal);
 
         if (isActive) {
-          setSlots(validateSlots(response.slots, closedSinceBySlot, Date.now()));
+          setSlots(
+            validateSlots(response.slots, closedSinceBySlot, Date.now()),
+          );
           setIsUnavailable(false);
         }
       } catch {
@@ -97,7 +106,10 @@ function RestockMode({ authenticatedEmployee, onExit, onRestockSuccess }: Restoc
         activeRequest = null;
 
         if (isActive) {
-          pollingTimeoutId = window.setTimeout(pollHardwareStatus, POLLING_INTERVAL_MS);
+          pollingTimeoutId = window.setTimeout(
+            pollHardwareStatus,
+            POLLING_INTERVAL_MS,
+          );
         }
       }
     }
@@ -140,12 +152,14 @@ function RestockMode({ authenticatedEmployee, onExit, onRestockSuccess }: Restoc
 
     try {
       restock = await commitRestockAndNotify(authenticatedEmployee.id, {
-        commitRestock: createMockRestock,
+        commitRestock: (employeeId) => createMockRestock(sessionId, employeeId),
         playAudio: playAudioFeedback,
       });
     } catch (error: unknown) {
       setRestockError(
-        error instanceof Error ? error.message : "Failed to confirm restock. Please try again.",
+        error instanceof Error
+          ? error.message
+          : "Failed to confirm restock. Please try again.",
       );
       submissionInProgressRef.current = false;
       setIsSubmitting(false);
@@ -159,14 +173,22 @@ function RestockMode({ authenticatedEmployee, onExit, onRestockSuccess }: Restoc
   if (isSuccessful) {
     return (
       <main className="home-page home-page--success restock-page">
-        <section className="purchase-success restock-success" role="status" aria-live="polite">
+        <section
+          className="purchase-success restock-success"
+          role="status"
+          aria-live="polite"
+        >
           <div className="purchase-success__icon" aria-hidden="true">
             {"\u2713"}
           </div>
           <p className="mode-label mode-label--employee">Employee Mode</p>
           <h1>Restock Successful</h1>
-          <p className="restock-success__inventory">Inventory has been restored.</p>
-          <p className="purchase-success__return">Returning to Customer Mode...</p>
+          <p className="restock-success__inventory">
+            Inventory has been restored.
+          </p>
+          <p className="purchase-success__return">
+            Returning to Customer Mode...
+          </p>
         </section>
       </main>
     );
@@ -180,8 +202,9 @@ function RestockMode({ authenticatedEmployee, onExit, onRestockSuccess }: Restoc
             <p className="mode-label mode-label--employee">Employee Mode</p>
             <h1>Restock Mode</h1>
             <p className="instruction">
-              Signed in as {authenticatedEmployee.name} ({authenticatedEmployee.employeeCode}) ·
-              Current physical slot and door status
+              Signed in as {authenticatedEmployee.name} (
+              {authenticatedEmployee.employeeCode}) · Current physical slot and
+              door status
             </p>
           </div>
           <button
@@ -201,12 +224,18 @@ function RestockMode({ authenticatedEmployee, onExit, onRestockSuccess }: Restoc
         {isUnavailable && (
           <section className="hardware-unavailable" role="status">
             <h2>Hardware status unavailable</h2>
-            <p>Check the Pi hardware service and ESP32 connection. Retrying automatically...</p>
+            <p>
+              Check the Pi hardware service and ESP32 connection. Retrying
+              automatically...
+            </p>
           </section>
         )}
 
         {slots !== null && !isUnavailable && (
-          <section className="hardware-grid" aria-label="Physical vending slot status">
+          <section
+            className="hardware-grid"
+            aria-label="Physical vending slot status"
+          >
             {slots.map((slot) => (
               <article className="hardware-card" key={slot.slotNumber}>
                 <div className="hardware-card__header">

@@ -8,6 +8,7 @@ import {
   createEmployee,
   parseCreateEmployeeRequest,
 } from "../services/employee-management.service";
+import { requireActiveKioskSession } from "../services/kiosk-session.service";
 
 async function authenticateEmployeeRequest(
   request: Request,
@@ -24,9 +25,22 @@ async function authenticateEmployeeRequest(
   }
 }
 
-export const faceAuthenticateEmployee = authenticateEmployeeRequest;
 export const mockAuthenticateEmployee = authenticateEmployeeRequest;
 export const validateEmployeeForFaceRegistration = authenticateEmployeeRequest;
+
+export async function faceAuthenticateEmployeeForSession(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    await requireActiveKioskSession(request.body?.sessionId, "RESTOCK_AUTH");
+    const employee = await authenticateEmployee(request.body?.employeeCode);
+    response.status(200).json({ employee });
+  } catch (error: unknown) {
+    next(error);
+  }
+}
 
 export async function getEmployeesForFaceRegistration(
   _request: Request,

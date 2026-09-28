@@ -73,12 +73,12 @@ test("employee creation rejects code and biometric fields", () => {
   }
 });
 
-test("registration completion accepts only an employee code", () => {
-  assert.equal(parseFaceRegistrationCompleteRequest({ employeeCode: " emp002 " }), "EMP002");
+test("registration completion accepts only a session id", () => {
+  assert.equal(parseFaceRegistrationCompleteRequest({ sessionId: 12 }), 12);
   for (const body of [
-    { employeeCode: "EMP002", embedding: [0.1] },
-    { employeeCode: "EMP002", faceEmbedding: [0.1] },
-    { employeeCode: "EMP002", template: {} },
+    { employeeCode: "EMP002" },
+    { sessionId: 12, faceEmbedding: [0.1] },
+    { sessionId: "12" },
   ]) {
     assert.throws(
       () => parseFaceRegistrationCompleteRequest(body),
@@ -90,24 +90,24 @@ test("registration completion accepts only an employee code", () => {
 test("registration completion marks an active employee using safe metadata", async () => {
   let lookedUpCode: string | undefined;
   const employee = await completeFaceRegistrationWithUpdate(
-    { employeeCode: " emp002 " },
-    async (employeeCode) => {
-      lookedUpCode = employeeCode;
+    { sessionId: 12 },
+    async (sessionId) => {
+      lookedUpCode = String(sessionId);
       return newEmployee;
     },
   );
-  assert.equal(lookedUpCode, "EMP002");
+  assert.equal(lookedUpCode, "12");
   assert.equal(employee.faceRegistered, true);
   assert.equal("faceEmbedding" in employee, false);
 });
 
 test("registration completion rejects unknown and inactive employees", async () => {
   await assert.rejects(
-    completeFaceRegistrationWithUpdate({ employeeCode: "EMP404" }, async () => null),
+    completeFaceRegistrationWithUpdate({ sessionId: 12 }, async () => null),
     (error: unknown) => error instanceof HttpError && error.statusCode === 401,
   );
   await assert.rejects(
-    completeFaceRegistrationWithUpdate({ employeeCode: "EMP002" }, async () => ({
+    completeFaceRegistrationWithUpdate({ sessionId: 12 }, async () => ({
       ...newEmployee,
       isActive: false,
     })),

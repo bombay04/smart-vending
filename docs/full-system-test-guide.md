@@ -98,7 +98,7 @@ Seed จะตั้ง Slot 1–3 เป็น `AVAILABLE` และเชื�
 ```bash
 curl -X POST http://localhost:3000/api/v1/restocks/mock \
   -H "Content-Type: application/json" \
-  -d '{"employeeId":1}'
+  -d '{"sessionId":1,"employeeId":1}'
 ```
 
 > Restock API ใช้ได้เมื่อมี Employee ID `1` และ Employee ยัง active เท่านั้น แต่ seed ปัจจุบันไม่ได้สร้าง Employee หากได้รับ `Employee not found.` ให้ใช้ `npm run seed` สำหรับ reset demo แทน
@@ -301,7 +301,7 @@ curl http://localhost:5000/health
 Expected:
 
 ```json
-{"hardware":"connected","mockHardware":false,"status":"ok"}
+{ "hardware": "connected", "mockHardware": false, "status": "ok" }
 ```
 
 ### 6.2 ทดสอบ Unlock
@@ -417,6 +417,18 @@ VITE_PI_UNLOCK_BASE_URL=http://localhost:5000
 
 > `.env` เป็นไฟล์เฉพาะเครื่องและไม่ควร commit หลังแก้ `.env` ต้อง restart Vite ทุกครั้ง
 
+ถ้าเปิด Staff Portal จากโทรศัพท์/แท็บเล็ต/PC ผ่าน URL ของ Pi เช่น
+`http://<PI_IP>:5173/staff` ให้เพิ่ม origin ของ Frontend แบบ exact match ใน
+`backend/.env` บนเครื่อง Backend ด้วย รายการคั่นด้วย comma และต้องระบุ scheme,
+host และ port ครบ:
+
+```dotenv
+CORS_ALLOWED_ORIGINS=http://localhost:5173,http://<PI_IP>:5173
+```
+
+ห้ามใช้ wildcard `*` และห้าม commit `backend/.env` หลังแก้ค่า จากนั้น restart
+Backend เพื่อโหลดค่าใหม่
+
 ## 10. เปิด Frontend บน Pi
 
 Pi Terminal 3:
@@ -499,7 +511,7 @@ npm run seed
 ```bash
 curl -X POST http://localhost:3000/api/v1/restocks/mock \
   -H "Content-Type: application/json" \
-  -d '{"employeeId":1}'
+  -d '{"sessionId":1,"employeeId":1}'
 ```
 
 จากนั้น refresh หน้า Customer Frontend และตรวจว่า Slot 1–3 เป็น `AVAILABLE`

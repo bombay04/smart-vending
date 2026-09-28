@@ -5,6 +5,7 @@
 
 generator client {
   provider = "prisma-client-js"
+  output   = "../generated/prisma-client"
 }
 
 datasource db {
@@ -25,6 +26,18 @@ enum PaymentStatus {
 
 enum PaymentProvider {
   OPN
+}
+
+enum KioskSessionType {
+  RESTOCK_AUTH
+  FACE_REGISTRATION
+}
+
+enum KioskSessionStatus {
+  ACTIVE
+  COMPLETED
+  EXPIRED
+  CANCELLED
 }
 
 model Product {
@@ -74,15 +87,31 @@ model Transaction {
 }
 
 model Employee {
-  id             Int          @id @default(autoincrement())
+  id             Int            @id @default(autoincrement())
   name           String
-  employeeCode   String       @unique
+  employeeCode   String         @unique
   faceEmbedding  Json?
-  faceRegistered Boolean      @default(false)
-  isActive       Boolean      @default(true)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  faceRegistered Boolean        @default(false)
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
   restockLogs    RestockLog[]
+  kioskSessions  KioskSession[]
+}
+
+model KioskSession {
+  id          Int                @id @default(autoincrement())
+  machineId   String
+  type        KioskSessionType
+  status      KioskSessionStatus @default(ACTIVE)
+  employeeId  Int?
+  createdAt   DateTime           @default(now())
+  expiresAt   DateTime
+  completedAt DateTime?
+  employee    Employee?          @relation(fields: [employeeId], references: [id])
+
+  @@index([machineId, status, expiresAt])
+  @@index([employeeId])
 }
 
 model RestockLog {
