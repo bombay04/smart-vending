@@ -42,7 +42,7 @@ test("short landscape layout covers each Pi-facing surface", async () => {
   const appCss = await frontendSource("src/App.css");
 
   assert.match(appCss, /@media \(min-width: 901px\) and \(max-height: 700px\)/);
-  assert.match(appCss, /\.home-page:not\(\.staff-portal-page\)/);
+  assert.match(appCss, /\.home-page:not\(\.remote-portal-page\)/);
   for (const selector of [
     ".slot-grid",
     ".payment-card",

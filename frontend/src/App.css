@@ -649,7 +649,7 @@
   background: #fef3c7;
 }
 
-.staff-portal-page {
+.remote-portal-page {
   background:
     radial-gradient(
       circle at top left,
@@ -657,6 +657,16 @@
       transparent 34rem
     ),
     #f4f7fb;
+}
+
+.admin-portal-page {
+  background:
+    radial-gradient(
+      circle at top right,
+      rgba(124, 58, 237, 0.12),
+      transparent 34rem
+    ),
+    #f6f4fb;
 }
 
 .staff-portal-container {
@@ -835,6 +845,19 @@
   border-radius: 16px;
   color: #1e3a8a;
   background: #eff6ff;
+}
+
+.staff-busy-session {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid #fcd34d;
+  border-radius: 16px;
+  color: #78350f;
+  background: #fffbeb;
+}
+
+.staff-busy-session p {
+  margin: 6px 0 0;
 }
 
 .staff-active-session p {
@@ -1218,6 +1241,12 @@
   .hardware-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .staff-employee-row {
+    grid-template-columns: 0.75fr 1.15fr 0.75fr 1fr 1.25fr;
+    gap: 10px;
+    padding: 14px 12px;
+  }
 }
 
 @media (max-width: 620px) {
@@ -1289,7 +1318,7 @@
 
 /* Raspberry Pi 7-inch display: compose every local workflow inside 1024x600. */
 @media (min-width: 901px) and (max-height: 700px) {
-  .home-page:not(.staff-portal-page) {
+  .home-page:not(.remote-portal-page) {
     width: 100%;
     height: 100vh;
     height: 100dvh;
@@ -1298,7 +1327,7 @@
     overflow: hidden;
   }
 
-  .home-page:not(.staff-portal-page) .customer-container {
+  .home-page:not(.remote-portal-page) .customer-container {
     display: flex;
     height: 100%;
     min-height: 0;

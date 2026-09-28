@@ -122,7 +122,7 @@ curl -X POST http://localhost:3000/api/v1/kiosk-sessions/1/cancel \
   -H "Content-Type: application/json" -d '{}'
 ```
 
-Sessions expire after about five minutes. The `/staff` pilot route and these mutation endpoints do not yet have real staff authentication/authorization and must not be described as production-secure.
+Sessions expire after about five minutes. The `/staff` and `/admin` pilot routes and these mutation endpoints do not yet have real authentication/authorization and must not be described as production-secure. Their current separation is workflow/UI separation, not access control.
 
 ## Mock restock
 

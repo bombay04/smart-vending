@@ -1,67 +1,23 @@
-import {
-  type FormEvent,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
-import {
-  createEmployee,
-  fetchEmployeesForFaceRegistration,
-} from "../api/employee-auth";
+import { useEffect, useState } from "react";
 import {
   cancelKioskSession,
   fetchCurrentKioskSession,
-  startFaceRegistrationSession,
   startRestockSession,
   type KioskSession,
 } from "../api/kiosk-session";
-import type { RegistrationEmployee } from "../types/employee";
+import { getPortalSessionState } from "../portal-session-state.mjs";
 
 interface StaffPortalProps {
   onBack: () => void;
 }
 
-const sortEmployees = (employees: RegistrationEmployee[]) =>
-  [...employees].sort((a, b) => a.employeeCode.localeCompare(b.employeeCode));
-
 function StaffPortal({ onBack }: StaffPortalProps) {
-  const [employees, setEmployees] = useState<RegistrationEmployee[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
-  const [name, setName] = useState("");
-  const [isCreating, setIsCreating] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [session, setSession] = useState<KioskSession | null>(null);
+  const [sessionLoaded, setSessionLoaded] = useState(false);
   const [sessionBusy, setSessionBusy] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
-  const requestRef = useRef<AbortController | null>(null);
-
-  const loadEmployees = useCallback(async () => {
-    const controller = new AbortController();
-    requestRef.current?.abort();
-    requestRef.current = controller;
-    setIsLoading(true);
-    setLoadError(false);
-    try {
-      setEmployees(
-        sortEmployees(
-          await fetchEmployeesForFaceRegistration(controller.signal),
-        ),
-      );
-    } catch {
-      if (!controller.signal.aborted) setLoadError(true);
-    } finally {
-      if (!controller.signal.aborted) setIsLoading(false);
-      if (requestRef.current === controller) requestRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadEmployees();
-    return () => requestRef.current?.abort();
-  }, [loadEmployees]);
 
   useEffect(() => {
     let stopped = false;
@@ -73,10 +29,14 @@ function StaffPortal({ onBack }: StaffPortalProps) {
         const current = await fetchCurrentKioskSession(controller.signal);
         if (!stopped) {
           setSession(current);
+          setSessionLoaded(true);
           setSessionError(null);
         }
       } catch {
-        if (!stopped) setSessionError("Kiosk session status is unavailable.");
+        if (!stopped) {
+          setSessionLoaded(true);
+          setSessionError("Kiosk session status is unavailable.");
+        }
       } finally {
         if (!stopped) timeoutId = window.setTimeout(poll, 1500);
       }
@@ -85,7 +45,7 @@ function StaffPortal({ onBack }: StaffPortalProps) {
     return () => {
       stopped = true;
       controller?.abort();
-      if (timeoutId) window.clearTimeout(timeoutId);
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
   }, []);
 
@@ -94,59 +54,42 @@ function StaffPortal({ onBack }: StaffPortalProps) {
     return () => window.clearInterval(interval);
   }, []);
 
-  async function handleCreate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!name.trim() || isCreating) return;
-    setIsCreating(true);
-    setMessage(null);
-    try {
-      const employee = await createEmployee(name);
-      setEmployees((current) => sortEmployees([...current, employee]));
-      setMessage(
-        `Created ${employee.employeeCode} for ${employee.name}. Start face registration separately when ready.`,
-      );
-      setName("");
-    } catch {
-      setMessage("Employee creation failed. Check the backend and try again.");
-    } finally {
-      setIsCreating(false);
-    }
-  }
-
-  async function runSessionAction(
-    action: () => Promise<KioskSession>,
-    success: string,
-  ): Promise<boolean> {
-    if (sessionBusy) return false;
+  async function handleStartRestock() {
+    if (sessionBusy || session !== null) return;
     setSessionBusy(true);
     setSessionError(null);
     setMessage(null);
     try {
-      setSession(await action());
-      setMessage(success);
-      return true;
+      setSession(await startRestockSession());
+      setMessage("The kiosk is waiting for employee face authentication.");
     } catch (error) {
       setSessionError(
         error instanceof Error ? error.message : "Session request failed.",
       );
-      return false;
     } finally {
       setSessionBusy(false);
     }
   }
 
-  async function handleCancelSession() {
-    if (session === null) return;
-    if (
-      await runSessionAction(
-        () => cancelKioskSession(session.id),
-        "Session cancelled.",
-      )
-    ) {
+  async function handleCancelRestock() {
+    if (session?.type !== "RESTOCK_AUTH" || sessionBusy) return;
+    setSessionBusy(true);
+    setSessionError(null);
+    setMessage(null);
+    try {
+      await cancelKioskSession(session.id);
       setSession(null);
+      setMessage("Restock session cancelled.");
+    } catch (error) {
+      setSessionError(
+        error instanceof Error ? error.message : "Session request failed.",
+      );
+    } finally {
+      setSessionBusy(false);
     }
   }
 
+  const portalState = getPortalSessionState(session, "RESTOCK_AUTH");
   const secondsRemaining = session
     ? Math.max(
         0,
@@ -155,15 +98,15 @@ function StaffPortal({ onBack }: StaffPortalProps) {
     : 0;
 
   return (
-    <main className="home-page staff-portal-page">
+    <main className="home-page remote-portal-page staff-portal-page">
       <div className="staff-portal-container">
         <header className="staff-portal-header">
           <div>
-            <p className="mode-label mode-label--admin">
+            <p className="mode-label mode-label--employee">
               Prototype Staff Portal
             </p>
             <h1>Staff Operations</h1>
-            <p>Start short-lived workflows on the customer kiosk.</p>
+            <p>Start and monitor restocking on the customer kiosk.</p>
           </div>
           <button type="button" onClick={onBack}>
             Back to Home
@@ -176,40 +119,31 @@ function StaffPortal({ onBack }: StaffPortalProps) {
         >
           <div className="staff-section-heading">
             <div>
-              <h2 id="restock-session-title">Restock</h2>
+              <h2 id="restock-session-title">Restock status</h2>
               <p>
-                Employee identity is verified by the kiosk face-authentication
-                flow.
+                The kiosk verifies an active employee before opening Restock
+                Mode.
               </p>
             </div>
-            <button
-              className="staff-primary-action"
-              type="button"
-              disabled={sessionBusy || session !== null}
-              onClick={() =>
-                void runSessionAction(
-                  startRestockSession,
-                  "The kiosk is waiting for employee face authentication.",
-                )
-              }
-            >
-              Start Restock
-            </button>
+            {portalState === "IDLE" && (
+              <button
+                className="staff-primary-action"
+                type="button"
+                disabled={
+                  sessionBusy || !sessionLoaded || sessionError !== null
+                }
+                onClick={() => void handleStartRestock()}
+              >
+                {sessionBusy ? "Starting..." : "Start Restock"}
+              </button>
+            )}
           </div>
-          {session && (
+
+          {portalState === "OWN_SESSION" && session !== null && (
             <div className="staff-active-session" role="status">
               <div>
-                <strong>
-                  {session.type === "RESTOCK_AUTH"
-                    ? "Restock authentication"
-                    : "Face registration"}{" "}
-                  ACTIVE
-                </strong>
-                <p>
-                  {session.type === "RESTOCK_AUTH"
-                    ? "Kiosk waiting for employee face authentication."
-                    : `Kiosk waiting to register ${session.employee?.name} (${session.employee?.employeeCode}).`}
-                </p>
+                <strong>Restock authentication ACTIVE</strong>
+                <p>Kiosk waiting for employee face authentication.</p>
                 <span>
                   Expires in {secondsRemaining}s ·{" "}
                   {new Date(session.expiresAt).toLocaleTimeString()}
@@ -218,140 +152,28 @@ function StaffPortal({ onBack }: StaffPortalProps) {
               <button
                 type="button"
                 disabled={sessionBusy}
-                onClick={() => void handleCancelSession()}
+                onClick={() => void handleCancelRestock()}
               >
                 Cancel
               </button>
             </div>
           )}
+
+          {portalState === "KIOSK_BUSY" && (
+            <div className="staff-busy-session" role="status">
+              <strong>Kiosk busy</strong>
+              <p>
+                Another kiosk workflow is active. Restock can start when it
+                finishes or expires.
+              </p>
+            </div>
+          )}
+
           {sessionError && (
             <p className="staff-message staff-message--error">{sessionError}</p>
           )}
           {message && (
             <p className="staff-message staff-message--success">{message}</p>
-          )}
-        </section>
-
-        <section
-          className="staff-add-employee"
-          aria-labelledby="add-employee-title"
-        >
-          <div>
-            <h2 id="add-employee-title">Add Employee</h2>
-            <p>
-              This creates the employee record only. It does not start face
-              registration.
-            </p>
-          </div>
-          <form onSubmit={(event) => void handleCreate(event)}>
-            <label htmlFor="staff-employee-name">Employee name</label>
-            <div className="staff-add-row">
-              <input
-                id="staff-employee-name"
-                type="text"
-                maxLength={120}
-                value={name}
-                disabled={isCreating}
-                onChange={(event) => setName(event.target.value)}
-              />
-              <button type="submit" disabled={isCreating || !name.trim()}>
-                {isCreating ? "Adding..." : "+ Add Employee"}
-              </button>
-            </div>
-          </form>
-        </section>
-
-        <section
-          className="staff-employee-section"
-          aria-labelledby="employee-list-title"
-        >
-          <div className="staff-section-heading">
-            <div>
-              <h2 id="employee-list-title">Employees</h2>
-              <p>Face status contains no biometric data.</p>
-            </div>
-            <button
-              type="button"
-              disabled={isLoading}
-              onClick={() => void loadEmployees()}
-            >
-              Refresh
-            </button>
-          </div>
-          {isLoading && <p className="staff-message">Loading employees...</p>}
-          {loadError && (
-            <div className="staff-message staff-message--error">
-              <span>The employee list is unavailable.</span>
-              <button type="button" onClick={() => void loadEmployees()}>
-                Retry
-              </button>
-            </div>
-          )}
-          {!isLoading && !loadError && employees.length === 0 && (
-            <p className="staff-message">No employees have been created.</p>
-          )}
-          {!isLoading && !loadError && employees.length > 0 && (
-            <div
-              className="staff-employee-table"
-              role="table"
-              aria-label="Employees"
-            >
-              <div
-                className="staff-employee-row staff-employee-row--header"
-                role="row"
-              >
-                <span>Code</span>
-                <span>Name</span>
-                <span>Employee</span>
-                <span>Face Status</span>
-                <span>Action</span>
-              </div>
-              {employees.map((employee) => (
-                <div
-                  className="staff-employee-row"
-                  role="row"
-                  key={employee.id}
-                >
-                  <strong>{employee.employeeCode}</strong>
-                  <span>{employee.name}</span>
-                  <span
-                    className={
-                      employee.isActive ? "staff-active" : "staff-inactive"
-                    }
-                  >
-                    {employee.isActive ? "Active" : "Inactive"}
-                  </span>
-                  <span
-                    className={
-                      employee.faceRegistered
-                        ? "staff-registered"
-                        : "staff-setup-required"
-                    }
-                  >
-                    {employee.faceRegistered
-                      ? "Registered"
-                      : "Face Setup Required"}
-                  </span>
-                  <span>
-                    {!employee.faceRegistered && employee.isActive && (
-                      <button
-                        className="staff-face-action"
-                        type="button"
-                        disabled={sessionBusy || session !== null}
-                        onClick={() =>
-                          void runSessionAction(
-                            () => startFaceRegistrationSession(employee.id),
-                            `The kiosk is waiting to register ${employee.employeeCode}.`,
-                          )
-                        }
-                      >
-                        Start Face Registration
-                      </button>
-                    )}
-                  </span>
-                </div>
-              ))}
-            </div>
           )}
         </section>
       </div>

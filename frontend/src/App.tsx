@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import AdminPortal from "./components/AdminPortal";
 import StaffPortal from "./components/StaffPortal";
 import HomePage from "./pages/HomePage";
 import "./App.css";
 
 const STAFF_PORTAL_PATH = "/staff";
+const ADMIN_PORTAL_PATH = "/admin";
 
 function App() {
   const [pathname, setPathname] = useState(window.location.pathname);
@@ -35,6 +37,17 @@ function App() {
   if (pathname === STAFF_PORTAL_PATH) {
     return (
       <StaffPortal
+        onBack={() => {
+          window.history.replaceState(null, "", "/");
+          setPathname("/");
+        }}
+      />
+    );
+  }
+
+  if (pathname === ADMIN_PORTAL_PATH) {
+    return (
+      <AdminPortal
         onBack={() => {
           window.history.replaceState(null, "", "/");
           setPathname("/");
