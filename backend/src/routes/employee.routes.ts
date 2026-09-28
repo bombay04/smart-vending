@@ -2,7 +2,7 @@ import { Router } from "express";
 import {
   completeFaceRegistrationRequest,
   createEmployeeRequest,
-  faceAuthenticateEmployee,
+  faceAuthenticateEmployeeForSession,
   getEmployeesForFaceRegistration,
   mockAuthenticateEmployee,
   validateEmployeeForFaceRegistration,
@@ -11,7 +11,7 @@ import {
 const employeeRouter = Router();
 
 employeeRouter.post("/", createEmployeeRequest);
-employeeRouter.post("/auth/face", faceAuthenticateEmployee);
+employeeRouter.post("/auth/face", faceAuthenticateEmployeeForSession);
 employeeRouter.post("/auth/mock", mockAuthenticateEmployee);
 employeeRouter.get("/face-registration", getEmployeesForFaceRegistration);
 employeeRouter.post("/face-registration/complete", completeFaceRegistrationRequest);

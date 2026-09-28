@@ -98,7 +98,7 @@ Seed จะตั้ง Slot 1–3 เป็น `AVAILABLE` และเชื�
 ```bash
 curl -X POST http://localhost:3000/api/v1/restocks/mock \
   -H "Content-Type: application/json" \
-  -d '{"employeeId":1}'
+  -d '{"sessionId":1,"employeeId":1}'
 ```
 
 > Restock API ใช้ได้เมื่อมี Employee ID `1` และ Employee ยัง active เท่านั้น แต่ seed ปัจจุบันไม่ได้สร้าง Employee หากได้รับ `Employee not found.` ให้ใช้ `npm run seed` สำหรับ reset demo แทน
@@ -301,7 +301,7 @@ curl http://localhost:5000/health
 Expected:
 
 ```json
-{"hardware":"connected","mockHardware":false,"status":"ok"}
+{ "hardware": "connected", "mockHardware": false, "status": "ok" }
 ```
 
 ### 6.2 ทดสอบ Unlock
@@ -499,7 +499,7 @@ npm run seed
 ```bash
 curl -X POST http://localhost:3000/api/v1/restocks/mock \
   -H "Content-Type: application/json" \
-  -d '{"employeeId":1}'
+  -d '{"sessionId":1,"employeeId":1}'
 ```
 
 จากนั้น refresh หน้า Customer Frontend และตรวจว่า Slot 1–3 เป็น `AVAILABLE`

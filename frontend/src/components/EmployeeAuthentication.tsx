@@ -14,6 +14,7 @@ import { playAudioFeedback } from "../api/audio";
 import { validateEmployeeAndNotify } from "../audio-feedback.mjs";
 
 interface EmployeeAuthenticationProps {
+  sessionId: number;
   onAuthenticated: (employee: AuthenticatedEmployee) => void;
   onCancel: () => void;
 }
@@ -25,18 +26,24 @@ type AuthenticationState =
   | "SUCCESS"
   | FaceAuthenticationFailureStatus;
 
-const STATE_CONTENT: Record<AuthenticationState, { title: string; instruction: string }> = {
+const STATE_CONTENT: Record<
+  AuthenticationState,
+  { title: string; instruction: string }
+> = {
   CHECKING: {
     title: "Checking Scanner",
-    instruction: "Checking whether employee face authentication is available...",
+    instruction:
+      "Checking whether employee face authentication is available...",
   },
   IDLE: {
     title: "Ready to Scan",
-    instruction: "Face the camera, make sure you are the only person visible, then tap Scan Face.",
+    instruction:
+      "Face the camera, make sure you are the only person visible, then tap Scan Face.",
   },
   SCANNING: {
     title: "Scanning Face",
-    instruction: "Look directly at the camera and keep still while three samples are captured.",
+    instruction:
+      "Look directly at the camera and keep still while three samples are captured.",
   },
   SUCCESS: {
     title: "Authentication Successful",
@@ -44,7 +51,8 @@ const STATE_CONTENT: Record<AuthenticationState, { title: string; instruction: s
   },
   NO_MATCH: {
     title: "Face Not Recognized",
-    instruction: "We could not verify an active employee. Adjust your position and try again.",
+    instruction:
+      "We could not verify an active employee. Adjust your position and try again.",
   },
   NO_FACE: {
     title: "No Face Detected",
@@ -52,7 +60,8 @@ const STATE_CONTENT: Record<AuthenticationState, { title: string; instruction: s
   },
   MULTIPLE_FACES: {
     title: "One Person at a Time",
-    instruction: "Make sure only one person is visible to the camera, then try again.",
+    instruction:
+      "Make sure only one person is visible to the camera, then try again.",
   },
   BUSY: {
     title: "Scanner Busy",
@@ -60,11 +69,13 @@ const STATE_CONTENT: Record<AuthenticationState, { title: string; instruction: s
   },
   UNAVAILABLE: {
     title: "Scanner Unavailable",
-    instruction: "Face authentication is unavailable. Check the camera service and try again.",
+    instruction:
+      "Face authentication is unavailable. Check the camera service and try again.",
   },
   LOCKED: {
     title: "Face Authentication Locked",
-    instruction: "Too many failed attempts. Face scanning is temporarily disabled.",
+    instruction:
+      "Too many failed attempts. Face scanning is temporarily disabled.",
   },
 };
 
@@ -74,12 +85,18 @@ function formatCountdown(totalSeconds: number): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-function EmployeeAuthentication({ onAuthenticated, onCancel }: EmployeeAuthenticationProps) {
+function EmployeeAuthentication({
+  sessionId,
+  onAuthenticated,
+  onCancel,
+}: EmployeeAuthenticationProps) {
   const [authenticationState, setAuthenticationState] =
     useState<AuthenticationState>("CHECKING");
   const [authenticatedEmployee, setAuthenticatedEmployee] =
     useState<AuthenticatedEmployee | null>(null);
-  const [remainingAttempts, setRemainingAttempts] = useState<number | null>(null);
+  const [remainingAttempts, setRemainingAttempts] = useState<number | null>(
+    null,
+  );
   const [lockoutSeconds, setLockoutSeconds] = useState<number | null>(null);
   const [lockedUntilMs, setLockedUntilMs] = useState<number | null>(null);
   const activeRequestRef = useRef<AbortController | null>(null);
@@ -128,7 +145,10 @@ function EmployeeAuthentication({ onAuthenticated, onCancel }: EmployeeAuthentic
     let expiryCheckStarted = false;
 
     const updateCountdown = () => {
-      const seconds = Math.max(0, Math.ceil((lockedUntilMs - Date.now()) / 1000));
+      const seconds = Math.max(
+        0,
+        Math.ceil((lockedUntilMs - Date.now()) / 1000),
+      );
       setLockoutSeconds(seconds);
 
       if (seconds > 0 || expiryCheckStarted) {
@@ -194,13 +214,16 @@ function EmployeeAuthentication({ onAuthenticated, onCancel }: EmployeeAuthentic
     setAuthenticationState("SCANNING");
 
     try {
-      const faceMatch = await requestFaceAuthentication(requestController.signal);
+      const faceMatch = await requestFaceAuthentication(
+        requestController.signal,
+      );
       setRemainingAttempts(null);
       const employee = await validateEmployeeAndNotify(
         faceMatch.employeeCode,
         requestController.signal,
         {
-          validateEmployee: validateFaceAuthenticatedEmployee,
+          validateEmployee: (employeeCode, signal) =>
+            validateFaceAuthenticatedEmployee(employeeCode, sessionId, signal),
           playAudio: playAudioFeedback,
         },
       );
@@ -221,7 +244,10 @@ function EmployeeAuthentication({ onAuthenticated, onCancel }: EmployeeAuthentic
       }
 
       if (error instanceof FaceAuthenticationError) {
-        if (error.status === "LOCKED" && error.retryAfterSeconds !== undefined) {
+        if (
+          error.status === "LOCKED" &&
+          error.retryAfterSeconds !== undefined
+        ) {
           showLockout(error.retryAfterSeconds);
         } else {
           if (error.remainingAttempts !== undefined) {
@@ -260,13 +286,20 @@ function EmployeeAuthentication({ onAuthenticated, onCancel }: EmployeeAuthentic
   const isScanning = authenticationState === "SCANNING";
   const isSuccessful = authenticationState === "SUCCESS";
   const isLocked = authenticationState === "LOCKED";
-  const isFailure = !["CHECKING", "IDLE", "SCANNING", "SUCCESS", "LOCKED"].includes(
-    authenticationState,
-  );
+  const isFailure = ![
+    "CHECKING",
+    "IDLE",
+    "SCANNING",
+    "SUCCESS",
+    "LOCKED",
+  ].includes(authenticationState);
 
   return (
     <main className="home-page employee-auth-page">
-      <section className="employee-auth-card" aria-labelledby="employee-auth-title">
+      <section
+        className="employee-auth-card"
+        aria-labelledby="employee-auth-title"
+      >
         <p className="mode-label mode-label--employee">Employee Mode</p>
         <div
           className={`face-scan-indicator face-scan-indicator--${authenticationState.toLowerCase()}`}
@@ -275,12 +308,17 @@ function EmployeeAuthentication({ onAuthenticated, onCancel }: EmployeeAuthentic
           <span>{isSuccessful ? "✓" : "◎"}</span>
         </div>
         <h1 id="employee-auth-title">Face Authentication</h1>
-        <div className="employee-auth-status" aria-live="polite" aria-busy={isScanning}>
+        <div
+          className="employee-auth-status"
+          aria-live="polite"
+          aria-busy={isScanning}
+        >
           <h2>{content.title}</h2>
           <p>{content.instruction}</p>
           {remainingAttempts !== null && remainingAttempts > 0 && isFailure && (
             <p className="employee-auth-attempts">
-              {remainingAttempts} {remainingAttempts === 1 ? "attempt" : "attempts"} remaining
+              {remainingAttempts}{" "}
+              {remainingAttempts === 1 ? "attempt" : "attempts"} remaining
               before temporary lockout.
             </p>
           )}
@@ -290,7 +328,9 @@ function EmployeeAuthentication({ onAuthenticated, onCancel }: EmployeeAuthentic
             </p>
           )}
           {authenticatedEmployee && (
-            <p className="employee-auth-identity">Welcome, {authenticatedEmployee.name}</p>
+            <p className="employee-auth-identity">
+              Welcome, {authenticatedEmployee.name}
+            </p>
           )}
         </div>
 
@@ -311,7 +351,11 @@ function EmployeeAuthentication({ onAuthenticated, onCancel }: EmployeeAuthentic
                     ? "Try Again"
                     : "Scan Face"}
           </button>
-          <button className="employee-auth-cancel" type="button" onClick={handleCancel}>
+          <button
+            className="employee-auth-cancel"
+            type="button"
+            onClick={handleCancel}
+          >
             Back to Customer Mode
           </button>
         </div>

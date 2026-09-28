@@ -1,19 +1,29 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   createEmployee,
   fetchEmployeesForFaceRegistration,
 } from "../api/employee-auth";
+import {
+  cancelKioskSession,
+  fetchCurrentKioskSession,
+  startFaceRegistrationSession,
+  startRestockSession,
+  type KioskSession,
+} from "../api/kiosk-session";
 import type { RegistrationEmployee } from "../types/employee";
 
 interface StaffPortalProps {
   onBack: () => void;
 }
 
-function sortEmployees(employees: RegistrationEmployee[]): RegistrationEmployee[] {
-  return [...employees].sort((first, second) =>
-    first.employeeCode.localeCompare(second.employeeCode),
-  );
-}
+const sortEmployees = (employees: RegistrationEmployee[]) =>
+  [...employees].sort((a, b) => a.employeeCode.localeCompare(b.employeeCode));
 
 function StaffPortal({ onBack }: StaffPortalProps) {
   const [employees, setEmployees] = useState<RegistrationEmployee[]>([]);
@@ -21,71 +31,217 @@ function StaffPortal({ onBack }: StaffPortalProps) {
   const [loadError, setLoadError] = useState(false);
   const [name, setName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [createdEmployee, setCreatedEmployee] = useState<RegistrationEmployee | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [session, setSession] = useState<KioskSession | null>(null);
+  const [sessionBusy, setSessionBusy] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now());
   const requestRef = useRef<AbortController | null>(null);
 
-  async function loadEmployees() {
+  const loadEmployees = useCallback(async () => {
     const controller = new AbortController();
     requestRef.current?.abort();
     requestRef.current = controller;
     setIsLoading(true);
     setLoadError(false);
     try {
-      setEmployees(sortEmployees(await fetchEmployeesForFaceRegistration(controller.signal)));
+      setEmployees(
+        sortEmployees(
+          await fetchEmployeesForFaceRegistration(controller.signal),
+        ),
+      );
     } catch {
       if (!controller.signal.aborted) setLoadError(true);
     } finally {
       if (!controller.signal.aborted) setIsLoading(false);
       if (requestRef.current === controller) requestRef.current = null;
     }
-  }
+  }, []);
 
   useEffect(() => {
     void loadEmployees();
     return () => requestRef.current?.abort();
+  }, [loadEmployees]);
+
+  useEffect(() => {
+    let stopped = false;
+    let timeoutId: number | undefined;
+    let controller: AbortController | undefined;
+    const poll = async () => {
+      controller = new AbortController();
+      try {
+        const current = await fetchCurrentKioskSession(controller.signal);
+        if (!stopped) {
+          setSession(current);
+          setSessionError(null);
+        }
+      } catch {
+        if (!stopped) setSessionError("Kiosk session status is unavailable.");
+      } finally {
+        if (!stopped) timeoutId = window.setTimeout(poll, 1500);
+      }
+    };
+    void poll();
+    return () => {
+      stopped = true;
+      controller?.abort();
+      if (timeoutId) window.clearTimeout(timeoutId);
+    };
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
   }, []);
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (name.trim().length === 0 || isCreating || isLoading) return;
-
-    const controller = new AbortController();
-    requestRef.current = controller;
+    if (!name.trim() || isCreating) return;
     setIsCreating(true);
-    setCreateError(null);
-    setCreatedEmployee(null);
+    setMessage(null);
     try {
-      const employee = await createEmployee(name, controller.signal);
+      const employee = await createEmployee(name);
       setEmployees((current) => sortEmployees([...current, employee]));
-      setCreatedEmployee(employee);
+      setMessage(
+        `Created ${employee.employeeCode} for ${employee.name}. Start face registration separately when ready.`,
+      );
       setName("");
     } catch {
-      if (!controller.signal.aborted) {
-        setCreateError("Employee creation failed. Check the backend and try again.");
-      }
+      setMessage("Employee creation failed. Check the backend and try again.");
     } finally {
-      if (!controller.signal.aborted) setIsCreating(false);
-      if (requestRef.current === controller) requestRef.current = null;
+      setIsCreating(false);
     }
   }
+
+  async function runSessionAction(
+    action: () => Promise<KioskSession>,
+    success: string,
+  ): Promise<boolean> {
+    if (sessionBusy) return false;
+    setSessionBusy(true);
+    setSessionError(null);
+    setMessage(null);
+    try {
+      setSession(await action());
+      setMessage(success);
+      return true;
+    } catch (error) {
+      setSessionError(
+        error instanceof Error ? error.message : "Session request failed.",
+      );
+      return false;
+    } finally {
+      setSessionBusy(false);
+    }
+  }
+
+  async function handleCancelSession() {
+    if (session === null) return;
+    if (
+      await runSessionAction(
+        () => cancelKioskSession(session.id),
+        "Session cancelled.",
+      )
+    ) {
+      setSession(null);
+    }
+  }
+
+  const secondsRemaining = session
+    ? Math.max(
+        0,
+        Math.ceil((new Date(session.expiresAt).getTime() - now) / 1000),
+      )
+    : 0;
 
   return (
     <main className="home-page staff-portal-page">
       <div className="staff-portal-container">
         <header className="staff-portal-header">
           <div>
-            <p className="mode-label mode-label--admin">Prototype Staff Portal</p>
-            <h1>Employee Management</h1>
-            <p>Manage employee records and review face-setup status.</p>
+            <p className="mode-label mode-label--admin">
+              Prototype Staff Portal
+            </p>
+            <h1>Staff Operations</h1>
+            <p>Start short-lived workflows on the customer kiosk.</p>
           </div>
-          <button type="button" onClick={onBack}>Back to Home</button>
+          <button type="button" onClick={onBack}>
+            Back to Home
+          </button>
         </header>
 
-        <section className="staff-add-employee" aria-labelledby="add-employee-title">
+        <section
+          className="staff-session-section"
+          aria-labelledby="restock-session-title"
+        >
+          <div className="staff-section-heading">
+            <div>
+              <h2 id="restock-session-title">Restock</h2>
+              <p>
+                Employee identity is verified by the kiosk face-authentication
+                flow.
+              </p>
+            </div>
+            <button
+              className="staff-primary-action"
+              type="button"
+              disabled={sessionBusy || session !== null}
+              onClick={() =>
+                void runSessionAction(
+                  startRestockSession,
+                  "The kiosk is waiting for employee face authentication.",
+                )
+              }
+            >
+              Start Restock
+            </button>
+          </div>
+          {session && (
+            <div className="staff-active-session" role="status">
+              <div>
+                <strong>
+                  {session.type === "RESTOCK_AUTH"
+                    ? "Restock authentication"
+                    : "Face registration"}{" "}
+                  ACTIVE
+                </strong>
+                <p>
+                  {session.type === "RESTOCK_AUTH"
+                    ? "Kiosk waiting for employee face authentication."
+                    : `Kiosk waiting to register ${session.employee?.name} (${session.employee?.employeeCode}).`}
+                </p>
+                <span>
+                  Expires in {secondsRemaining}s ·{" "}
+                  {new Date(session.expiresAt).toLocaleTimeString()}
+                </span>
+              </div>
+              <button
+                type="button"
+                disabled={sessionBusy}
+                onClick={() => void handleCancelSession()}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+          {sessionError && (
+            <p className="staff-message staff-message--error">{sessionError}</p>
+          )}
+          {message && (
+            <p className="staff-message staff-message--success">{message}</p>
+          )}
+        </section>
+
+        <section
+          className="staff-add-employee"
+          aria-labelledby="add-employee-title"
+        >
           <div>
             <h2 id="add-employee-title">Add Employee</h2>
-            <p>The backend assigns the next employee code automatically.</p>
+            <p>
+              This creates the employee record only. It does not start face
+              registration.
+            </p>
           </div>
           <form onSubmit={(event) => void handleCreate(event)}>
             <label htmlFor="staff-employee-name">Employee name</label>
@@ -95,67 +251,103 @@ function StaffPortal({ onBack }: StaffPortalProps) {
                 type="text"
                 maxLength={120}
                 value={name}
-                disabled={isCreating || isLoading}
+                disabled={isCreating}
                 onChange={(event) => setName(event.target.value)}
               />
-              <button
-                type="submit"
-                disabled={isCreating || isLoading || name.trim().length === 0}
-              >
+              <button type="submit" disabled={isCreating || !name.trim()}>
                 {isCreating ? "Adding..." : "+ Add Employee"}
               </button>
             </div>
           </form>
-          {createError && <p className="staff-message staff-message--error">{createError}</p>}
-          {createdEmployee && (
-            <p className="staff-message staff-message--success">
-              Created {createdEmployee.employeeCode} for {createdEmployee.name}. Face setup is required at the vending machine.
-            </p>
-          )}
         </section>
 
-        <section className="staff-employee-section" aria-labelledby="employee-list-title">
+        <section
+          className="staff-employee-section"
+          aria-labelledby="employee-list-title"
+        >
           <div className="staff-section-heading">
             <div>
               <h2 id="employee-list-title">Employees</h2>
-              <p>Face status is non-biometric backend metadata reported after Pi enrollment.</p>
+              <p>Face status contains no biometric data.</p>
             </div>
             <button
               type="button"
-              disabled={isLoading || isCreating}
+              disabled={isLoading}
               onClick={() => void loadEmployees()}
             >
               Refresh
             </button>
           </div>
-
           {isLoading && <p className="staff-message">Loading employees...</p>}
           {loadError && (
             <div className="staff-message staff-message--error">
               <span>The employee list is unavailable.</span>
-              <button type="button" onClick={() => void loadEmployees()}>Retry</button>
+              <button type="button" onClick={() => void loadEmployees()}>
+                Retry
+              </button>
             </div>
           )}
           {!isLoading && !loadError && employees.length === 0 && (
             <p className="staff-message">No employees have been created.</p>
           )}
           {!isLoading && !loadError && employees.length > 0 && (
-            <div className="staff-employee-table" role="table" aria-label="Employees">
-              <div className="staff-employee-row staff-employee-row--header" role="row">
-                <span role="columnheader">Code</span>
-                <span role="columnheader">Name</span>
-                <span role="columnheader">Employee</span>
-                <span role="columnheader">Face Status</span>
+            <div
+              className="staff-employee-table"
+              role="table"
+              aria-label="Employees"
+            >
+              <div
+                className="staff-employee-row staff-employee-row--header"
+                role="row"
+              >
+                <span>Code</span>
+                <span>Name</span>
+                <span>Employee</span>
+                <span>Face Status</span>
+                <span>Action</span>
               </div>
               {employees.map((employee) => (
-                <div className="staff-employee-row" role="row" key={employee.id}>
-                  <strong role="cell">{employee.employeeCode}</strong>
-                  <span role="cell">{employee.name}</span>
-                  <span role="cell" className={employee.isActive ? "staff-active" : "staff-inactive"}>
+                <div
+                  className="staff-employee-row"
+                  role="row"
+                  key={employee.id}
+                >
+                  <strong>{employee.employeeCode}</strong>
+                  <span>{employee.name}</span>
+                  <span
+                    className={
+                      employee.isActive ? "staff-active" : "staff-inactive"
+                    }
+                  >
                     {employee.isActive ? "Active" : "Inactive"}
                   </span>
-                  <span role="cell" className={employee.faceRegistered ? "staff-registered" : "staff-setup-required"}>
-                    {employee.faceRegistered ? "Registered" : "Face Setup Required"}
+                  <span
+                    className={
+                      employee.faceRegistered
+                        ? "staff-registered"
+                        : "staff-setup-required"
+                    }
+                  >
+                    {employee.faceRegistered
+                      ? "Registered"
+                      : "Face Setup Required"}
+                  </span>
+                  <span>
+                    {!employee.faceRegistered && employee.isActive && (
+                      <button
+                        className="staff-face-action"
+                        type="button"
+                        disabled={sessionBusy || session !== null}
+                        onClick={() =>
+                          void runSessionAction(
+                            () => startFaceRegistrationSession(employee.id),
+                            `The kiosk is waiting to register ${employee.employeeCode}.`,
+                          )
+                        }
+                      >
+                        Start Face Registration
+                      </button>
+                    )}
                   </span>
                 </div>
               ))}

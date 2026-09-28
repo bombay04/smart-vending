@@ -9,10 +9,16 @@ import { unlockSlot } from "../api/unlock";
 import { playAudioFeedback } from "../api/audio";
 import EmployeeAuthentication from "../components/EmployeeAuthentication";
 import RestockMode from "../components/RestockMode";
+import EmployeeFaceRegistration from "../components/EmployeeFaceRegistration";
+import {
+  fetchCurrentKioskSession,
+  type KioskSession,
+} from "../api/kiosk-session";
 import { handleConfirmedPaymentOnce } from "../payment-flow.mjs";
 import type { AuthenticatedEmployee } from "../types/employee";
 import type { MockRestockResult } from "../api/restock";
 import type { Slot } from "../types/slot";
+import { decideKioskSessionAction } from "../kiosk-session-flow.mjs";
 
 interface PurchaseSuccess {
   slotNumber: number;
@@ -28,8 +34,10 @@ type PaymentScreen =
 
 function HomePage() {
   const [activeMode, setActiveMode] = useState<
-    "customer" | "employee-auth" | "restock"
+    "customer" | "employee-auth" | "restock" | "face-registration"
   >("customer");
+  const [activeStaffSession, setActiveStaffSession] =
+    useState<KioskSession | null>(null);
   const [authenticatedEmployee, setAuthenticatedEmployee] =
     useState<AuthenticatedEmployee | null>(null);
   const [slots, setSlots] = useState<Slot[]>([]);
@@ -42,6 +50,8 @@ function HomePage() {
   const [purchaseSuccess, setPurchaseSuccess] =
     useState<PurchaseSuccess | null>(null);
   const unlockAttemptedTransactionIds = useRef(new Set<number>());
+  const acceptedSessionIds = useRef(new Set<number>());
+  const staffWorkflowCompletedRef = useRef(false);
   const waitingTransactionId =
     paymentScreen?.phase === "waiting"
       ? paymentScreen.payment.transactionId
@@ -100,6 +110,7 @@ function HomePage() {
   );
 
   const handleRestockSuccess = useCallback((restock: MockRestockResult) => {
+    staffWorkflowCompletedRef.current = true;
     const restockedSlotNumbers = new Set(
       restock.slots.map((slot) => slot.slotNumber),
     );
@@ -123,11 +134,14 @@ function HomePage() {
 
   const exitRestockMode = useCallback(() => {
     setAuthenticatedEmployee(null);
+    setActiveStaffSession(null);
+    staffWorkflowCompletedRef.current = false;
     setActiveMode("customer");
   }, []);
 
   const cancelEmployeeAuthentication = useCallback(() => {
     setAuthenticatedEmployee(null);
+    setActiveStaffSession(null);
     setActiveMode("customer");
   }, []);
 
@@ -250,26 +264,103 @@ function HomePage() {
   }, [completeConfirmedPayment, waitingTransactionId]);
 
   useEffect(() => {
+    let stopped = false;
+    let timeoutId: number | undefined;
+    let controller: AbortController | undefined;
+
+    const poll = async () => {
+      controller = new AbortController();
+      try {
+        const session = await fetchCurrentKioskSession(controller.signal);
+        if (stopped) return;
+
+        const action = decideKioskSessionAction({
+          session,
+          isSafeIdle: paymentScreen === null && purchaseSuccess === null,
+          currentMode: activeMode,
+          acceptedSessionIds: acceptedSessionIds.current,
+          workflowCompleted: staffWorkflowCompletedRef.current,
+        });
+        if (action === "EXIT_STAFF") {
+          setAuthenticatedEmployee(null);
+          setActiveStaffSession(null);
+          setActiveMode("customer");
+        } else if (
+          action === "START_RESTOCK_AUTH" ||
+          action === "START_FACE_REGISTRATION"
+        ) {
+          if (session === null) return;
+          acceptedSessionIds.current.add(session.id);
+          staffWorkflowCompletedRef.current = false;
+          setActiveStaffSession(session);
+          setAuthenticatedEmployee(null);
+          setActiveMode(
+            action === "START_RESTOCK_AUTH"
+              ? "employee-auth"
+              : "face-registration",
+          );
+        }
+      } catch {
+        // Fail closed for staff entry while leaving customer purchasing unaffected.
+      } finally {
+        if (!stopped) timeoutId = window.setTimeout(poll, 1500);
+      }
+    };
+
+    void poll();
+    return () => {
+      stopped = true;
+      controller?.abort();
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [activeMode, paymentScreen, purchaseSuccess]);
+
+  useEffect(() => {
     if (purchaseSuccess === null) return undefined;
     const timeoutId = window.setTimeout(() => setPurchaseSuccess(null), 4000);
     return () => window.clearTimeout(timeoutId);
   }, [purchaseSuccess]);
 
-  if (activeMode === "employee-auth") {
+  if (
+    activeMode === "employee-auth" &&
+    activeStaffSession?.type === "RESTOCK_AUTH"
+  ) {
     return (
       <EmployeeAuthentication
+        sessionId={activeStaffSession.id}
         onAuthenticated={handleEmployeeAuthenticated}
         onCancel={cancelEmployeeAuthentication}
       />
     );
   }
 
-  if (activeMode === "restock" && authenticatedEmployee !== null) {
+  if (
+    activeMode === "restock" &&
+    authenticatedEmployee !== null &&
+    activeStaffSession?.type === "RESTOCK_AUTH"
+  ) {
     return (
       <RestockMode
+        sessionId={activeStaffSession.id}
         authenticatedEmployee={authenticatedEmployee}
         onExit={exitRestockMode}
         onRestockSuccess={handleRestockSuccess}
+      />
+    );
+  }
+
+  if (
+    activeMode === "face-registration" &&
+    activeStaffSession?.type === "FACE_REGISTRATION"
+  ) {
+    return (
+      <EmployeeFaceRegistration
+        session={activeStaffSession}
+        onCancel={cancelEmployeeAuthentication}
+        onCompleted={() => {
+          staffWorkflowCompletedRef.current = true;
+          cancelEmployeeAuthentication();
+        }}
       />
     );
   }
@@ -415,16 +506,6 @@ function HomePage() {
           <p className="mode-label">Customer Mode</p>
           <h1>Smart Vending Machine</h1>
           <p className="instruction">Please select a product</p>
-          <button
-            className="employee-mode-button"
-            type="button"
-            onClick={() => {
-              setAuthenticatedEmployee(null);
-              setActiveMode("employee-auth");
-            }}
-          >
-            Employee Mode
-          </button>
         </header>
 
         {isLoading && <p className="state-message">Loading slots...</p>}

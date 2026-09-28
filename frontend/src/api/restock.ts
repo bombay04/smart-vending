@@ -17,13 +17,16 @@ interface MockRestockResponse {
 
 const mockRestockUrl = `${API_BASE_URL}/api/v1/restocks/mock`;
 
-export async function createMockRestock(employeeId: number): Promise<MockRestockResult> {
+export async function createMockRestock(
+  sessionId: number,
+  employeeId: number,
+): Promise<MockRestockResult> {
   const response = await fetch(mockRestockUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ employeeId }),
+    body: JSON.stringify({ sessionId, employeeId }),
   });
 
   if (!response.ok) {

@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../utils/http-error";
-import { normalizeEmployeeCode } from "./employee-auth.service";
+import { PILOT_KIOSK_MACHINE_ID } from "./kiosk-session.service";
 
 const EMPLOYEE_CODE_PATTERN = /^EMP(\d+)$/;
 const MAX_EMPLOYEE_NAME_LENGTH = 120;
@@ -22,7 +22,6 @@ interface NewEmployeeData {
 }
 
 type CreateAttempt = (normalizedName: string) => Promise<EmployeeManagementRecord>;
-type CompleteAttempt = (normalizedEmployeeCode: string) => Promise<EmployeeManagementRecord | null>;
 
 function hasExactKeys(value: Record<string, unknown>, expectedKeys: string[]): boolean {
   const actualKeys = Object.keys(value).sort();
@@ -77,16 +76,20 @@ export function parseCreateEmployeeRequest(body: unknown): string {
   return normalizeEmployeeName((body as Record<string, unknown>).name);
 }
 
-export function parseFaceRegistrationCompleteRequest(body: unknown): string {
+export function parseFaceRegistrationCompleteRequest(body: unknown): number {
   if (
     typeof body !== "object" ||
     body === null ||
     Array.isArray(body) ||
-    !hasExactKeys(body as Record<string, unknown>, ["employeeCode"])
+    !hasExactKeys(body as Record<string, unknown>, ["sessionId"])
   ) {
-    throw new HttpError("Request body must contain only employeeCode.", 400);
+    throw new HttpError("Request body must contain only sessionId.", 400);
   }
-  return normalizeEmployeeCode((body as Record<string, unknown>).employeeCode);
+  const sessionId = (body as Record<string, unknown>).sessionId;
+  if (typeof sessionId !== "number" || !Number.isInteger(sessionId) || sessionId <= 0) {
+    throw new HttpError("sessionId must be a positive integer.", 400);
+  }
+  return sessionId;
 }
 
 export function toSafeEmployee(record: EmployeeManagementRecord): EmployeeManagementRecord {
@@ -149,10 +152,10 @@ export async function createEmployee(name: unknown): Promise<EmployeeManagementR
 
 export async function completeFaceRegistrationWithUpdate(
   requestBody: unknown,
-  completeAttempt: CompleteAttempt,
+  completeAttempt: (sessionId: number) => Promise<EmployeeManagementRecord | null>,
 ): Promise<EmployeeManagementRecord> {
-  const normalizedEmployeeCode = parseFaceRegistrationCompleteRequest(requestBody);
-  const employee = await completeAttempt(normalizedEmployeeCode);
+  const sessionId = parseFaceRegistrationCompleteRequest(requestBody);
+  const employee = await completeAttempt(sessionId);
   if (employee === null || !employee.isActive) {
     throw new HttpError("Employee is unknown or inactive.", 401);
   }
@@ -162,15 +165,37 @@ export async function completeFaceRegistrationWithUpdate(
 export async function completeFaceRegistration(
   requestBody: unknown,
 ): Promise<EmployeeManagementRecord> {
-  return completeFaceRegistrationWithUpdate(requestBody, (normalizedEmployeeCode) =>
+  return completeFaceRegistrationWithUpdate(requestBody, (sessionId) =>
     prisma.$transaction(async (transaction) => {
+      const now = new Date();
+      const session = await transaction.kioskSession.findUnique({ where: { id: sessionId } });
+      if (
+        !session ||
+        session.machineId !== PILOT_KIOSK_MACHINE_ID ||
+        session.type !== "FACE_REGISTRATION" ||
+        session.status !== "ACTIVE" ||
+        session.expiresAt <= now ||
+        session.employeeId === null
+      ) {
+        if (session?.status === "ACTIVE" && session.expiresAt <= now) {
+          await transaction.kioskSession.update({
+            where: { id: session.id },
+            data: { status: "EXPIRED" },
+          });
+        }
+        throw new HttpError("A valid active face-registration session is required.", 403);
+      }
       const updateResult = await transaction.employee.updateMany({
-        where: { employeeCode: normalizedEmployeeCode, isActive: true },
+        where: { id: session.employeeId, isActive: true },
         data: { faceRegistered: true },
       });
       if (updateResult.count !== 1) return null;
+      await transaction.kioskSession.update({
+        where: { id: session.id },
+        data: { status: "COMPLETED", completedAt: now },
+      });
       return transaction.employee.findUnique({
-        where: { employeeCode: normalizedEmployeeCode },
+        where: { id: session.employeeId },
         select: {
           id: true,
           employeeCode: true,

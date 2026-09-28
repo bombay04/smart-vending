@@ -1,5 +1,8 @@
 import { API_BASE_URL } from "../config/api";
-import type { AuthenticatedEmployee, RegistrationEmployee } from "../types/employee";
+import type {
+  AuthenticatedEmployee,
+  RegistrationEmployee,
+} from "../types/employee";
 
 const mockEmployeeAuthUrl = `${API_BASE_URL}/api/v1/employees/auth/mock`;
 const faceEmployeeAuthUrl = `${API_BASE_URL}/api/v1/employees/auth/face`;
@@ -10,12 +13,18 @@ const faceRegistrationCompleteUrl = `${API_BASE_URL}/api/v1/employees/face-regis
 
 export class EmployeeValidationError extends Error {
   constructor(readonly rejected: boolean) {
-    super(rejected ? "Employee access is not active." : "Employee validation is unavailable.");
+    super(
+      rejected
+        ? "Employee access is not active."
+        : "Employee validation is unavailable.",
+    );
     this.name = "EmployeeValidationError";
   }
 }
 
-function isAuthenticatedEmployee(value: unknown): value is AuthenticatedEmployee {
+function isAuthenticatedEmployee(
+  value: unknown,
+): value is AuthenticatedEmployee {
   if (typeof value !== "object" || value === null) {
     return false;
   }
@@ -35,6 +44,7 @@ function isAuthenticatedEmployee(value: unknown): value is AuthenticatedEmployee
 async function postEmployeeCode(
   url: string,
   employeeCode: string,
+  sessionId?: number,
   signal?: AbortSignal,
 ): Promise<AuthenticatedEmployee> {
   const normalizedEmployeeCode = employeeCode.trim().toUpperCase();
@@ -44,7 +54,11 @@ async function postEmployeeCode(
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ employeeCode: normalizedEmployeeCode }),
+    body: JSON.stringify(
+      sessionId === undefined
+        ? { employeeCode: normalizedEmployeeCode }
+        : { employeeCode: normalizedEmployeeCode, sessionId },
+    ),
     signal,
   });
 
@@ -74,9 +88,10 @@ async function postEmployeeCode(
 
 export function validateFaceAuthenticatedEmployee(
   employeeCode: string,
+  sessionId: number,
   signal?: AbortSignal,
 ): Promise<AuthenticatedEmployee> {
-  return postEmployeeCode(faceEmployeeAuthUrl, employeeCode, signal);
+  return postEmployeeCode(faceEmployeeAuthUrl, employeeCode, sessionId, signal);
 }
 
 function isRegistrationEmployee(value: unknown): value is RegistrationEmployee {
@@ -95,7 +110,12 @@ export function validateEmployeeForFaceRegistration(
   employeeCode: string,
   signal?: AbortSignal,
 ): Promise<AuthenticatedEmployee> {
-  return postEmployeeCode(faceRegistrationValidationUrl, employeeCode, signal);
+  return postEmployeeCode(
+    faceRegistrationValidationUrl,
+    employeeCode,
+    undefined,
+    signal,
+  );
 }
 
 export async function fetchEmployeesForFaceRegistration(
@@ -136,7 +156,9 @@ export async function fetchEmployeesForFaceRegistration(
   }));
 }
 
-async function readRegistrationEmployee(response: Response): Promise<RegistrationEmployee> {
+async function readRegistrationEmployee(
+  response: Response,
+): Promise<RegistrationEmployee> {
   if (!response.ok) {
     throw new EmployeeValidationError(response.status === 401);
   }
@@ -178,13 +200,13 @@ export async function createEmployee(
 }
 
 export async function completeEmployeeFaceRegistration(
-  employeeCode: string,
+  sessionId: number,
   signal?: AbortSignal,
 ): Promise<RegistrationEmployee> {
   const response = await fetch(faceRegistrationCompleteUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ employeeCode: employeeCode.trim().toUpperCase() }),
+    body: JSON.stringify({ sessionId }),
     signal,
   });
   return readRegistrationEmployee(response);
@@ -194,5 +216,5 @@ export async function authenticateMockEmployee(
   employeeCode: string,
   signal?: AbortSignal,
 ): Promise<AuthenticatedEmployee> {
-  return postEmployeeCode(mockEmployeeAuthUrl, employeeCode, signal);
+  return postEmployeeCode(mockEmployeeAuthUrl, employeeCode, undefined, signal);
 }

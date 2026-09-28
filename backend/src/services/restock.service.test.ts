@@ -28,8 +28,9 @@ class MemoryRestockStore implements RestockStore {
 
   constructor(private readonly failure: Error | null = null) {}
 
-  async commitRestock(employeeId: number) {
+  async commitRestock(sessionId: number, employeeId: number) {
     this.commitCount += 1;
+    assert.equal(sessionId, 9);
     if (this.failure) throw this.failure;
     assert.equal(employeeId, committedRestock.employeeId);
     return structuredClone(committedRestock);
@@ -62,7 +63,7 @@ test("successful restock sends one notification with three authoritative mapping
   const store = new MemoryRestockStore();
   const provider = new MockNotificationProvider();
 
-  const result = await createMockRestockWithDependencies(7, store, { provider });
+  const result = await createMockRestockWithDependencies(9, 7, store, { provider });
 
   assert.deepEqual(result, committedRestock);
   assert.deepEqual(provider.restockNotifications, [{ slots: committedRestock.slots }]);
@@ -74,7 +75,7 @@ test("failed restock never claims or sends a notification", async () => {
   const provider = new MockNotificationProvider();
 
   await assert.rejects(
-    createMockRestockWithDependencies(7, store, { provider }),
+    createMockRestockWithDependencies(9, 7, store, { provider }),
     (error: unknown) => error instanceof HttpError && error.statusCode === 403,
   );
   assert.equal(store.notificationClaimed, false);
@@ -86,8 +87,8 @@ test("durable restock claim prevents duplicate notification handling", async () 
   const provider = new MockNotificationProvider();
   const notifications = { provider };
 
-  await createMockRestockWithDependencies(7, store, notifications);
-  await createMockRestockWithDependencies(7, store, notifications);
+  await createMockRestockWithDependencies(9, 7, store, notifications);
+  await createMockRestockWithDependencies(9, 7, store, notifications);
 
   assert.equal(store.commitCount, 2);
   assert.equal(provider.restockNotifications.length, 1);
@@ -98,7 +99,7 @@ test("notification failure leaves the restock committed and slots available", as
   const provider = new MockNotificationProvider(new Error("line-secret-value"));
   const logEntries: unknown[][] = [];
 
-  const result = await createMockRestockWithDependencies(7, store, {
+  const result = await createMockRestockWithDependencies(9, 7, store, {
     provider,
     logger: { error: (...entry: unknown[]) => logEntries.push(entry) },
   });
