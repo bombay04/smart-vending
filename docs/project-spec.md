@@ -168,7 +168,7 @@ The authorized enrollment flow is:
 
 `Admin Portal -> employee-bound ACTIVE FACE_REGISTRATION session -> idle Pi kiosk -> verify the same live session -> capture five samples -> save schema-v3 template locally -> update faceRegistered and complete the session -> Customer Home`
 
-The former direct `/admin/face-registration` entry and kiosk-side employee directory/selector are removed. Direct navigation falls through to Customer Home and cannot enroll anyone. Employee identity comes only from the session response; the Pi UI never lets a kiosk user choose or submit an arbitrary employee.
+The only supported frontend routes are Customer Kiosk `/`, Staff Portal `/staff`, and Admin Portal `/admin`. The legacy `/admin/face-registration` URL and every other unknown path are normalized to `/`; they are not alternate kiosk entry points. Face registration starts only when HomePage polling accepts an active employee-bound `FACE_REGISTRATION` session. The Pi UI never lets a kiosk user choose or submit an arbitrary employee.
 
 The Pi alone remains authoritative for actual template existence. `POST /face/registration/status` returns only normalized codes and registration-existence booleans. After `REGISTERED`, `POST /api/v1/employees/face-registration/complete` accepts only `{ "sessionId": number }`; the backend derives the employee from a matching active unexpired `FACE_REGISTRATION` session, verifies that employee is active, updates only `faceRegistered`, and completes the session transactionally.
 
