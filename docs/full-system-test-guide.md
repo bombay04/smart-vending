@@ -417,6 +417,18 @@ VITE_PI_UNLOCK_BASE_URL=http://localhost:5000
 
 > `.env` เป็นไฟล์เฉพาะเครื่องและไม่ควร commit หลังแก้ `.env` ต้อง restart Vite ทุกครั้ง
 
+ถ้าเปิด Staff Portal จากโทรศัพท์/แท็บเล็ต/PC ผ่าน URL ของ Pi เช่น
+`http://<PI_IP>:5173/staff` ให้เพิ่ม origin ของ Frontend แบบ exact match ใน
+`backend/.env` บนเครื่อง Backend ด้วย รายการคั่นด้วย comma และต้องระบุ scheme,
+host และ port ครบ:
+
+```dotenv
+CORS_ALLOWED_ORIGINS=http://localhost:5173,http://<PI_IP>:5173
+```
+
+ห้ามใช้ wildcard `*` และห้าม commit `backend/.env` หลังแก้ค่า จากนั้น restart
+Backend เพื่อโหลดค่าใหม่
+
 ## 10. เปิด Frontend บน Pi
 
 Pi Terminal 3:
