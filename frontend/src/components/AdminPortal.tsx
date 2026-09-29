@@ -7,7 +7,10 @@ import {
 } from "react";
 import {
   createEmployee,
+  deleteEmployee,
+  EmployeeManagementError,
   fetchEmployeesForFaceRegistration,
+  updateEmployee,
 } from "../api/employee-auth";
 import {
   cancelKioskSession,
@@ -32,6 +35,17 @@ function AdminPortal({ onBack }: AdminPortalProps) {
   const [name, setName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [editingEmployeeId, setEditingEmployeeId] = useState<number | null>(
+    null,
+  );
+  const [editName, setEditName] = useState("");
+  const [deleteConfirmationId, setDeleteConfirmationId] = useState<
+    number | null
+  >(null);
+  const [busyEmployeeIds, setBusyEmployeeIds] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [rowErrors, setRowErrors] = useState<Record<number, string>>({});
   const [session, setSession] = useState<KioskSession | null>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [sessionBusy, setSessionBusy] = useState(false);
@@ -118,6 +132,118 @@ function AdminPortal({ onBack }: AdminPortalProps) {
     }
   }
 
+  function setEmployeeBusy(employeeId: number, busy: boolean) {
+    setBusyEmployeeIds((current) => {
+      const next = new Set(current);
+      if (busy) next.add(employeeId);
+      else next.delete(employeeId);
+      return next;
+    });
+  }
+
+  function setRowError(employeeId: number, error: string | null) {
+    setRowErrors((current) => {
+      const next = { ...current };
+      if (error === null) delete next[employeeId];
+      else next[employeeId] = error;
+      return next;
+    });
+  }
+
+  function mutationErrorMessage(error: unknown, fallback: string) {
+    return error instanceof EmployeeManagementError ? error.message : fallback;
+  }
+
+  function replaceEmployee(updatedEmployee: RegistrationEmployee) {
+    setEmployees((current) =>
+      sortEmployees(
+        current.map((employee) =>
+          employee.id === updatedEmployee.id ? updatedEmployee : employee,
+        ),
+      ),
+    );
+  }
+
+  function beginEdit(employee: RegistrationEmployee) {
+    setDeleteConfirmationId(null);
+    setRowError(employee.id, null);
+    setEditingEmployeeId(employee.id);
+    setEditName(employee.name);
+  }
+
+  function cancelEdit() {
+    setEditingEmployeeId(null);
+    setEditName("");
+  }
+
+  async function handleSaveName(employee: RegistrationEmployee) {
+    const normalizedName = editName.trim();
+    if (!normalizedName || busyEmployeeIds.has(employee.id)) return;
+    setEmployeeBusy(employee.id, true);
+    setRowError(employee.id, null);
+    try {
+      replaceEmployee(
+        await updateEmployee(employee.id, { name: normalizedName }),
+      );
+      cancelEdit();
+    } catch (error) {
+      setRowError(
+        employee.id,
+        mutationErrorMessage(
+          error,
+          "Employee name update failed. Please try again.",
+        ),
+      );
+    } finally {
+      setEmployeeBusy(employee.id, false);
+    }
+  }
+
+  async function handleActiveChange(employee: RegistrationEmployee) {
+    if (busyEmployeeIds.has(employee.id)) return;
+    setEmployeeBusy(employee.id, true);
+    setRowError(employee.id, null);
+    try {
+      replaceEmployee(
+        await updateEmployee(employee.id, { isActive: !employee.isActive }),
+      );
+    } catch (error) {
+      setRowError(
+        employee.id,
+        mutationErrorMessage(
+          error,
+          "Employee status update failed. Please try again.",
+        ),
+      );
+    } finally {
+      setEmployeeBusy(employee.id, false);
+    }
+  }
+
+  async function handleDelete(employee: RegistrationEmployee) {
+    if (busyEmployeeIds.has(employee.id)) return;
+    setEmployeeBusy(employee.id, true);
+    setRowError(employee.id, null);
+    try {
+      await deleteEmployee(employee.id);
+      setEmployees((current) =>
+        current.filter((item) => item.id !== employee.id),
+      );
+      setDeleteConfirmationId(null);
+      if (editingEmployeeId === employee.id) cancelEdit();
+    } catch (error) {
+      setRowError(
+        employee.id,
+        mutationErrorMessage(
+          error,
+          "Employee deletion failed. Please try again.",
+        ),
+      );
+    } finally {
+      setEmployeeBusy(employee.id, false);
+    }
+  }
+
   async function handleStartFaceRegistration(employee: RegistrationEmployee) {
     if (sessionBusy || session !== null) return;
     setSessionBusy(true);
@@ -125,9 +251,7 @@ function AdminPortal({ onBack }: AdminPortalProps) {
     setMessage(null);
     try {
       setSession(await startFaceRegistrationSession(employee.id));
-      setMessage(
-        `The kiosk is waiting to register ${employee.employeeCode}.`,
-      );
+      setMessage(`The kiosk is waiting to register ${employee.employeeCode}.`);
     } catch (error) {
       setSessionError(
         error instanceof Error ? error.message : "Session request failed.",
@@ -185,9 +309,7 @@ function AdminPortal({ onBack }: AdminPortalProps) {
         >
           <div className="staff-section-heading">
             <div>
-              <h2 id="registration-session-title">
-                Face registration status
-              </h2>
+              <h2 id="registration-session-title">Face registration status</h2>
               <p>
                 Registration runs locally on the kiosk for the selected active
                 employee.
@@ -278,8 +400,7 @@ function AdminPortal({ onBack }: AdminPortalProps) {
             <div>
               <h2 id="employee-list-title">Employee directory</h2>
               <p>
-                Face status is workflow metadata and contains no biometric
-                data.
+                Face status is workflow metadata and contains no biometric data.
               </p>
             </div>
             <button
@@ -316,7 +437,7 @@ function AdminPortal({ onBack }: AdminPortalProps) {
                 <span>Name</span>
                 <span>Employee</span>
                 <span>Face Status</span>
-                <span>Action</span>
+                <span>Actions</span>
               </div>
               {employees.map((employee) => (
                 <div
@@ -325,7 +446,22 @@ function AdminPortal({ onBack }: AdminPortalProps) {
                   key={employee.id}
                 >
                   <strong>{employee.employeeCode}</strong>
-                  <span>{employee.name}</span>
+                  <span>
+                    {editingEmployeeId === employee.id ? (
+                      <label className="admin-edit-name">
+                        <span className="sr-only">Employee name</span>
+                        <input
+                          type="text"
+                          maxLength={120}
+                          value={editName}
+                          disabled={busyEmployeeIds.has(employee.id)}
+                          onChange={(event) => setEditName(event.target.value)}
+                        />
+                      </label>
+                    ) : (
+                      employee.name
+                    )}
+                  </span>
                   <span
                     className={
                       employee.isActive ? "staff-active" : "staff-inactive"
@@ -344,24 +480,112 @@ function AdminPortal({ onBack }: AdminPortalProps) {
                       ? "Registered"
                       : "Face Setup Required"}
                   </span>
-                  <span>
-                    {!employee.faceRegistered &&
-                      employee.isActive &&
-                      portalState === "IDLE" &&
-                      sessionLoaded &&
-                      !sessionError && (
+                  <div className="admin-employee-action-cell">
+                    {editingEmployeeId === employee.id ? (
+                      <div className="admin-employee-actions">
                         <button
-                          className="staff-face-action"
                           type="button"
-                          disabled={sessionBusy}
-                          onClick={() =>
-                            void handleStartFaceRegistration(employee)
+                          disabled={
+                            busyEmployeeIds.has(employee.id) || !editName.trim()
                           }
+                          onClick={() => void handleSaveName(employee)}
                         >
-                          Start Face Registration
+                          {busyEmployeeIds.has(employee.id)
+                            ? "Saving..."
+                            : "Save"}
                         </button>
-                      )}
-                  </span>
+                        <button
+                          type="button"
+                          disabled={busyEmployeeIds.has(employee.id)}
+                          onClick={cancelEdit}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : deleteConfirmationId === employee.id ? (
+                      <div className="admin-delete-confirmation">
+                        <strong>Delete {employee.employeeCode}?</strong>
+                        <span>
+                          This permanently removes this unused employee record.
+                        </span>
+                        <div className="admin-employee-actions">
+                          <button
+                            className="admin-delete-action"
+                            type="button"
+                            disabled={busyEmployeeIds.has(employee.id)}
+                            onClick={() => void handleDelete(employee)}
+                          >
+                            {busyEmployeeIds.has(employee.id)
+                              ? "Deleting..."
+                              : "Confirm Delete"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyEmployeeIds.has(employee.id)}
+                            onClick={() => setDeleteConfirmationId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="admin-employee-actions">
+                        <button
+                          type="button"
+                          disabled={busyEmployeeIds.has(employee.id)}
+                          onClick={() => beginEdit(employee)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busyEmployeeIds.has(employee.id)}
+                          onClick={() => void handleActiveChange(employee)}
+                        >
+                          {busyEmployeeIds.has(employee.id)
+                            ? "Updating..."
+                            : employee.isActive
+                              ? "Deactivate"
+                              : "Activate"}
+                        </button>
+                        <button
+                          className="admin-delete-action"
+                          type="button"
+                          disabled={busyEmployeeIds.has(employee.id)}
+                          onClick={() => {
+                            setEditingEmployeeId(null);
+                            setRowError(employee.id, null);
+                            setDeleteConfirmationId(employee.id);
+                          }}
+                        >
+                          Delete
+                        </button>
+                        {!employee.faceRegistered &&
+                          employee.isActive &&
+                          portalState === "IDLE" &&
+                          sessionLoaded &&
+                          !sessionError && (
+                            <button
+                              className="staff-face-action"
+                              type="button"
+                              disabled={
+                                sessionBusy || busyEmployeeIds.has(employee.id)
+                              }
+                              onClick={() =>
+                                void handleStartFaceRegistration(employee)
+                              }
+                            >
+                              Start Face Registration
+                            </button>
+                          )}
+                      </div>
+                    )}
+                    {rowErrors[employee.id] && (
+                      <span className="admin-row-error" role="alert">
+                        {rowErrors[employee.id]}
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

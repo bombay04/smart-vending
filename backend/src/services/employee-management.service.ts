@@ -5,6 +5,8 @@ import { PILOT_KIOSK_MACHINE_ID } from "./kiosk-session.service";
 const EMPLOYEE_CODE_PATTERN = /^EMP(\d+)$/;
 const MAX_EMPLOYEE_NAME_LENGTH = 120;
 const MAX_CREATE_ATTEMPTS = 3;
+const UNSAFE_DELETE_MESSAGE =
+  "This employee has enrollment or usage history and cannot be deleted. Deactivate the employee instead.";
 
 export interface EmployeeManagementRecord {
   id: number;
@@ -22,6 +24,28 @@ interface NewEmployeeData {
 }
 
 type CreateAttempt = (normalizedName: string) => Promise<EmployeeManagementRecord>;
+type UpdateAttempt = () => Promise<EmployeeManagementRecord>;
+
+export interface EmployeeUpdateData {
+  name?: string;
+  isActive?: boolean;
+}
+
+interface EmployeeUpdateStore {
+  findEmployee(employeeId: number): Promise<EmployeeManagementRecord | null>;
+  countActiveFaceRegistrationSessions(employeeId: number, now: Date): Promise<number>;
+  updateEmployee(employeeId: number, data: EmployeeUpdateData): Promise<EmployeeManagementRecord>;
+}
+
+interface EmployeeDeleteCandidate extends EmployeeManagementRecord {
+  restockLogCount: number;
+  kioskSessionCount: number;
+}
+
+interface EmployeeDeleteStore {
+  findEmployee(employeeId: number): Promise<EmployeeDeleteCandidate | null>;
+  deleteEmployee(employeeId: number): Promise<void>;
+}
 
 function hasExactKeys(value: Record<string, unknown>, expectedKeys: string[]): boolean {
   const actualKeys = Object.keys(value).sort();
@@ -42,6 +66,13 @@ export function normalizeEmployeeName(name: unknown): string {
   return normalizedName;
 }
 
+export function formatEmployeeCode(employeeCodeNumber: bigint): string {
+  if (employeeCodeNumber <= 0n) throw new Error("Employee code number must be positive.");
+  return `EMP${employeeCodeNumber.toString().padStart(3, "0")}`;
+}
+
+// Retained for deterministic unit callers; production allocation uses the
+// durable PostgreSQL sequence below so deletion cannot recycle a code.
 export function nextEmployeeCode(employeeCodes: string[]): string {
   const highestEmployeeNumber = employeeCodes.reduce((highest, employeeCode) => {
     const match = EMPLOYEE_CODE_PATTERN.exec(employeeCode);
@@ -49,7 +80,7 @@ export function nextEmployeeCode(employeeCodes: string[]): string {
     const value = Number.parseInt(match[1], 10);
     return Number.isSafeInteger(value) ? Math.max(highest, value) : highest;
   }, 0);
-  return `EMP${String(highestEmployeeNumber + 1).padStart(3, "0")}`;
+  return formatEmployeeCode(BigInt(highestEmployeeNumber + 1));
 }
 
 export function buildNewEmployeeData(
@@ -74,6 +105,38 @@ export function parseCreateEmployeeRequest(body: unknown): string {
     throw new HttpError("Request body must contain only name.", 400);
   }
   return normalizeEmployeeName((body as Record<string, unknown>).name);
+}
+
+export function parseEmployeeId(employeeId: unknown): number {
+  const parsed =
+    typeof employeeId === "string" && /^\d+$/.test(employeeId)
+      ? Number.parseInt(employeeId, 10)
+      : employeeId;
+  if (typeof parsed !== "number" || !Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new HttpError("employeeId must be a positive integer.", 400);
+  }
+  return parsed;
+}
+
+export function parseUpdateEmployeeRequest(body: unknown): EmployeeUpdateData {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new HttpError("Request body must contain name and/or isActive.", 400);
+  }
+  const request = body as Record<string, unknown>;
+  const keys = Object.keys(request);
+  if (keys.length === 0 || keys.some((key) => key !== "name" && key !== "isActive")) {
+    throw new HttpError("Request body may contain only name and isActive.", 400);
+  }
+
+  const data: EmployeeUpdateData = {};
+  if ("name" in request) data.name = normalizeEmployeeName(request.name);
+  if ("isActive" in request) {
+    if (typeof request.isActive !== "boolean") {
+      throw new HttpError("isActive must be a boolean.", 400);
+    }
+    data.isActive = request.isActive;
+  }
+  return data;
 }
 
 export function parseFaceRegistrationCompleteRequest(body: unknown): number {
@@ -127,13 +190,16 @@ export async function createEmployee(name: unknown): Promise<EmployeeManagementR
   return createEmployeeWithRetry(name, (normalizedName) =>
     prisma.$transaction(
       async (transaction) => {
-        const existingEmployees = await transaction.employee.findMany({
-          select: { employeeCode: true },
-        });
-        const data = buildNewEmployeeData(
-          normalizedName,
-          existingEmployees.map((employee) => employee.employeeCode),
-        );
+        const [sequenceValue] = await transaction.$queryRaw<
+          Array<{ employeeCodeNumber: bigint }>
+        >`SELECT nextval('"EmployeeCodeNumber_seq"') AS "employeeCodeNumber"`;
+        if (!sequenceValue) throw new Error("Employee code sequence returned no value.");
+        const data: NewEmployeeData = {
+          name: normalizedName,
+          employeeCode: formatEmployeeCode(sequenceValue.employeeCodeNumber),
+          isActive: true,
+          faceRegistered: false,
+        };
         return transaction.employee.create({
           data,
           select: {
@@ -148,6 +214,153 @@ export async function createEmployee(name: unknown): Promise<EmployeeManagementR
       { isolationLevel: "Serializable" },
     ),
   );
+}
+
+export async function updateEmployeeWithStore(
+  employeeIdValue: unknown,
+  body: unknown,
+  store: EmployeeUpdateStore,
+  now = new Date(),
+): Promise<EmployeeManagementRecord> {
+  const employeeId = parseEmployeeId(employeeIdValue);
+  const data = parseUpdateEmployeeRequest(body);
+  const employee = await store.findEmployee(employeeId);
+  if (!employee) throw new HttpError("Employee not found.", 404);
+
+  if (employee.isActive && data.isActive === false) {
+    const activeRegistrationSessions = await store.countActiveFaceRegistrationSessions(
+      employeeId,
+      now,
+    );
+    if (activeRegistrationSessions > 0) {
+      throw new HttpError(
+        "Employee cannot be deactivated during an active face-registration session. Cancel the session first.",
+        409,
+      );
+    }
+  }
+
+  return toSafeEmployee(await store.updateEmployee(employeeId, data));
+}
+
+export async function updateEmployeeWithConflictHandling(
+  updateAttempt: UpdateAttempt,
+): Promise<EmployeeManagementRecord> {
+  try {
+    return await updateAttempt();
+  } catch (error: unknown) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "P2034") {
+      throw new HttpError(
+        "Employee update conflicted with another change. Refresh the employee directory and try again.",
+        409,
+      );
+    }
+    throw error;
+  }
+}
+
+export async function updateEmployee(
+  employeeIdValue: unknown,
+  body: unknown,
+): Promise<EmployeeManagementRecord> {
+  return updateEmployeeWithConflictHandling(() =>
+    prisma.$transaction(
+      (transaction) =>
+        updateEmployeeWithStore(employeeIdValue, body, {
+          findEmployee: (employeeId) =>
+            transaction.employee.findUnique({
+              where: { id: employeeId },
+              select: {
+                id: true,
+                employeeCode: true,
+                name: true,
+                isActive: true,
+                faceRegistered: true,
+              },
+            }),
+          countActiveFaceRegistrationSessions: (employeeId, now) =>
+            transaction.kioskSession.count({
+              where: {
+                employeeId,
+                type: "FACE_REGISTRATION",
+                status: "ACTIVE",
+                expiresAt: { gt: now },
+              },
+            }),
+          updateEmployee: (employeeId, data) =>
+            transaction.employee.update({
+              where: { id: employeeId },
+              data,
+              select: {
+                id: true,
+                employeeCode: true,
+                name: true,
+                isActive: true,
+                faceRegistered: true,
+              },
+            }),
+        }),
+      { isolationLevel: "Serializable" },
+    ),
+  );
+}
+
+export async function deleteEmployeeWithStore(
+  employeeIdValue: unknown,
+  store: EmployeeDeleteStore,
+): Promise<void> {
+  const employeeId = parseEmployeeId(employeeIdValue);
+  const employee = await store.findEmployee(employeeId);
+  if (!employee) throw new HttpError("Employee not found.", 404);
+  if (employee.faceRegistered || employee.restockLogCount > 0 || employee.kioskSessionCount > 0) {
+    throw new HttpError(UNSAFE_DELETE_MESSAGE, 409);
+  }
+  await store.deleteEmployee(employeeId);
+}
+
+function isPrismaDeleteConflict(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) return false;
+  return error.code === "P2003" || error.code === "P2034";
+}
+
+export async function deleteEmployee(employeeIdValue: unknown): Promise<void> {
+  try {
+    await prisma.$transaction(
+      (transaction) =>
+        deleteEmployeeWithStore(employeeIdValue, {
+          findEmployee: async (employeeId) => {
+            const employee = await transaction.employee.findUnique({
+              where: { id: employeeId },
+              select: {
+                id: true,
+                employeeCode: true,
+                name: true,
+                isActive: true,
+                faceRegistered: true,
+                _count: { select: { restockLogs: true, kioskSessions: true } },
+              },
+            });
+            if (!employee) return null;
+            return {
+              id: employee.id,
+              employeeCode: employee.employeeCode,
+              name: employee.name,
+              isActive: employee.isActive,
+              faceRegistered: employee.faceRegistered,
+              restockLogCount: employee._count.restockLogs,
+              kioskSessionCount: employee._count.kioskSessions,
+            };
+          },
+          deleteEmployee: async (employeeId) => {
+            await transaction.employee.delete({ where: { id: employeeId } });
+          },
+        }),
+      { isolationLevel: "Serializable" },
+    );
+  } catch (error: unknown) {
+    if (isPrismaDeleteConflict(error)) throw new HttpError(UNSAFE_DELETE_MESSAGE, 409);
+    throw error;
+  }
 }
 
 export async function completeFaceRegistrationWithUpdate(

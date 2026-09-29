@@ -34,10 +34,11 @@ test("routing exposes exactly the customer, staff, and admin surfaces", async ()
 });
 
 test("the remote portals separate staff restock from admin employee workflows", async () => {
-  const [app, staffPortal, adminPortal] = await Promise.all([
+  const [app, staffPortal, adminPortal, employeeApi] = await Promise.all([
     source("src/App.tsx"),
     source("src/components/StaffPortal.tsx"),
     source("src/components/AdminPortal.tsx"),
+    source("src/api/employee-auth.ts"),
   ]);
 
   assert.match(app, /<StaffPortal/);
@@ -58,10 +59,55 @@ test("the remote portals separate staff restock from admin employee workflows", 
   assert.match(adminPortal, /createEmployee\(name/);
   assert.match(adminPortal, /Face Setup Required/);
   assert.match(adminPortal, /Start Face Registration/);
+  assert.match(adminPortal, />\s*Edit\s*</);
+  assert.match(adminPortal, /"Deactivate"/);
+  assert.match(adminPortal, /"Activate"/);
+  assert.match(adminPortal, />\s*Delete\s*</);
+  assert.match(adminPortal, /handleSaveName/);
+  assert.match(adminPortal, /handleActiveChange/);
+  assert.match(employeeApi, /method: "PATCH"/);
+  assert.match(employeeApi, /method: "DELETE"/);
   assert.match(adminPortal, /cancelKioskSession/);
   assert.doesNotMatch(adminPortal, /Start Restock/);
   assert.doesNotMatch(adminPortal, /startRestockSession/);
   assert.doesNotMatch(adminPortal, /registerEmployeeFace/);
+});
+
+test("admin deletion is confirmed, refreshes local rows, and displays lifecycle conflicts", async () => {
+  const [adminPortal, employeeApi] = await Promise.all([
+    source("src/components/AdminPortal.tsx"),
+    source("src/api/employee-auth.ts"),
+  ]);
+
+  assert.match(adminPortal, /Delete \{employee\.employeeCode\}\?/);
+  assert.match(
+    adminPortal,
+    /This permanently removes this unused employee record/,
+  );
+  assert.match(adminPortal, /Confirm Delete/);
+  assert.match(adminPortal, /setDeleteConfirmationId\(employee\.id\)/);
+  assert.match(
+    adminPortal,
+    /current\.filter\(\(item\) => item\.id !== employee\.id\)/,
+  );
+  assert.match(adminPortal, /rowErrors\[employee\.id\]/);
+  assert.match(
+    adminPortal,
+    /error instanceof EmployeeManagementError \? error\.message/,
+  );
+  assert.match(employeeApi, /responseData\.error/);
+  assert.match(
+    employeeApi,
+    /new EmployeeManagementError\(response\.status, message\)/,
+  );
+});
+
+test("inactive employees are not offered face registration", async () => {
+  const adminPortal = await source("src/components/AdminPortal.tsx");
+  assert.match(
+    adminPortal,
+    /!employee\.faceRegistered &&[\s\S]*employee\.isActive &&[\s\S]*Start Face Registration/,
+  );
 });
 
 test("local face setup uses the session-bound employee and metadata-only sync recovery", async () => {
