@@ -10,13 +10,23 @@ from typing import TypeAlias
 @dataclass(frozen=True)
 class CameraCaptureDiagnostics:
     camera_index: int
+    backend: str
+    requested_width: int
+    requested_height: int
+    requested_fps: int
+    requested_fourcc: str
+    actual_width: int
+    actual_height: int
+    actual_fps: float
+    actual_fourcc: str
     frame_width: int
     frame_height: int
-    stabilization_seconds: float
-    stabilization_elapsed_milliseconds: float
-    stabilization_reads: int
-    successful_discarded_frames: int
-    post_stabilization_attempts: int
+    warmup_reads: int
+    unhealthy_frames: int
+    black_frames: int
+    recovery_attempt: int
+    reopen_count: int
+    time_to_first_healthy_milliseconds: float
 
 
 @dataclass(frozen=True)
@@ -92,12 +102,18 @@ def format_diagnostic(event: DiagnosticEvent) -> str:
         return (
             "DEBUG camera "
             f"index={event.camera_index} "
+            f"backend={event.backend} "
+            f"requested={event.requested_width}x{event.requested_height}"
+            f"@{event.requested_fps} fourcc={event.requested_fourcc} "
+            f"actual={event.actual_width}x{event.actual_height}"
+            f"@{event.actual_fps:.3f} fourcc={event.actual_fourcc} "
             f"frame={event.frame_width}x{event.frame_height} "
-            f"stabilizationSeconds={event.stabilization_seconds:.3f} "
-            f"stabilizationElapsedMs={event.stabilization_elapsed_milliseconds:.1f} "
-            f"stabilizationReads={event.stabilization_reads} "
-            f"discardedFrames={event.successful_discarded_frames} "
-            f"freshFrameAttempts={event.post_stabilization_attempts}"
+            f"warmupReads={event.warmup_reads} "
+            f"unhealthyFrames={event.unhealthy_frames} "
+            f"blackFrames={event.black_frames} "
+            f"recoveryAttempt={event.recovery_attempt} "
+            f"reopenCount={event.reopen_count} "
+            f"timeToHealthyMs={event.time_to_first_healthy_milliseconds:.1f}"
         )
 
     if isinstance(event, FaceDetectionDiagnostics):

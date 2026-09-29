@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from .camera import capture_frame
+from .camera import CameraCaptureSession
 from .config import (
     DEFAULT_CAMERA_INDEX,
     DEFAULT_CAMERA_STABILIZATION_SECONDS,
@@ -192,28 +192,13 @@ class FaceEngine:
         self, *, phase: str, sample_count: int
     ) -> tuple[tuple[float, ...], ...]:
         embeddings: list[tuple[float, ...]] = []
-        for sample_number in range(1, sample_count + 1):
-            for attempt in range(1, MAX_ATTEMPTS_PER_SAMPLE + 1):
-                self._emit(
-                    SampleCollectionDiagnostics(
-                        phase=phase,
-                        sample_number=sample_number,
-                        required_samples=sample_count,
-                        attempt=attempt,
-                        maximum_attempts=MAX_ATTEMPTS_PER_SAMPLE,
-                        status="capturing",
-                    )
-                )
-                frame = capture_frame(
-                    self.camera_index,
-                    stabilization_seconds=self.stabilization_seconds,
-                    diagnostic_sink=self.diagnostic_sink,
-                )
-                try:
-                    detection = self.detector.detect_single_face(
-                        frame, diagnostic_sink=self.diagnostic_sink
-                    )
-                except (NoFaceError, MultipleFacesError) as error:
+        with CameraCaptureSession(
+            self.camera_index,
+            stabilization_seconds=self.stabilization_seconds,
+            diagnostic_sink=self.diagnostic_sink,
+        ) as camera:
+            for sample_number in range(1, sample_count + 1):
+                for attempt in range(1, MAX_ATTEMPTS_PER_SAMPLE + 1):
                     self._emit(
                         SampleCollectionDiagnostics(
                             phase=phase,
@@ -221,36 +206,52 @@ class FaceEngine:
                             required_samples=sample_count,
                             attempt=attempt,
                             maximum_attempts=MAX_ATTEMPTS_PER_SAMPLE,
-                            status=error.code,
+                            status="capturing",
                         )
                     )
-                    if attempt == MAX_ATTEMPTS_PER_SAMPLE:
-                        error_type = type(error)
-                        raise error_type(
-                            f"Unable to collect {phase} sample {sample_number}/"
-                            f"{sample_count} after {MAX_ATTEMPTS_PER_SAMPLE} "
-                            f"attempts: {error}"
-                        ) from error
-                    continue
+                    frame = camera.capture_frame()
+                    try:
+                        detection = self.detector.detect_single_face(
+                            frame, diagnostic_sink=self.diagnostic_sink
+                        )
+                    except (NoFaceError, MultipleFacesError) as error:
+                        self._emit(
+                            SampleCollectionDiagnostics(
+                                phase=phase,
+                                sample_number=sample_number,
+                                required_samples=sample_count,
+                                attempt=attempt,
+                                maximum_attempts=MAX_ATTEMPTS_PER_SAMPLE,
+                                status=error.code,
+                            )
+                        )
+                        if attempt == MAX_ATTEMPTS_PER_SAMPLE:
+                            error_type = type(error)
+                            raise error_type(
+                                f"Unable to collect {phase} sample {sample_number}/"
+                                f"{sample_count} after {MAX_ATTEMPTS_PER_SAMPLE} "
+                                f"attempts: {error}"
+                            ) from error
+                        continue
 
-                embeddings.append(
-                    self.embedder.create_embedding(
-                        frame,
-                        detection,
-                        diagnostic_sink=self.diagnostic_sink,
+                    embeddings.append(
+                        self.embedder.create_embedding(
+                            frame,
+                            detection,
+                            diagnostic_sink=self.diagnostic_sink,
+                        )
                     )
-                )
-                self._emit(
-                    SampleCollectionDiagnostics(
-                        phase=phase,
-                        sample_number=sample_number,
-                        required_samples=sample_count,
-                        attempt=attempt,
-                        maximum_attempts=MAX_ATTEMPTS_PER_SAMPLE,
-                        status="accepted",
+                    self._emit(
+                        SampleCollectionDiagnostics(
+                            phase=phase,
+                            sample_number=sample_number,
+                            required_samples=sample_count,
+                            attempt=attempt,
+                            maximum_attempts=MAX_ATTEMPTS_PER_SAMPLE,
+                            status="accepted",
+                        )
                     )
-                )
-                break
+                    break
         return tuple(embeddings)
 
     def _emit(self, event: DiagnosticEvent) -> None:

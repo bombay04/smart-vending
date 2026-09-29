@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from edge.face.diagnostics import (
+    CameraCaptureDiagnostics,
     ConsensusDecisionDiagnostics,
     EmbeddingDiagnostics,
     FaceDetectionDiagnostics,
@@ -13,6 +14,37 @@ from edge.face.diagnostics import (
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_camera_diagnostics_include_configuration_and_health_counts_only(self) -> None:
+        output = format_diagnostic(
+            CameraCaptureDiagnostics(
+                camera_index=0,
+                backend="V4L2",
+                requested_width=640,
+                requested_height=480,
+                requested_fps=30,
+                requested_fourcc="MJPG",
+                actual_width=640,
+                actual_height=480,
+                actual_fps=30.0,
+                actual_fourcc="MJPG",
+                frame_width=640,
+                frame_height=480,
+                warmup_reads=3,
+                unhealthy_frames=2,
+                black_frames=2,
+                recovery_attempt=1,
+                reopen_count=1,
+                time_to_first_healthy_milliseconds=42.0,
+            )
+        )
+
+        self.assertIn("backend=V4L2", output)
+        self.assertIn("requested=640x480@30 fourcc=MJPG", output)
+        self.assertIn("blackFrames=2", output)
+        self.assertIn("reopenCount=1", output)
+        self.assertNotIn("pixels", output)
+        self.assertNotIn("embedding", output)
+
     def test_detection_embedding_and_timing_diagnostics_are_aggregate_only(self) -> None:
         outputs = (
             format_diagnostic(
