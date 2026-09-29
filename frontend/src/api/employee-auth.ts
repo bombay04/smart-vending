@@ -22,6 +22,16 @@ export class EmployeeValidationError extends Error {
   }
 }
 
+export class EmployeeManagementError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "EmployeeManagementError";
+  }
+}
+
 function isAuthenticatedEmployee(
   value: unknown,
 ): value is AuthenticatedEmployee {
@@ -160,7 +170,7 @@ async function readRegistrationEmployee(
   response: Response,
 ): Promise<RegistrationEmployee> {
   if (!response.ok) {
-    throw new EmployeeValidationError(response.status === 401);
+    throw await readEmployeeManagementError(response);
   }
   let responseData: unknown;
   try {
@@ -186,6 +196,27 @@ async function readRegistrationEmployee(
   };
 }
 
+async function readEmployeeManagementError(
+  response: Response,
+): Promise<EmployeeManagementError> {
+  let message = "Employee request failed. Please try again.";
+  try {
+    const responseData = (await response.json()) as unknown;
+    if (
+      typeof responseData === "object" &&
+      responseData !== null &&
+      "error" in responseData &&
+      typeof responseData.error === "string" &&
+      responseData.error.length > 0
+    ) {
+      message = responseData.error;
+    }
+  } catch {
+    // Keep the safe fallback message when the backend response is not JSON.
+  }
+  return new EmployeeManagementError(response.status, message);
+}
+
 export async function createEmployee(
   name: string,
   signal?: AbortSignal,
@@ -197,6 +228,31 @@ export async function createEmployee(
     signal,
   });
   return readRegistrationEmployee(response);
+}
+
+export async function updateEmployee(
+  employeeId: number,
+  updates: { name?: string; isActive?: boolean },
+  signal?: AbortSignal,
+): Promise<RegistrationEmployee> {
+  const response = await fetch(`${employeesUrl}/${employeeId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+    signal,
+  });
+  return readRegistrationEmployee(response);
+}
+
+export async function deleteEmployee(
+  employeeId: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(`${employeesUrl}/${employeeId}`, {
+    method: "DELETE",
+    signal,
+  });
+  if (!response.ok) throw await readEmployeeManagementError(response);
 }
 
 export async function completeEmployeeFaceRegistration(

@@ -6,7 +6,9 @@ import {
 import {
   completeFaceRegistration,
   createEmployee,
+  deleteEmployee,
   parseCreateEmployeeRequest,
+  updateEmployee,
 } from "../services/employee-management.service";
 import { requireActiveKioskSession } from "../services/kiosk-session.service";
 
@@ -64,6 +66,32 @@ export async function createEmployeeRequest(
     const name = parseCreateEmployeeRequest(request.body);
     const employee = await createEmployee(name);
     response.status(201).json({ employee });
+  } catch (error: unknown) {
+    next(error);
+  }
+}
+
+export async function updateEmployeeRequest(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const employee = await updateEmployee(request.params.employeeId, request.body);
+    response.status(200).json({ employee });
+  } catch (error: unknown) {
+    next(error);
+  }
+}
+
+export async function deleteEmployeeRequest(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    await deleteEmployee(request.params.employeeId);
+    response.status(204).send();
   } catch (error: unknown) {
     next(error);
   }

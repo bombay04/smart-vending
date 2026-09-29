@@ -162,7 +162,9 @@ The YuNet/SFace pipeline, sampling and comparison rules, schema-v3 storage, loca
 
 ### Employee face registration
 
-`/admin` lists backend employee records and creates an employee from a name only. Creation allocates a sequential `EMP###` code, marks the record active, initializes `faceRegistered: false`, and does not start enrollment. For an active unregistered employee, **Start Face Registration** creates an employee-bound `FACE_REGISTRATION` session and displays its waiting state, identity, status, expiry, and Cancel action.
+`/admin` lists backend employee records and supports name-only creation, name editing, activation/deactivation, and restricted deletion. Creation allocates a durable sequential `EMP###` code that is never reused, marks the record active, initializes `faceRegistered: false`, and does not start enrollment. Active/inactive is the operational access state: inactive employees remain stored with their history and local Pi template, but fail backend validation and cannot enter Restock Mode. For an active unregistered employee, **Start Face Registration** creates an employee-bound `FACE_REGISTRATION` session and displays its waiting state, identity, status, expiry, and Cancel action.
+
+Hard deletion is limited to unused, unregistered employees with no kiosk-session or restock history. Enrolled or used employees must be deactivated instead. Deleting or replacing a Pi biometric template remains out of scope.
 
 The authorized enrollment flow is:
 
