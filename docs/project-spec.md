@@ -31,7 +31,7 @@ The physical machine is one vending cabinet with three transparent, stacked acry
 7. Employee authentication fails closed for every unsuccessful, unavailable, malformed, or uncertain outcome.
 8. Biometric data remains local to the Raspberry Pi. The backend and frontend must never receive biometric embeddings.
 9. Customer Home is customer-only: it exposes no staff navigation, gesture, shortcut, or local employee selector.
-10. Restock and face registration require a short-lived backend-authorized kiosk session started remotely from `/staff`.
+10. Restock and face registration require a short-lived backend-authorized kiosk session started remotely from `/staff` and `/admin`, respectively.
 
 ## System architecture and responsibilities
 
@@ -49,7 +49,7 @@ The backend uses Node.js, TypeScript, Express, PostgreSQL, and Prisma. It provid
 
 ### Frontend
 
-The touchscreen UI uses React, Vite, and TypeScript and runs in Chromium on the Raspberry Pi. Its normal `/` surface is customer-only. The separate responsive `/staff` portal supports phones, tablets, and PCs and remotely initiates staff workflows.
+The touchscreen UI uses React, Vite, and TypeScript and runs in Chromium on the Raspberry Pi. Its normal `/` surface is customer-only. The responsive `/staff` portal initiates restock operations, while the separate responsive `/admin` portal manages employees and initiates face registration. Both remote portals support phones, tablets, and PCs.
 
 ## Communication boundaries
 
@@ -116,7 +116,7 @@ The PostgreSQL `KioskSession` model records `machineId`, type (`RESTOCK_AUTH` or
 
 The REST API exposes current, start-restock, start-face-registration, complete, and cancel operations. Clients cannot submit a session type or arbitrary status transition. Completion is idempotent for an already completed session; invalid cross-state transitions fail with conflict. Network failure fails closed for staff entry and does not affect customer purchasing or delete Pi-local templates.
 
-The `/staff` route currently has **no real authentication or authorization middleware**. Hiding or knowing the route is not security. This is a documented single-machine pilot limitation: the session routes isolate the mutation boundary for future staff-auth middleware, but the portal is not production-secure and this task does not invent a large RBAC system.
+The `/staff` and `/admin` routes currently have **no real authentication or authorization middleware**. Their separation is at the workflow/UI level only; hiding or knowing either route is not security. This is a documented single-machine pilot limitation: the session routes isolate the mutation boundary for future identity and authorization middleware, but the portals are not production-secure.
 
 For phone/tablet/PC access, build the frontend with `VITE_API_BASE_URL` pointing to the reachable backend and configure the backend comma-separated `CORS_ALLOWED_ORIGINS` with each trusted portal origin. The default CORS origin remains `http://localhost:5173` for local development.
 
@@ -162,13 +162,13 @@ The YuNet/SFace pipeline, sampling and comparison rules, schema-v3 storage, loca
 
 ### Employee face registration
 
-`/staff` lists backend employee records and creates an employee from a name only. Creation allocates a sequential `EMP###` code, marks the record active, initializes `faceRegistered: false`, and does not start enrollment. For an active unregistered employee, **Start Face Registration** creates an employee-bound `FACE_REGISTRATION` session and displays its waiting state, identity, status, expiry, and Cancel action.
+`/admin` lists backend employee records and creates an employee from a name only. Creation allocates a sequential `EMP###` code, marks the record active, initializes `faceRegistered: false`, and does not start enrollment. For an active unregistered employee, **Start Face Registration** creates an employee-bound `FACE_REGISTRATION` session and displays its waiting state, identity, status, expiry, and Cancel action.
 
 The authorized enrollment flow is:
 
-`Staff Portal -> employee-bound ACTIVE FACE_REGISTRATION session -> idle Pi kiosk -> verify the same live session -> capture five samples -> save schema-v3 template locally -> update faceRegistered and complete the session -> Customer Home`
+`Admin Portal -> employee-bound ACTIVE FACE_REGISTRATION session -> idle Pi kiosk -> verify the same live session -> capture five samples -> save schema-v3 template locally -> update faceRegistered and complete the session -> Customer Home`
 
-The former direct `/admin/face-registration` entry and kiosk-side employee directory/selector are removed. Direct navigation falls through to Customer Home and cannot enroll anyone. Employee identity comes only from the session response; the Pi UI never lets a kiosk user choose or submit an arbitrary employee.
+The only supported frontend routes are Customer Kiosk `/`, Staff Portal `/staff`, and Admin Portal `/admin`. The legacy `/admin/face-registration` URL and every other unknown path are normalized to `/`; they are not alternate kiosk entry points. Face registration starts only when HomePage polling accepts an active employee-bound `FACE_REGISTRATION` session. The Pi UI never lets a kiosk user choose or submit an arbitrary employee.
 
 The Pi alone remains authoritative for actual template existence. `POST /face/registration/status` returns only normalized codes and registration-existence booleans. After `REGISTERED`, `POST /api/v1/employees/face-registration/complete` accepts only `{ "sessionId": number }`; the backend derives the employee from a matching active unexpired `FACE_REGISTRATION` session, verifies that employee is active, updates only `faceRegistered`, and completes the session transactionally.
 
@@ -259,7 +259,7 @@ The following are out of scope for Phase 1:
 | Real Omise/Opn PromptPay QR creation, polling, and webhook reconciliation  | Implemented (automated tests; real provider E2E pending)                                |
 | Local YuNet/SFace recognition and Pi face-auth HTTP endpoint               | Implemented                                                                             |
 | Customer-only kiosk plus remote temporary staff sessions                   | Implemented                                                                             |
-| Responsive staff portal remote restock/registration initiation             | Implemented; no portal authentication yet                                               |
+| Separate responsive staff-restock and admin-registration portals           | Implemented at workflow/UI level; no portal authentication yet                           |
 | Cloud employee management plus session-bound local face registration       | Implemented (automated tests; physical validation not recorded)                         |
 | Backend validation of matched active employee                              | Implemented                                                                             |
 | Fail-closed employee-auth outcomes                                         | Implemented                                                                             |
@@ -276,7 +276,7 @@ The following are out of scope for Phase 1:
 1. **Legacy backend biometric field:** `backend/prisma/schema.prisma` still defines an optional `Employee.faceEmbedding` JSON field. The current architecture must neither use nor populate it; new employee creation leaves it `NULL`, API selects omit it, and biometric templates and embeddings remain exclusively local to the Pi. Removing it is deferred to a separate schema/migration task. The separate `faceRegistered` Boolean is privacy-safe workflow metadata and is not biometric template authority.
 2. **Stale threshold documentation:** [pi-face-recognition.md](pi-face-recognition.md) still describes `1.128` only as an upstream reference that is uncalibrated for this project. Task 34 later validated it for the limited prototype dataset described above. The technical document is stale; the Task 34 result is not a business-rule conflict.
 3. **Delayed authentication clearing:** after a successful restock is committed, the current frontend retains the authenticated employee in memory during the approximately 3.5-second success screen. It clears authentication when returning to Customer Home, while the target behavior is immediate clearing at successful commit.
-4. **Staff Portal authentication:** `/staff` and its session mutation endpoints have no real authentication/authorization middleware in the current pilot. Route separation is not an access-control system; production deployment requires staff identity and authorization to be added at this isolated API boundary.
+4. **Portal authentication:** `/staff`, `/admin`, and their session mutation endpoints have no real authentication/authorization middleware in the current pilot. Route separation is not an access-control system; production deployment requires staff/admin identity and authorization to be added at this isolated API boundary.
 
 ## Technical references
 

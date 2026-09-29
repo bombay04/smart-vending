@@ -1,18 +1,37 @@
 import { useEffect, useState } from "react";
+import AdminPortal from "./components/AdminPortal";
 import StaffPortal from "./components/StaffPortal";
 import HomePage from "./pages/HomePage";
+import {
+  ADMIN_PORTAL_PATH,
+  CUSTOMER_KIOSK_PATH,
+  resolveAppPathname,
+  STAFF_PORTAL_PATH,
+} from "./app-route.mjs";
 import "./App.css";
 
-const STAFF_PORTAL_PATH = "/staff";
-
 function App() {
-  const [pathname, setPathname] = useState(window.location.pathname);
+  const [pathname, setPathname] = useState(() =>
+    resolveAppPathname(window.location.pathname),
+  );
 
   useEffect(() => {
-    const handlePopState = () => setPathname(window.location.pathname);
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
+    const syncPathname = () => {
+      const resolvedPathname = resolveAppPathname(window.location.pathname);
+      if (resolvedPathname !== window.location.pathname) {
+        window.history.replaceState(null, "", resolvedPathname);
+      }
+      setPathname(resolvedPathname);
+    };
+    syncPathname();
+    window.addEventListener("popstate", syncPathname);
+    return () => window.removeEventListener("popstate", syncPathname);
   }, []);
+
+  const returnToCustomerKiosk = () => {
+    window.history.replaceState(null, "", CUSTOMER_KIOSK_PATH);
+    setPathname(CUSTOMER_KIOSK_PATH);
+  };
 
   useEffect(() => {
     const preventKioskContextMenu = (event: MouseEvent) => {
@@ -32,18 +51,19 @@ function App() {
       document.removeEventListener("contextmenu", preventKioskContextMenu);
   }, []);
 
-  if (pathname === STAFF_PORTAL_PATH) {
-    return (
-      <StaffPortal
-        onBack={() => {
-          window.history.replaceState(null, "", "/");
-          setPathname("/");
-        }}
-      />
-    );
+  if (pathname === CUSTOMER_KIOSK_PATH) {
+    return <HomePage />;
   }
 
-  return <HomePage />;
+  if (pathname === STAFF_PORTAL_PATH) {
+    return <StaffPortal onBack={returnToCustomerKiosk} />;
+  }
+
+  if (pathname === ADMIN_PORTAL_PATH) {
+    return <AdminPortal onBack={returnToCustomerKiosk} />;
+  }
+
+  return null;
 }
 
 export default App;

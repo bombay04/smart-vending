@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { decideKioskSessionAction } from "../src/kiosk-session-flow.mjs";
+import { getPortalSessionState } from "../src/portal-session-state.mjs";
 
 const restock = { id: 10, type: "RESTOCK_AUTH", employee: null };
 const registration = {
@@ -66,19 +67,79 @@ test("customer and direct-route source expose no local staff entry bypass", asyn
   assert.match(registrationSource, /authorizedSession\?\.id !== session\.id/);
 });
 
-test("staff portal keeps employee creation separate and exposes responsive remote actions", async () => {
-  const [portal, css] = await Promise.all([
+test("portal session state preserves each role boundary during conflicts", () => {
+  assert.equal(getPortalSessionState(null, "RESTOCK_AUTH"), "IDLE");
+  assert.equal(
+    getPortalSessionState(restock, "RESTOCK_AUTH"),
+    "OWN_SESSION",
+  );
+  assert.equal(
+    getPortalSessionState(registration, "FACE_REGISTRATION"),
+    "OWN_SESSION",
+  );
+  assert.equal(
+    getPortalSessionState(registration, "RESTOCK_AUTH"),
+    "KIOSK_BUSY",
+  );
+  assert.equal(
+    getPortalSessionState(restock, "FACE_REGISTRATION"),
+    "KIOSK_BUSY",
+  );
+});
+
+test("portals expose only role-owned cancellation and responsive busy states", async () => {
+  const [staffPortal, adminPortal, css] = await Promise.all([
     readFile(
       new URL("../src/components/StaffPortal.tsx", import.meta.url),
       "utf8",
     ),
+    readFile(
+      new URL("../src/components/AdminPortal.tsx", import.meta.url),
+      "utf8",
+    ),
     readFile(new URL("../src/App.css", import.meta.url), "utf8"),
   ]);
-  assert.match(portal, /Start Restock/);
-  assert.match(portal, /Start Face Registration/);
-  assert.match(portal, /createEmployee\(name\)/);
-  assert.match(portal, /does not start\s+face\s+registration/);
-  assert.match(portal, /cancelKioskSession/);
+  assert.match(staffPortal, /session\?\.type !== "RESTOCK_AUTH"/);
+  assert.match(adminPortal, /session\?\.type !== "FACE_REGISTRATION"/);
+  assert.match(staffPortal, /portalState === "KIOSK_BUSY"/);
+  assert.match(adminPortal, /portalState === "KIOSK_BUSY"/);
+  assert.match(staffPortal, /Another kiosk workflow is active/);
+  assert.match(adminPortal, /Another kiosk workflow is active/);
   assert.match(css, /@media \(max-width: 900px\)/);
   assert.match(css, /\.staff-active-session[\s\S]*flex-direction: column/);
+  assert.match(css, /\.staff-employee-row[\s\S]*grid-template-columns/);
+});
+
+test("local restock and registration screens retain session guards", async () => {
+  const [home, authentication, restockMode, registrationSource] =
+    await Promise.all([
+      readFile(new URL("../src/pages/HomePage.tsx", import.meta.url), "utf8"),
+      readFile(
+        new URL(
+          "../src/components/EmployeeAuthentication.tsx",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+      readFile(
+        new URL("../src/components/RestockMode.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL(
+          "../src/components/EmployeeFaceRegistration.tsx",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ]);
+
+  assert.match(home, /activeStaffSession\?\.type === "RESTOCK_AUTH"/);
+  assert.match(home, /activeStaffSession\?\.type === "FACE_REGISTRATION"/);
+  assert.match(
+    authentication,
+    /validateFaceAuthenticatedEmployee\([\s\S]*sessionId/,
+  );
+  assert.match(restockMode, /createMockRestock\(sessionId, employeeId\)/);
+  assert.match(registrationSource, /authorizedSession\?\.id !== session\.id/);
 });
