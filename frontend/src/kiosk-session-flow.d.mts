@@ -4,7 +4,9 @@ export type KioskSessionAction =
   | "STAY"
   | "EXIT_STAFF"
   | "START_RESTOCK_AUTH"
-  | "START_FACE_REGISTRATION";
+  | "START_FACE_REGISTRATION"
+  | "PROCESS_DRAFT_DELETE"
+  | "PROCESS_OFFBOARDING";
 
 export function decideKioskSessionAction(input: {
   session: KioskSession | null;

@@ -11,9 +11,15 @@ import EmployeeAuthentication from "../components/EmployeeAuthentication";
 import RestockMode from "../components/RestockMode";
 import EmployeeFaceRegistration from "../components/EmployeeFaceRegistration";
 import {
+  completeEmployeeOffboarding,
   fetchCurrentKioskSession,
+  reportDraftDeleteResult,
   type KioskSession,
 } from "../api/kiosk-session";
+import {
+  fetchFaceRegistrationStatuses,
+  removeEmployeeFaceTemplate,
+} from "../api/face-registration";
 import { handleConfirmedPaymentOnce } from "../payment-flow.mjs";
 import type { AuthenticatedEmployee } from "../types/employee";
 import type { MockRestockResult } from "../api/restock";
@@ -52,6 +58,7 @@ function HomePage() {
   const unlockAttemptedTransactionIds = useRef(new Set<number>());
   const acceptedSessionIds = useRef(new Set<number>());
   const staffWorkflowCompletedRef = useRef(false);
+  const maintenanceInFlightSessionId = useRef<number | null>(null);
   const waitingTransactionId =
     paymentScreen?.phase === "waiting"
       ? paymentScreen.payment.transactionId
@@ -299,6 +306,41 @@ function HomePage() {
               ? "employee-auth"
               : "face-registration",
           );
+        } else if (
+          action === "PROCESS_DRAFT_DELETE" ||
+          action === "PROCESS_OFFBOARDING"
+        ) {
+          if (
+            session?.employee === null ||
+            session === null ||
+            maintenanceInFlightSessionId.current !== null
+          ) {
+            return;
+          }
+          maintenanceInFlightSessionId.current = session.id;
+          try {
+            if (action === "PROCESS_DRAFT_DELETE") {
+              const [templateStatus] = await fetchFaceRegistrationStatuses(
+                [session.employee.employeeCode],
+                controller.signal,
+              );
+              if (!templateStatus) return;
+              await reportDraftDeleteResult(
+                session.id,
+                templateStatus.registered,
+                controller.signal,
+              );
+            } else {
+              await removeEmployeeFaceTemplate(
+                session.employee.employeeCode,
+                controller.signal,
+              );
+              await completeEmployeeOffboarding(session.id, controller.signal);
+            }
+            acceptedSessionIds.current.add(session.id);
+          } finally {
+            maintenanceInFlightSessionId.current = null;
+          }
         }
       } catch {
         // Fail closed for staff entry while leaving customer purchasing unaffected.

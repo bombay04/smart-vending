@@ -1,11 +1,7 @@
 import { PI_UNLOCK_BASE_URL } from "../config/api";
 
 export type FaceRegistrationFailureStatus =
-  | "NO_FACE"
-  | "MULTIPLE_FACES"
-  | "ALREADY_REGISTERED"
-  | "BUSY"
-  | "UNAVAILABLE";
+  "NO_FACE" | "MULTIPLE_FACES" | "ALREADY_REGISTERED" | "BUSY" | "UNAVAILABLE";
 
 export interface FaceRegistrationSuccess {
   status: "REGISTERED";
@@ -60,13 +56,15 @@ export async function registerEmployeeFace(
   if (isRecord(responseData)) {
     if (
       response.status === 422 &&
-      (responseData.status === "NO_FACE" || responseData.status === "MULTIPLE_FACES")
+      (responseData.status === "NO_FACE" ||
+        responseData.status === "MULTIPLE_FACES")
     ) {
       throw new FaceRegistrationError(responseData.status);
     }
     if (
       response.status === 409 &&
-      (responseData.status === "ALREADY_REGISTERED" || responseData.status === "BUSY")
+      (responseData.status === "ALREADY_REGISTERED" ||
+        responseData.status === "BUSY")
     ) {
       throw new FaceRegistrationError(responseData.status);
     }
@@ -85,13 +83,16 @@ export async function fetchFaceRegistrationStatuses(
   const normalizedCodes = employeeCodes.map((employeeCode) =>
     employeeCode.trim().toUpperCase(),
   );
-  const response = await fetch(`${PI_UNLOCK_BASE_URL}/face/registration/status`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ employeeCodes: normalizedCodes }),
-    cache: "no-store",
-    signal,
-  });
+  const response = await fetch(
+    `${PI_UNLOCK_BASE_URL}/face/registration/status`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ employeeCodes: normalizedCodes }),
+      cache: "no-store",
+      signal,
+    },
+  );
 
   let responseData: unknown;
   try {
@@ -135,4 +136,32 @@ export async function fetchFaceRegistrationStatuses(
     throw new FaceRegistrationError("UNAVAILABLE");
   }
   return statuses;
+}
+
+export async function removeEmployeeFaceTemplate(
+  employeeCode: string,
+  signal?: AbortSignal,
+): Promise<{ templateExisted: boolean }> {
+  const normalizedEmployeeCode = employeeCode.trim().toUpperCase();
+  const response = await fetch(`${PI_UNLOCK_BASE_URL}/face/template/remove`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ employeeCode: normalizedEmployeeCode }),
+    signal,
+  });
+  const payload = (await response.json()) as Record<string, unknown>;
+  if (
+    !response.ok ||
+    (payload.status !== "REMOVED" && payload.status !== "ABSENT") ||
+    payload.employeeCode !== normalizedEmployeeCode ||
+    typeof payload.templateExisted !== "boolean" ||
+    typeof payload.removed !== "boolean"
+  ) {
+    throw new FaceRegistrationError(
+      response.status === 409 && payload.status === "BUSY"
+        ? "BUSY"
+        : "UNAVAILABLE",
+    );
+  }
+  return { templateExisted: payload.templateExisted };
 }

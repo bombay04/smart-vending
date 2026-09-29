@@ -7,9 +7,10 @@ import {
 } from "react";
 import {
   createEmployee,
-  deleteEmployee,
   EmployeeManagementError,
   fetchEmployeesForFaceRegistration,
+  offboardEmployee,
+  startEmployeeDraftDelete,
   updateEmployee,
 } from "../api/employee-auth";
 import {
@@ -42,6 +43,9 @@ function AdminPortal({ onBack }: AdminPortalProps) {
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<
     number | null
   >(null);
+  const [offboardConfirmationId, setOffboardConfirmationId] = useState<
+    number | null
+  >(null);
   const [busyEmployeeIds, setBusyEmployeeIds] = useState<Set<number>>(
     () => new Set(),
   );
@@ -52,6 +56,7 @@ function AdminPortal({ onBack }: AdminPortalProps) {
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const requestRef = useRef<AbortController | null>(null);
+  const previousSessionRef = useRef<KioskSession | null>(null);
 
   const loadEmployees = useCallback(async () => {
     const controller = new AbortController();
@@ -60,13 +65,14 @@ function AdminPortal({ onBack }: AdminPortalProps) {
     setIsLoading(true);
     setLoadError(false);
     try {
-      setEmployees(
-        sortEmployees(
-          await fetchEmployeesForFaceRegistration(controller.signal),
-        ),
+      const loadedEmployees = sortEmployees(
+        await fetchEmployeesForFaceRegistration(controller.signal),
       );
+      setEmployees(loadedEmployees);
+      return loadedEmployees;
     } catch {
       if (!controller.signal.aborted) setLoadError(true);
+      return null;
     } finally {
       if (!controller.signal.aborted) setIsLoading(false);
       if (requestRef.current === controller) requestRef.current = null;
@@ -87,6 +93,43 @@ function AdminPortal({ onBack }: AdminPortalProps) {
       try {
         const current = await fetchCurrentKioskSession(controller.signal);
         if (!stopped) {
+          const previous = previousSessionRef.current;
+          if (
+            current === null &&
+            (previous?.type === "EMPLOYEE_DRAFT_DELETE" ||
+              previous?.type === "EMPLOYEE_OFFBOARDING")
+          ) {
+            const refreshedEmployees = await loadEmployees();
+            const refreshedEmployee = refreshedEmployees?.find(
+              (employee) => employee.id === previous.employeeId,
+            );
+            if (refreshedEmployees === null) {
+              setMessage(
+                "Kiosk cleanup ended. Refresh the employee directory to confirm the result.",
+              );
+            } else if (
+              previous.type === "EMPLOYEE_DRAFT_DELETE" &&
+              refreshedEmployee?.faceRegistered
+            ) {
+              setMessage(
+                "Local face data exists; the employee was preserved and deactivated. Use Offboard to remove it.",
+              );
+            } else if (
+              previous.type === "EMPLOYEE_DRAFT_DELETE" &&
+              refreshedEmployee === undefined
+            ) {
+              setMessage("Verified unused draft deleted.");
+            } else if (previous.type === "EMPLOYEE_DRAFT_DELETE") {
+              setMessage(
+                "The employee changed during verification and was not deleted.",
+              );
+            } else {
+              setMessage(
+                "Offboarding biometric cleanup completed. History was retained.",
+              );
+            }
+          }
+          previousSessionRef.current = current;
           setSession(current);
           setSessionLoaded(true);
           setSessionError(null);
@@ -106,7 +149,7 @@ function AdminPortal({ onBack }: AdminPortalProps) {
       controller?.abort();
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, []);
+  }, [loadEmployees]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
@@ -158,7 +201,9 @@ function AdminPortal({ onBack }: AdminPortalProps) {
     setEmployees((current) =>
       sortEmployees(
         current.map((employee) =>
-          employee.id === updatedEmployee.id ? updatedEmployee : employee,
+          employee.id === updatedEmployee.id
+            ? { ...employee, ...updatedEmployee }
+            : employee,
         ),
       ),
     );
@@ -166,6 +211,7 @@ function AdminPortal({ onBack }: AdminPortalProps) {
 
   function beginEdit(employee: RegistrationEmployee) {
     setDeleteConfirmationId(null);
+    setOffboardConfirmationId(null);
     setRowError(employee.id, null);
     setEditingEmployeeId(employee.id);
     setEditName(employee.name);
@@ -182,9 +228,14 @@ function AdminPortal({ onBack }: AdminPortalProps) {
     setEmployeeBusy(employee.id, true);
     setRowError(employee.id, null);
     try {
-      replaceEmployee(
-        await updateEmployee(employee.id, { name: normalizedName }),
-      );
+      const updated = await updateEmployee(employee.id, {
+        name: normalizedName,
+      });
+      replaceEmployee({
+        ...updated,
+        canDeleteDraft: employee.canDeleteDraft,
+        activeCleanupType: employee.activeCleanupType,
+      });
       cancelEdit();
     } catch (error) {
       setRowError(
@@ -204,9 +255,14 @@ function AdminPortal({ onBack }: AdminPortalProps) {
     setEmployeeBusy(employee.id, true);
     setRowError(employee.id, null);
     try {
-      replaceEmployee(
-        await updateEmployee(employee.id, { isActive: !employee.isActive }),
-      );
+      const updated = await updateEmployee(employee.id, {
+        isActive: !employee.isActive,
+      });
+      replaceEmployee({
+        ...updated,
+        canDeleteDraft: employee.canDeleteDraft,
+        activeCleanupType: employee.activeCleanupType,
+      });
     } catch (error) {
       setRowError(
         employee.id,
@@ -220,23 +276,48 @@ function AdminPortal({ onBack }: AdminPortalProps) {
     }
   }
 
-  async function handleDelete(employee: RegistrationEmployee) {
-    if (busyEmployeeIds.has(employee.id)) return;
+  async function handleLifecycleAction(
+    employee: RegistrationEmployee,
+    action: "EMPLOYEE_DRAFT_DELETE" | "EMPLOYEE_OFFBOARDING",
+  ) {
+    if (busyEmployeeIds.has(employee.id) || session !== null) return;
     setEmployeeBusy(employee.id, true);
     setRowError(employee.id, null);
+    setMessage(null);
     try {
-      await deleteEmployee(employee.id);
+      const cleanupSession =
+        action === "EMPLOYEE_DRAFT_DELETE"
+          ? await startEmployeeDraftDelete(employee.id)
+          : await offboardEmployee(employee.id);
+      setSession(cleanupSession);
+      previousSessionRef.current = cleanupSession;
       setEmployees((current) =>
-        current.filter((item) => item.id !== employee.id),
+        current.map((item) =>
+          item.id === employee.id
+            ? {
+                ...item,
+                isActive:
+                  action === "EMPLOYEE_OFFBOARDING" ? false : item.isActive,
+                activeCleanupType: action,
+              }
+            : item,
+        ),
       );
       setDeleteConfirmationId(null);
-      if (editingEmployeeId === employee.id) cancelEdit();
+      setOffboardConfirmationId(null);
+      setMessage(
+        action === "EMPLOYEE_DRAFT_DELETE"
+          ? `Waiting for the kiosk to verify ${employee.employeeCode} has no local face data.`
+          : `Access disabled. Waiting for kiosk biometric cleanup for ${employee.employeeCode}.`,
+      );
     } catch (error) {
       setRowError(
         employee.id,
         mutationErrorMessage(
           error,
-          "Employee deletion failed. Please try again.",
+          action === "EMPLOYEE_DRAFT_DELETE"
+            ? "Draft-delete verification could not start."
+            : "Offboarding could not start.",
         ),
       );
     } finally {
@@ -280,6 +361,11 @@ function AdminPortal({ onBack }: AdminPortalProps) {
   }
 
   const portalState = getPortalSessionState(session, "FACE_REGISTRATION");
+  const cleanupSession =
+    session?.type === "EMPLOYEE_DRAFT_DELETE" ||
+    session?.type === "EMPLOYEE_OFFBOARDING"
+      ? session
+      : null;
   const secondsRemaining = session
     ? Math.max(
         0,
@@ -340,7 +426,23 @@ function AdminPortal({ onBack }: AdminPortalProps) {
             </div>
           )}
 
-          {portalState === "KIOSK_BUSY" && (
+          {cleanupSession !== null && (
+            <div className="staff-active-session" role="status">
+              <div>
+                <strong>Waiting for kiosk biometric cleanup</strong>
+                <p>
+                  {cleanupSession.type === "EMPLOYEE_DRAFT_DELETE"
+                    ? "The kiosk is verifying that no local face template exists for"
+                    : "The employee is inactive while the kiosk removes the local face template for"}{" "}
+                  {cleanupSession.employee?.name} (
+                  {cleanupSession.employee?.employeeCode}).
+                </p>
+                <span>Expires in {secondsRemaining}s</span>
+              </div>
+            </div>
+          )}
+
+          {portalState === "KIOSK_BUSY" && cleanupSession === null && (
             <div className="staff-busy-session" role="status">
               <strong>Kiosk busy</strong>
               <p>
@@ -504,20 +606,26 @@ function AdminPortal({ onBack }: AdminPortalProps) {
                       </div>
                     ) : deleteConfirmationId === employee.id ? (
                       <div className="admin-delete-confirmation">
-                        <strong>Delete {employee.employeeCode}?</strong>
+                        <strong>Delete Draft {employee.employeeCode}?</strong>
                         <span>
-                          This permanently removes this unused employee record.
+                          Permanently delete this unused employee after the
+                          kiosk verifies that no face template exists.
                         </span>
                         <div className="admin-employee-actions">
                           <button
                             className="admin-delete-action"
                             type="button"
                             disabled={busyEmployeeIds.has(employee.id)}
-                            onClick={() => void handleDelete(employee)}
+                            onClick={() =>
+                              void handleLifecycleAction(
+                                employee,
+                                "EMPLOYEE_DRAFT_DELETE",
+                              )
+                            }
                           >
                             {busyEmployeeIds.has(employee.id)
                               ? "Deleting..."
-                              : "Confirm Delete"}
+                              : "Confirm Delete Draft"}
                           </button>
                           <button
                             type="button"
@@ -528,18 +636,57 @@ function AdminPortal({ onBack }: AdminPortalProps) {
                           </button>
                         </div>
                       </div>
+                    ) : offboardConfirmationId === employee.id ? (
+                      <div className="admin-delete-confirmation">
+                        <strong>Offboard {employee.employeeCode}?</strong>
+                        <span>
+                          Disable access and remove this employee&apos;s face
+                          template from the kiosk. History is retained.
+                        </span>
+                        <div className="admin-employee-actions">
+                          <button
+                            className="admin-delete-action"
+                            type="button"
+                            disabled={busyEmployeeIds.has(employee.id)}
+                            onClick={() =>
+                              void handleLifecycleAction(
+                                employee,
+                                "EMPLOYEE_OFFBOARDING",
+                              )
+                            }
+                          >
+                            {busyEmployeeIds.has(employee.id)
+                              ? "Starting..."
+                              : "Confirm Offboard"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyEmployeeIds.has(employee.id)}
+                            onClick={() => setOffboardConfirmationId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
                     ) : (
                       <div className="admin-employee-actions">
                         <button
                           type="button"
-                          disabled={busyEmployeeIds.has(employee.id)}
+                          disabled={
+                            busyEmployeeIds.has(employee.id) ||
+                            employee.activeCleanupType !== null
+                          }
                           onClick={() => beginEdit(employee)}
                         >
                           Edit
                         </button>
                         <button
                           type="button"
-                          disabled={busyEmployeeIds.has(employee.id)}
+                          disabled={
+                            busyEmployeeIds.has(employee.id) ||
+                            employee.activeCleanupType !== null
+                          }
+                          title="Temporarily disable access. Face registration is retained."
                           onClick={() => void handleActiveChange(employee)}
                         >
                           {busyEmployeeIds.has(employee.id)
@@ -551,15 +698,41 @@ function AdminPortal({ onBack }: AdminPortalProps) {
                         <button
                           className="admin-delete-action"
                           type="button"
-                          disabled={busyEmployeeIds.has(employee.id)}
+                          disabled={
+                            busyEmployeeIds.has(employee.id) ||
+                            employee.activeCleanupType !== null ||
+                            session !== null
+                          }
+                          title="Disable access and remove the face template. History is retained."
                           onClick={() => {
                             setEditingEmployeeId(null);
+                            setDeleteConfirmationId(null);
                             setRowError(employee.id, null);
-                            setDeleteConfirmationId(employee.id);
+                            setOffboardConfirmationId(employee.id);
                           }}
                         >
-                          Delete
+                          Offboard
                         </button>
+                        {employee.canDeleteDraft && (
+                          <button
+                            className="admin-delete-action"
+                            type="button"
+                            disabled={
+                              busyEmployeeIds.has(employee.id) ||
+                              employee.activeCleanupType !== null ||
+                              session !== null
+                            }
+                            title="Permanently delete this unused employee after kiosk verification."
+                            onClick={() => {
+                              setEditingEmployeeId(null);
+                              setOffboardConfirmationId(null);
+                              setRowError(employee.id, null);
+                              setDeleteConfirmationId(employee.id);
+                            }}
+                          >
+                            Delete Draft
+                          </button>
+                        )}
                         {!employee.faceRegistered &&
                           employee.isActive &&
                           portalState === "IDLE" &&
@@ -579,6 +752,11 @@ function AdminPortal({ onBack }: AdminPortalProps) {
                             </button>
                           )}
                       </div>
+                    )}
+                    {employee.activeCleanupType !== null && (
+                      <span className="admin-row-status" role="status">
+                        Waiting for kiosk biometric cleanup
+                      </span>
                     )}
                     {rowErrors[employee.id] && (
                       <span className="admin-row-error" role="alert">

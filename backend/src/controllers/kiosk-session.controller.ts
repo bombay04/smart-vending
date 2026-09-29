@@ -7,6 +7,11 @@ import {
   getCurrentKioskSession,
 } from "../services/kiosk-session.service";
 import { HttpError } from "../utils/http-error";
+import {
+  completeOffboarding,
+  finalizeDraftDelete,
+  requireEmptyLifecycleBody,
+} from "../services/employee-lifecycle.service";
 
 function requireEmptyBody(body: unknown): void {
   if (
@@ -84,6 +89,31 @@ export async function cancelSession(request: Request, response: Response, next: 
     response
       .status(200)
       .json({ session: await cancelKioskSession(Number(request.params.sessionId)) });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function completeOffboardingSession(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+) {
+  try {
+    requireEmptyLifecycleBody(request.body);
+    response.status(200).json(await completeOffboarding(request.params.sessionId));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function submitDraftDeleteResult(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+) {
+  try {
+    response.status(200).json(await finalizeDraftDelete(request.params.sessionId, request.body));
   } catch (error) {
     next(error);
   }

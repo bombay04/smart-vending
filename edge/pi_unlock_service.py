@@ -86,6 +86,8 @@ class FaceRecognizer(Protocol):
 
     def is_registered(self, employee_code: str) -> bool: ...
 
+    def remove_template(self, employee_code: str) -> bool: ...
+
 
 face_engine: FaceRecognizer | None = None
 
@@ -328,6 +330,15 @@ def normalized_employee_code_from_request() -> str | None:
         return None
     body: Any = request.get_json(silent=True)
     if not isinstance(body, dict):
+        return None
+    return normalize_employee_code(body.get("employeeCode"))
+
+
+def normalized_employee_code_only_from_request() -> str | None:
+    if not request.is_json:
+        return None
+    body: Any = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) != {"employeeCode"}:
         return None
     return normalize_employee_code(body.get("employeeCode"))
 
@@ -578,29 +589,73 @@ def face_registration_status() -> tuple[Response, int] | Response:
             400,
         )
 
+    if not face_authentication_lock.acquire(blocking=False):
+        return jsonify(status="BUSY"), 409
+
     try:
-        engine = get_face_engine()
-        employees = [
-            {
-                "employeeCode": employee_code,
-                "registered": engine.is_registered(employee_code),
-            }
-            for employee_code in employee_codes
-        ]
-    except FaceEngineError as error:
-        logger.error(
-            "Face registration status unavailable (%s)", type(error).__name__
-        )
-        return jsonify(status="UNAVAILABLE"), 503
-    except Exception as error:
-        logger.error(
-            "Unexpected face registration status failure (%s)", type(error).__name__
-        )
-        return jsonify(status="UNAVAILABLE"), 503
+        try:
+            engine = get_face_engine()
+            employees = [
+                {
+                    "employeeCode": employee_code,
+                    "registered": engine.is_registered(employee_code),
+                }
+                for employee_code in employee_codes
+            ]
+        except FaceEngineError as error:
+            logger.error(
+                "Face registration status unavailable (%s)", type(error).__name__
+            )
+            return jsonify(status="UNAVAILABLE"), 503
+        except Exception as error:
+            logger.error(
+                "Unexpected face registration status failure (%s)", type(error).__name__
+            )
+            return jsonify(status="UNAVAILABLE"), 503
+    finally:
+        face_authentication_lock.release()
 
     response = jsonify(status="OK", employees=employees)
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@app.post("/face/template/remove")
+def remove_face_template() -> tuple[Response, int] | Response:
+    employee_code = normalized_employee_code_only_from_request()
+    if employee_code is None:
+        return (
+            jsonify(
+                status="INVALID_REQUEST",
+                error="employeeCode must use 1-64 letters, digits, underscores, or hyphens.",
+            ),
+            400,
+        )
+
+    if not face_authentication_lock.acquire(blocking=False):
+        return jsonify(status="BUSY"), 409
+
+    try:
+        try:
+            existed = get_face_engine().remove_template(employee_code)
+        except FaceEngineError as error:
+            logger.error("Face template removal unavailable (%s)", type(error).__name__)
+            return jsonify(status="UNAVAILABLE"), 503
+        except Exception as error:
+            logger.error(
+                "Unexpected face template removal failure (%s)", type(error).__name__
+            )
+            return jsonify(status="UNAVAILABLE"), 503
+
+        logger.info("Face template removal completed for validated employee code")
+        return jsonify(
+            status="REMOVED" if existed else "ABSENT",
+            employeeCode=employee_code,
+            templateExisted=existed,
+            removed=existed,
+        )
+    finally:
+        face_authentication_lock.release()
 
 
 @app.post("/unlock")

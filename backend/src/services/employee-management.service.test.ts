@@ -163,6 +163,33 @@ test("active face-registration session blocks deactivation", async () => {
   assert.equal(updated, false);
 });
 
+test("active biometric cleanup blocks reactivation", async () => {
+  let updated = false;
+  await assert.rejects(
+    updateEmployeeWithStore(
+      2,
+      { isActive: true },
+      {
+        async findEmployee() {
+          return { ...newEmployee, isActive: false };
+        },
+        async countActiveFaceRegistrationSessions() {
+          return 0;
+        },
+        async countActiveCleanupSessions() {
+          return 1;
+        },
+        async updateEmployee() {
+          updated = true;
+          return newEmployee;
+        },
+      },
+    ),
+    (error: unknown) => error instanceof HttpError && error.statusCode === 409,
+  );
+  assert.equal(updated, false);
+});
+
 test("employee update translates Prisma P2034 to a safe 409 without retrying", async () => {
   let attempts = 0;
   await assert.rejects(

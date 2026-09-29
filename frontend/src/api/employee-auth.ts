@@ -3,6 +3,7 @@ import type {
   AuthenticatedEmployee,
   RegistrationEmployee,
 } from "../types/employee";
+import { isKioskSession, type KioskSession } from "./kiosk-session";
 
 const mockEmployeeAuthUrl = `${API_BASE_URL}/api/v1/employees/auth/mock`;
 const faceEmployeeAuthUrl = `${API_BASE_URL}/api/v1/employees/auth/face`;
@@ -104,7 +105,16 @@ export function validateFaceAuthenticatedEmployee(
   return postEmployeeCode(faceEmployeeAuthUrl, employeeCode, sessionId, signal);
 }
 
-function isRegistrationEmployee(value: unknown): value is RegistrationEmployee {
+type BasicRegistrationEmployee = AuthenticatedEmployee & {
+  isActive: boolean;
+  faceRegistered: boolean;
+  canDeleteDraft?: boolean;
+  activeCleanupType?: "EMPLOYEE_DRAFT_DELETE" | "EMPLOYEE_OFFBOARDING" | null;
+};
+
+function isRegistrationEmployee(
+  value: unknown,
+): value is BasicRegistrationEmployee {
   if (!isAuthenticatedEmployee(value)) {
     return false;
   }
@@ -112,7 +122,13 @@ function isRegistrationEmployee(value: unknown): value is RegistrationEmployee {
     "isActive" in value &&
     typeof value.isActive === "boolean" &&
     "faceRegistered" in value &&
-    typeof value.faceRegistered === "boolean"
+    typeof value.faceRegistered === "boolean" &&
+    (!("canDeleteDraft" in value) ||
+      typeof value.canDeleteDraft === "boolean") &&
+    (!("activeCleanupType" in value) ||
+      value.activeCleanupType === null ||
+      value.activeCleanupType === "EMPLOYEE_DRAFT_DELETE" ||
+      value.activeCleanupType === "EMPLOYEE_OFFBOARDING")
   );
 }
 
@@ -163,6 +179,8 @@ export async function fetchEmployeesForFaceRegistration(
     name: employee.name,
     isActive: employee.isActive,
     faceRegistered: employee.faceRegistered,
+    canDeleteDraft: employee.canDeleteDraft ?? !employee.faceRegistered,
+    activeCleanupType: employee.activeCleanupType ?? null,
   }));
 }
 
@@ -193,8 +211,40 @@ async function readRegistrationEmployee(
     name: employee.name,
     isActive: employee.isActive,
     faceRegistered: employee.faceRegistered,
+    canDeleteDraft: employee.canDeleteDraft ?? !employee.faceRegistered,
+    activeCleanupType: employee.activeCleanupType ?? null,
   };
 }
+
+async function startEmployeeLifecycle(
+  employeeId: number,
+  action: "draft-delete" | "offboard",
+  signal?: AbortSignal,
+): Promise<KioskSession> {
+  const response = await fetch(`${employeesUrl}/${employeeId}/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+    signal,
+  });
+  if (!response.ok) throw await readEmployeeManagementError(response);
+  const payload = (await response.json()) as { session?: unknown };
+  if (!isKioskSession(payload.session)) {
+    throw new EmployeeManagementError(
+      502,
+      "Kiosk session response is invalid.",
+    );
+  }
+  return payload.session;
+}
+
+export const startEmployeeDraftDelete = (
+  employeeId: number,
+  signal?: AbortSignal,
+) => startEmployeeLifecycle(employeeId, "draft-delete", signal);
+
+export const offboardEmployee = (employeeId: number, signal?: AbortSignal) =>
+  startEmployeeLifecycle(employeeId, "offboard", signal);
 
 async function readEmployeeManagementError(
   response: Response,
