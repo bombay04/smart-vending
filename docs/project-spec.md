@@ -112,7 +112,7 @@ Local face scanning, backend active-employee validation, session validation, fai
 
 ### Temporary kiosk sessions
 
-The PostgreSQL `KioskSession` model records `machineId`, type (`RESTOCK_AUTH` or `FACE_REGISTRATION`), status (`ACTIVE`, `COMPLETED`, `EXPIRED`, or `CANCELLED`), optional `employeeId`, creation/expiry/completion timestamps, and the bound employee relation. The pilot uses `PILOT_KIOSK` by default (configurable with `KIOSK_MACHINE_ID`) and a five-minute expiry. A PostgreSQL partial unique index and serializable creation transaction allow only one `ACTIVE` session for that machine. Elapsed rows are marked `EXPIRED` before reads and new creation.
+The PostgreSQL `KioskSession` model records `machineId`, type (`RESTOCK_AUTH`, `FACE_REGISTRATION`, `EMPLOYEE_DRAFT_DELETE`, or `EMPLOYEE_OFFBOARDING`), status (`ACTIVE`, `COMPLETED`, `EXPIRED`, or `CANCELLED`), optional `employeeId`, creation/expiry/completion timestamps, and the bound employee relation. The pilot uses `PILOT_KIOSK` by default (configurable with `KIOSK_MACHINE_ID`) and a five-minute expiry. A PostgreSQL partial unique index and serializable creation transaction allow only one `ACTIVE` session for that machine. Elapsed rows are marked `EXPIRED` before reads and new creation.
 
 The REST API exposes current, start-restock, start-face-registration, complete, and cancel operations. Clients cannot submit a session type or arbitrary status transition. Completion is idempotent for an already completed session; invalid cross-state transitions fail with conflict. Network failure fails closed for staff entry and does not affect customer purchasing or delete Pi-local templates.
 
@@ -162,9 +162,11 @@ The YuNet/SFace pipeline, sampling and comparison rules, schema-v3 storage, loca
 
 ### Employee face registration
 
-`/admin` lists backend employee records and supports name-only creation, name editing, activation/deactivation, and restricted deletion. Creation allocates a durable sequential `EMP###` code that is never reused, marks the record active, initializes `faceRegistered: false`, and does not start enrollment. Active/inactive is the operational access state: inactive employees remain stored with their history and local Pi template, but fail backend validation and cannot enter Restock Mode. For an active unregistered employee, **Start Face Registration** creates an employee-bound `FACE_REGISTRATION` session and displays its waiting state, identity, status, expiry, and Cancel action.
+`/admin` lists backend employee records and supports name-only creation, name editing, activation/deactivation, offboarding, and verified draft deletion. Creation allocates a durable sequential `EMP###` code that is never reused, marks the record active, initializes `faceRegistered: false`, and does not start enrollment. For an active unregistered employee, **Start Face Registration** creates an employee-bound `FACE_REGISTRATION` session and displays its waiting state, identity, status, expiry, and Cancel action.
 
-Hard deletion is limited to unused, unregistered employees with no kiosk-session or restock history. Enrolled or used employees must be deactivated instead. Deleting or replacing a Pi biometric template remains out of scope.
+The lifecycle actions are intentionally distinct: **Deactivate** revokes operational access but retains the Pi face template and all history; **Offboard** revokes access immediately, removes the Pi template through an employee-bound cleanup session, then sets `faceRegistered: false` while preserving the employee and history; **Delete Draft** hard-deletes only an unused employee after the Pi confirms that no local template exists. Cancelled or expired registration attempts alone are disposable workflow history and do not permanently prevent verified draft deletion. If verification finds a template, the backend preserves and deactivates the employee, reconciles `faceRegistered: true`, and directs the administrator to Offboard.
+
+The kiosk processes draft verification and offboarding silently only while Customer Home is safely idle. Template removal is idempotent and uses the same face-operation mutex as authentication and registration; a failure leaves the employee inactive and does not clear `faceRegistered` until local cleanup succeeds.
 
 The authorized enrollment flow is:
 
@@ -261,7 +263,7 @@ The following are out of scope for Phase 1:
 | Real Omise/Opn PromptPay QR creation, polling, and webhook reconciliation  | Implemented (automated tests; real provider E2E pending)                                |
 | Local YuNet/SFace recognition and Pi face-auth HTTP endpoint               | Implemented                                                                             |
 | Customer-only kiosk plus remote temporary staff sessions                   | Implemented                                                                             |
-| Separate responsive staff-restock and admin-registration portals           | Implemented at workflow/UI level; no portal authentication yet                           |
+| Separate responsive staff-restock and admin-registration portals           | Implemented at workflow/UI level; no portal authentication yet                          |
 | Cloud employee management plus session-bound local face registration       | Implemented (automated tests; physical validation not recorded)                         |
 | Backend validation of matched active employee                              | Implemented                                                                             |
 | Fail-closed employee-auth outcomes                                         | Implemented                                                                             |

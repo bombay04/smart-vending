@@ -1,6 +1,10 @@
 import { API_BASE_URL } from "../config/api";
 
-export type KioskSessionType = "RESTOCK_AUTH" | "FACE_REGISTRATION";
+export type KioskSessionType =
+  | "RESTOCK_AUTH"
+  | "FACE_REGISTRATION"
+  | "EMPLOYEE_DRAFT_DELETE"
+  | "EMPLOYEE_OFFBOARDING";
 export type KioskSessionStatus =
   "ACTIVE" | "COMPLETED" | "EXPIRED" | "CANCELLED";
 
@@ -24,7 +28,7 @@ export interface KioskSession {
 
 const sessionsUrl = `${API_BASE_URL}/api/v1/kiosk-sessions`;
 
-function isSession(value: unknown): value is KioskSession {
+export function isKioskSession(value: unknown): value is KioskSession {
   if (typeof value !== "object" || value === null) return false;
   const session = value as Record<string, unknown>;
   const employee = session.employee;
@@ -46,7 +50,11 @@ function isSession(value: unknown): value is KioskSession {
     (session.type === "RESTOCK_AUTH" &&
       session.employeeId === null &&
       employee === null) ||
-    (session.type === "FACE_REGISTRATION" &&
+    ([
+      "FACE_REGISTRATION",
+      "EMPLOYEE_DRAFT_DELETE",
+      "EMPLOYEE_OFFBOARDING",
+    ].includes(String(session.type)) &&
       typeof session.employeeId === "number" &&
       employee !== null &&
       typeof employee === "object" &&
@@ -57,7 +65,12 @@ function isSession(value: unknown): value is KioskSession {
     session.id > 0 &&
     typeof session.machineId === "string" &&
     session.machineId !== "" &&
-    (session.type === "RESTOCK_AUTH" || session.type === "FACE_REGISTRATION") &&
+    [
+      "RESTOCK_AUTH",
+      "FACE_REGISTRATION",
+      "EMPLOYEE_DRAFT_DELETE",
+      "EMPLOYEE_OFFBOARDING",
+    ].includes(String(session.type)) &&
     ["ACTIVE", "COMPLETED", "EXPIRED", "CANCELLED"].includes(
       String(session.status),
     ) &&
@@ -76,7 +89,7 @@ async function readSession(response: Response): Promise<KioskSession> {
     session?: unknown;
     error?: unknown;
   };
-  if (!response.ok || !isSession(payload.session)) {
+  if (!response.ok || !isKioskSession(payload.session)) {
     throw new Error(
       typeof payload.error === "string"
         ? payload.error
@@ -96,7 +109,7 @@ export async function fetchCurrentKioskSession(
   if (!response.ok) throw new Error("Kiosk session status is unavailable.");
   const payload = (await response.json()) as { session?: unknown };
   if (payload.session === null) return null;
-  if (!isSession(payload.session) || payload.session.status !== "ACTIVE") {
+  if (!isKioskSession(payload.session) || payload.session.status !== "ACTIVE") {
     throw new Error("Kiosk session status is invalid.");
   }
   return payload.session;
@@ -156,3 +169,35 @@ export async function completeKioskSession(
     }),
   );
 }
+
+async function postMaintenanceResult(
+  sessionId: number,
+  suffix: "draft-delete-result" | "offboarding-complete",
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(`${sessionsUrl}/${sessionId}/${suffix}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!response.ok) throw new Error("Kiosk cleanup result was not accepted.");
+}
+
+export const reportDraftDeleteResult = (
+  sessionId: number,
+  templateExists: boolean,
+  signal?: AbortSignal,
+) =>
+  postMaintenanceResult(
+    sessionId,
+    "draft-delete-result",
+    { templateExists },
+    signal,
+  );
+
+export const completeEmployeeOffboarding = (
+  sessionId: number,
+  signal?: AbortSignal,
+) => postMaintenanceResult(sessionId, "offboarding-complete", {}, signal);

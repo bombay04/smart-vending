@@ -62,34 +62,42 @@ test("the remote portals separate staff restock from admin employee workflows", 
   assert.match(adminPortal, />\s*Edit\s*</);
   assert.match(adminPortal, /"Deactivate"/);
   assert.match(adminPortal, /"Activate"/);
-  assert.match(adminPortal, />\s*Delete\s*</);
+  assert.match(adminPortal, />\s*Offboard\s*</);
+  assert.match(adminPortal, />\s*Delete Draft\s*</);
   assert.match(adminPortal, /handleSaveName/);
   assert.match(adminPortal, /handleActiveChange/);
   assert.match(employeeApi, /method: "PATCH"/);
-  assert.match(employeeApi, /method: "DELETE"/);
+  assert.match(employeeApi, /startEmployeeDraftDelete/);
+  assert.match(employeeApi, /offboardEmployee/);
   assert.match(adminPortal, /cancelKioskSession/);
   assert.doesNotMatch(adminPortal, /Start Restock/);
   assert.doesNotMatch(adminPortal, /startRestockSession/);
   assert.doesNotMatch(adminPortal, /registerEmployeeFace/);
 });
 
-test("admin deletion is confirmed, refreshes local rows, and displays lifecycle conflicts", async () => {
+test("admin draft deletion and offboarding are confirmed session workflows", async () => {
   const [adminPortal, employeeApi] = await Promise.all([
     source("src/components/AdminPortal.tsx"),
     source("src/api/employee-auth.ts"),
   ]);
 
-  assert.match(adminPortal, /Delete \{employee\.employeeCode\}\?/);
+  assert.match(adminPortal, /Delete Draft \{employee\.employeeCode\}\?/);
   assert.match(
     adminPortal,
-    /This permanently removes this unused employee record/,
+    /Permanently delete this unused employee after the[\s\S]*kiosk verifies/,
   );
-  assert.match(adminPortal, /Confirm Delete/);
+  assert.match(adminPortal, /Confirm Delete Draft/);
+  assert.match(adminPortal, /Offboard \{employee\.employeeCode\}\?/);
+  assert.match(adminPortal, /Confirm Offboard/);
   assert.match(adminPortal, /setDeleteConfirmationId\(employee\.id\)/);
+  assert.match(adminPortal, /startEmployeeDraftDelete\(employee\.id\)/);
+  assert.match(adminPortal, /offboardEmployee\(employee\.id\)/);
+  assert.match(adminPortal, /Waiting for kiosk biometric cleanup/);
   assert.match(
     adminPortal,
-    /current\.filter\(\(item\) => item\.id !== employee\.id\)/,
+    /Local face data exists; the employee was preserved and deactivated/,
   );
+  assert.match(adminPortal, /await loadEmployees\(\)/);
   assert.match(adminPortal, /rowErrors\[employee\.id\]/);
   assert.match(
     adminPortal,
@@ -100,6 +108,13 @@ test("admin deletion is confirmed, refreshes local rows, and displays lifecycle 
     employeeApi,
     /new EmployeeManagementError\(response\.status, message\)/,
   );
+});
+
+test("registered or used employees never receive the draft hard-delete control", async () => {
+  const adminPortal = await source("src/components/AdminPortal.tsx");
+  assert.match(adminPortal, /\{employee\.canDeleteDraft && \(/);
+  assert.match(adminPortal, /Delete Draft/);
+  assert.match(adminPortal, /employee\.activeCleanupType !== null/);
 });
 
 test("inactive employees are not offered face registration", async () => {

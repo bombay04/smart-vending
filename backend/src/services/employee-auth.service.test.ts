@@ -90,6 +90,8 @@ test("registration employee list returns active and inactive safe metadata", asy
       employeeCode: "EMP001",
       isActive: true,
       faceRegistered: true,
+      canDeleteDraft: false,
+      activeCleanupType: null,
     },
     {
       id: 2,
@@ -97,6 +99,8 @@ test("registration employee list returns active and inactive safe metadata", asy
       employeeCode: "EMP002",
       isActive: false,
       faceRegistered: false,
+      canDeleteDraft: true,
+      activeCleanupType: null,
     },
   ]);
   for (const employee of employees) {

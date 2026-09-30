@@ -115,6 +115,9 @@ class FaceEngine:
     def is_registered(self, employee_code: str) -> bool:
         return self.template_store.exists(employee_code)
 
+    def remove_template(self, employee_code: str) -> bool:
+        return self.template_store.remove(employee_code)
+
     def recognize(self) -> RecognitionResult:
         templates = self.template_store.load_all()
         live_embeddings = self._collect_embeddings(

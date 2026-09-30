@@ -10,6 +10,11 @@ import {
   parseCreateEmployeeRequest,
   updateEmployee,
 } from "../services/employee-management.service";
+import {
+  requireEmptyLifecycleBody,
+  startDraftDelete,
+  startOffboarding,
+} from "../services/employee-lifecycle.service";
 import { requireActiveKioskSession } from "../services/kiosk-session.service";
 
 async function authenticateEmployeeRequest(
@@ -105,6 +110,32 @@ export async function completeFaceRegistrationRequest(
   try {
     const employee = await completeFaceRegistration(request.body);
     response.status(200).json({ employee });
+  } catch (error: unknown) {
+    next(error);
+  }
+}
+
+export async function startDraftDeleteRequest(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    requireEmptyLifecycleBody(request.body);
+    response.status(201).json({ session: await startDraftDelete(request.params.employeeId) });
+  } catch (error: unknown) {
+    next(error);
+  }
+}
+
+export async function startOffboardingRequest(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    requireEmptyLifecycleBody(request.body);
+    response.status(201).json({ session: await startOffboarding(request.params.employeeId) });
   } catch (error: unknown) {
     next(error);
   }

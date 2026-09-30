@@ -33,6 +33,7 @@ class StubFaceEngine:
         self.register_calls: list[str] = []
         self.registered_codes = registered_codes or set()
         self.status_calls: list[str] = []
+        self.remove_calls: list[str] = []
 
     def recognize(self) -> RecognitionResult:
         self.recognize_calls += 1
@@ -51,6 +52,12 @@ class StubFaceEngine:
     def is_registered(self, employee_code: str) -> bool:
         self.status_calls.append(employee_code)
         return employee_code in self.registered_codes
+
+    def remove_template(self, employee_code: str) -> bool:
+        self.remove_calls.append(employee_code)
+        existed = employee_code in self.registered_codes
+        self.registered_codes.discard(employee_code)
+        return existed
 
 
 class FakeClock:
@@ -143,6 +150,11 @@ class PiUnlockServiceTests(unittest.TestCase):
     def post_face_registration_status(self, employee_codes: object):
         return self.client.post(
             "/face/registration/status", json={"employeeCodes": employee_codes}
+        )
+
+    def post_face_template_remove(self, employee_code: object = "EMP001"):
+        return self.client.post(
+            "/face/template/remove", json={"employeeCode": employee_code}
         )
 
     def set_face_outcome(
@@ -703,6 +715,73 @@ class PiUnlockServiceTests(unittest.TestCase):
             self.client.get("/face/auth/status").get_json(),
             {"status": "READY", "failedAttempts": 1, "remainingAttempts": 2},
         )
+
+    def test_template_removal_is_metadata_only_and_idempotent(self) -> None:
+        engine = StubFaceEngine(
+            result=recognition_result(matched=True), registered_codes={"EMP001"}
+        )
+        pi_unlock_service.face_engine = engine
+
+        removed = self.post_face_template_remove(" emp001 ")
+        absent = self.post_face_template_remove("EMP001")
+
+        self.assertEqual(removed.status_code, 200)
+        self.assertEqual(
+            removed.get_json(),
+            {
+                "status": "REMOVED",
+                "employeeCode": "EMP001",
+                "templateExisted": True,
+                "removed": True,
+            },
+        )
+        self.assertEqual(
+            absent.get_json(),
+            {
+                "status": "ABSENT",
+                "employeeCode": "EMP001",
+                "templateExisted": False,
+                "removed": False,
+            },
+        )
+        self.assertEqual(engine.remove_calls, ["EMP001", "EMP001"])
+        serialized = removed.get_data(as_text=True).lower()
+        for forbidden in ("embedding", "image", "landmark", "path", "model"):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_template_removal_rejects_invalid_codes_and_traversal(self) -> None:
+        engine = StubFaceEngine(result=recognition_result(matched=True))
+        pi_unlock_service.face_engine = engine
+
+        for employee_code in ("", "../EMP001", "EMP/001", 123, None):
+            response = self.post_face_template_remove(employee_code)
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.get_json()["status"], "INVALID_REQUEST")
+        self.assertEqual(engine.remove_calls, [])
+
+        extra_field = self.client.post(
+            "/face/template/remove",
+            json={"employeeCode": "EMP001", "path": "../face/data/EMP001.json"},
+        )
+        self.assertEqual(extra_field.status_code, 400)
+        self.assertEqual(engine.remove_calls, [])
+
+    def test_template_status_and_removal_share_the_face_operation_mutex(self) -> None:
+        engine = StubFaceEngine(
+            result=recognition_result(matched=True), registered_codes={"EMP001"}
+        )
+        pi_unlock_service.face_engine = engine
+        self.assertTrue(pi_unlock_service.face_authentication_lock.acquire(blocking=False))
+
+        status_response = self.post_face_registration_status(["EMP001"])
+        removal_response = self.post_face_template_remove("EMP001")
+
+        self.assertEqual(status_response.status_code, 409)
+        self.assertEqual(status_response.get_json(), {"status": "BUSY"})
+        self.assertEqual(removal_response.status_code, 409)
+        self.assertEqual(removal_response.get_json(), {"status": "BUSY"})
+        self.assertEqual(engine.status_calls, [])
+        self.assertEqual(engine.remove_calls, [])
 
     def test_mock_unlock_and_status_endpoints_still_work(self) -> None:
         with patch.object(pi_unlock_service, "MOCK_HARDWARE", True):

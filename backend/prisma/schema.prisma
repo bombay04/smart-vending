@@ -31,6 +31,8 @@ enum PaymentProvider {
 enum KioskSessionType {
   RESTOCK_AUTH
   FACE_REGISTRATION
+  EMPLOYEE_DRAFT_DELETE
+  EMPLOYEE_OFFBOARDING
 }
 
 enum KioskSessionStatus {

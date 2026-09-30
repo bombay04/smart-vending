@@ -34,6 +34,7 @@ export interface EmployeeUpdateData {
 interface EmployeeUpdateStore {
   findEmployee(employeeId: number): Promise<EmployeeManagementRecord | null>;
   countActiveFaceRegistrationSessions(employeeId: number, now: Date): Promise<number>;
+  countActiveCleanupSessions?(employeeId: number, now: Date): Promise<number>;
   updateEmployee(employeeId: number, data: EmployeeUpdateData): Promise<EmployeeManagementRecord>;
 }
 
@@ -239,6 +240,12 @@ export async function updateEmployeeWithStore(
       );
     }
   }
+  if (!employee.isActive && data.isActive === true) {
+    const activeCleanupSessions = await store.countActiveCleanupSessions?.(employeeId, now);
+    if ((activeCleanupSessions ?? 0) > 0) {
+      throw new HttpError("Employee cannot be activated while biometric cleanup is active.", 409);
+    }
+  }
 
   return toSafeEmployee(await store.updateEmployee(employeeId, data));
 }
@@ -283,6 +290,15 @@ export async function updateEmployee(
               where: {
                 employeeId,
                 type: "FACE_REGISTRATION",
+                status: "ACTIVE",
+                expiresAt: { gt: now },
+              },
+            }),
+          countActiveCleanupSessions: (employeeId, now) =>
+            transaction.kioskSession.count({
+              where: {
+                employeeId,
+                type: { in: ["EMPLOYEE_DRAFT_DELETE", "EMPLOYEE_OFFBOARDING"] },
                 status: "ACTIVE",
                 expiresAt: { gt: now },
               },
