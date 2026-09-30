@@ -10,6 +10,16 @@ const registration = {
   type: "FACE_REGISTRATION",
   employee: { id: 7, employeeCode: "EMP007", name: "Bound Employee" },
 };
+const draftDelete = {
+  id: 12,
+  type: "EMPLOYEE_DRAFT_DELETE",
+  employee: { id: 7, employeeCode: "EMP007", name: "Bound Employee" },
+};
+const offboarding = {
+  id: 13,
+  type: "EMPLOYEE_OFFBOARDING",
+  employee: { id: 7, employeeCode: "EMP007", name: "Bound Employee" },
+};
 const action = (overrides = {}) =>
   decideKioskSessionAction({
     session: null,
@@ -42,6 +52,15 @@ test("duplicate polls do not restart an accepted workflow", () => {
 test("an active payment prevents a remote session from hijacking the customer", () => {
   assert.equal(action({ session: registration, isSafeIdle: false }), "STAY");
 });
+test("employee cleanup is background-only and waits for safe customer idle", () => {
+  assert.equal(action({ session: draftDelete }), "PROCESS_DRAFT_DELETE");
+  assert.equal(action({ session: offboarding }), "PROCESS_OFFBOARDING");
+  assert.equal(action({ session: draftDelete, isSafeIdle: false }), "STAY");
+  assert.equal(
+    action({ session: offboarding, currentMode: "employee-auth" }),
+    "STAY",
+  );
+});
 test("cancelled or expired sessions exit an unfinished staff flow", () => {
   assert.equal(action({ currentMode: "employee-auth" }), "EXIT_STAFF");
 });
@@ -69,10 +88,7 @@ test("customer and direct-route source expose no local staff entry bypass", asyn
 
 test("portal session state preserves each role boundary during conflicts", () => {
   assert.equal(getPortalSessionState(null, "RESTOCK_AUTH"), "IDLE");
-  assert.equal(
-    getPortalSessionState(restock, "RESTOCK_AUTH"),
-    "OWN_SESSION",
-  );
+  assert.equal(getPortalSessionState(restock, "RESTOCK_AUTH"), "OWN_SESSION");
   assert.equal(
     getPortalSessionState(registration, "FACE_REGISTRATION"),
     "OWN_SESSION",
@@ -142,4 +158,10 @@ test("local restock and registration screens retain session guards", async () =>
   );
   assert.match(restockMode, /createMockRestock\(sessionId, employeeId\)/);
   assert.match(registrationSource, /authorizedSession\?\.id !== session\.id/);
+  assert.match(home, /PROCESS_DRAFT_DELETE/);
+  assert.match(home, /PROCESS_OFFBOARDING/);
+  assert.match(home, /fetchFaceRegistrationStatuses/);
+  assert.match(home, /removeEmployeeFaceTemplate/);
+  assert.match(home, /reportDraftDeleteResult/);
+  assert.match(home, /completeEmployeeOffboarding/);
 });

@@ -26,9 +26,9 @@ def embedding(value: float = 1.0) -> tuple[float, ...]:
     return (value,) + tuple(1.0 for _ in range(127))
 
 
-def face_template() -> FaceTemplate:
+def face_template(employee_code: str = "EMP001") -> FaceTemplate:
     return FaceTemplate(
-        employee_code="EMP001",
+        employee_code=employee_code,
         algorithm=SFACE_ALGORITHM,
         similarity_metric=SFACE_SIMILARITY_METRIC,
         detector_model=YUNET_MODEL_FILENAME,
@@ -78,6 +78,20 @@ class TemplateStoreTests(unittest.TestCase):
             self.store.save(original)
 
         self.assertEqual(path.read_bytes(), original_bytes)
+
+    def test_remove_deletes_only_the_validated_employee_and_is_idempotent(self) -> None:
+        self.store.save(face_template())
+        self.store.save(face_template("EMP002"))
+
+        self.assertTrue(self.store.remove("EMP001"))
+        self.assertFalse(self.store.exists("EMP001"))
+        self.assertTrue(self.store.exists("EMP002"))
+        self.assertFalse(self.store.remove("EMP001"))
+
+    def test_remove_rejects_path_traversal(self) -> None:
+        for employee_code in ("../EMP001", "EMP/001", "EMP\\001"):
+            with self.assertRaisesRegex(Exception, "employeeCode"):
+                self.store.remove(employee_code)
 
     def test_schema_v2_lbp_template_is_explicitly_incompatible(self) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)

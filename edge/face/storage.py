@@ -100,6 +100,18 @@ class TemplateStore:
     def exists(self, employee_code: str) -> bool:
         return self._path_for(employee_code).is_file()
 
+    def remove(self, employee_code: str) -> bool:
+        """Remove exactly one validated employee template, if present."""
+
+        path = self._path_for(employee_code)
+        try:
+            path.unlink()
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            raise TemplateStorageError(f"Unable to remove template: {path}") from error
+
     def load(self, employee_code: str) -> FaceTemplate:
         path = self._path_for(employee_code)
         if not path.is_file():
