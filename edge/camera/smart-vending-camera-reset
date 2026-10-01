@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 0 ]; then
+    echo "smart-vending-camera-reset accepts no arguments" >&2
+    exit 64
+fi
+
+UHUBCTL=/usr/sbin/uhubctl
+SLEEP=/usr/bin/sleep
+LSUSB=/usr/bin/lsusb
+UDEVADM=/usr/bin/udevadm
+HUB_LOCATION=1-1.1
+CAMERA_PORT=2
+CAMERA_USB_ID=5258:4a55
+
+"$UHUBCTL" -l "$HUB_LOCATION" -p "$CAMERA_PORT" -a off
+"$SLEEP" 1
+"$UHUBCTL" -l "$HUB_LOCATION" -p "$CAMERA_PORT" -a on
+"$UDEVADM" settle --timeout=10
+
+attempt=0
+while [ "$attempt" -lt 10 ]; do
+    if "$LSUSB" -d "$CAMERA_USB_ID" >/dev/null 2>&1; then
+        exit 0
+    fi
+    attempt=$((attempt + 1))
+    "$SLEEP" 1
+done
+
+echo "camera USB device did not re-enumerate" >&2
+exit 1

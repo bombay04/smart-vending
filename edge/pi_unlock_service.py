@@ -27,6 +27,12 @@ if __package__:
     )
     from .face.models import RecognitionResult
     from .face.storage import EMPLOYEE_CODE_PATTERN
+    from .face.usb_recovery import (
+        DEFAULT_USB_RECOVERY_COOLDOWN_SECONDS,
+        DEFAULT_USB_RECOVERY_HELPER_PATH,
+        DEFAULT_USB_RECOVERY_TIMEOUT_SECONDS,
+        CameraUsbPowerRecovery,
+    )
     from .serial_client import Esp32SerialClient, SerialClientError
 else:
     # Keep direct `python edge/pi_unlock_service.py` execution working on the Pi.
@@ -42,6 +48,12 @@ else:
     )
     from face.models import RecognitionResult
     from face.storage import EMPLOYEE_CODE_PATTERN
+    from face.usb_recovery import (
+        DEFAULT_USB_RECOVERY_COOLDOWN_SECONDS,
+        DEFAULT_USB_RECOVERY_HELPER_PATH,
+        DEFAULT_USB_RECOVERY_TIMEOUT_SECONDS,
+        CameraUsbPowerRecovery,
+    )
     from serial_client import Esp32SerialClient, SerialClientError
 
 
@@ -67,6 +79,7 @@ CAMERA_STATUS_REASONS = {
     "READ_FAILURE",
     "INVALID_FRAME",
     "BLACK_FRAME",
+    "NEAR_BLACK_FRAME",
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -90,6 +103,8 @@ class FaceRecognizer(Protocol):
 
 
 face_engine: FaceRecognizer | None = None
+camera_usb_recovery: CameraUsbPowerRecovery | None = None
+camera_usb_recovery_initialized = False
 
 
 class FaceAuthenticationLockout:
@@ -181,11 +196,57 @@ def environment_integer(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer.") from error
 
 
+def environment_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    try:
+        return float(value)
+    except ValueError as error:
+        raise ValueError(f"{name} must be a number.") from error
+
+
 def configured_camera_index() -> int:
     camera_index = environment_integer("FACE_CAMERA_INDEX", DEFAULT_CAMERA_INDEX)
     if camera_index < 0:
         raise ValueError("FACE_CAMERA_INDEX must be non-negative.")
     return camera_index
+
+
+def get_camera_usb_recovery() -> CameraUsbPowerRecovery | None:
+    """Return one process-wide fixed-helper recovery callable when enabled."""
+
+    global camera_usb_recovery, camera_usb_recovery_initialized
+
+    if camera_usb_recovery_initialized:
+        return camera_usb_recovery
+
+    if not environment_flag("FACE_CAMERA_USB_RECOVERY_ENABLED"):
+        camera_usb_recovery_initialized = True
+        logger.info("Automatic camera USB power recovery is disabled")
+        return None
+
+    configured_path = os.getenv("FACE_CAMERA_USB_RECOVERY_HELPER")
+    helper_path = (
+        Path(configured_path)
+        if configured_path
+        else DEFAULT_USB_RECOVERY_HELPER_PATH
+    )
+    camera_usb_recovery = CameraUsbPowerRecovery(
+        helper_path,
+        timeout_seconds=environment_float(
+            "FACE_CAMERA_USB_RECOVERY_TIMEOUT_SECONDS",
+            DEFAULT_USB_RECOVERY_TIMEOUT_SECONDS,
+        ),
+        cooldown_seconds=environment_float(
+            "FACE_CAMERA_USB_RECOVERY_COOLDOWN_SECONDS",
+            DEFAULT_USB_RECOVERY_COOLDOWN_SECONDS,
+        ),
+    )
+    camera_usb_recovery_initialized = True
+    logger.info("Automatic targeted camera USB power recovery is enabled")
+    return camera_usb_recovery
 
 
 MOCK_HARDWARE = environment_flag("MOCK_HARDWARE")
@@ -301,7 +362,10 @@ def get_face_engine() -> FaceRecognizer:
     global face_engine
 
     if face_engine is None:
-        face_engine = FaceEngine(camera_index=configured_camera_index())
+        face_engine = FaceEngine(
+            camera_index=configured_camera_index(),
+            camera_recovery_escalation=get_camera_usb_recovery(),
+        )
         logger.info("Face authentication runtime initialized")
     return face_engine
 
@@ -385,7 +449,10 @@ def camera_status() -> tuple[Response, int] | Response:
 
     try:
         try:
-            capture_frame(configured_camera_index())
+            capture_frame(
+                configured_camera_index(),
+                recovery_escalation=get_camera_usb_recovery(),
+            )
         except CameraError as error:
             reason = (
                 error.reason

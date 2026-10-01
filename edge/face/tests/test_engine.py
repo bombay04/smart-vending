@@ -15,7 +15,7 @@ from edge.face.config import (
 )
 from edge.face.diagnostics import ConsensusDecisionDiagnostics
 from edge.face.engine import FaceEngine, validate_sample_count
-from edge.face.errors import AlreadyRegisteredError, NoFaceError
+from edge.face.errors import AlreadyRegisteredError, CameraError, NoFaceError
 from edge.face.models import FaceTemplate
 from edge.face.storage import TemplateStore
 
@@ -85,6 +85,36 @@ class FakeEmbedder:
         self, first: tuple[float, ...], second: tuple[float, ...]
     ) -> float:
         return abs(first[0] - second[0])
+
+
+class FakeCameraSession:
+    def __init__(self, frames: list[object]) -> None:
+        self.frames = iter(frames)
+        self.capture_calls = 0
+        self.enter_calls = 0
+        self.exit_calls = 0
+
+    def __enter__(self) -> FakeCameraSession:
+        self.enter_calls += 1
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        self.exit_calls += 1
+
+    def capture_frame(self) -> object:
+        self.capture_calls += 1
+        return next(self.frames)
+
+
+class FailingCameraSession:
+    def __init__(self, reason: str = "BLACK_FRAME") -> None:
+        self.reason = reason
+
+    def __enter__(self) -> FailingCameraSession:
+        raise CameraError("unhealthy stream", reason=self.reason)
+
+    def __exit__(self, *_exc_info: object) -> None:
+        pass
 
 
 class RecognitionEngine(FaceEngine):
@@ -163,15 +193,44 @@ class EngineConfigurationTests(unittest.TestCase):
             detector=PassthroughDetector(),  # type: ignore[arg-type]
             embedder=FakeEmbedder(embeddings),  # type: ignore[arg-type]
         )
-        with patch(
-            "edge.face.engine.capture_frame", side_effect=["a", "b", "c", "d", "e"]
-        ) as capture:
+        camera = FakeCameraSession(["a", "b", "c", "d", "e"])
+        with patch("edge.face.engine.CameraCaptureSession", return_value=camera) as factory:
             registered = engine.register("EMP001")
 
-        self.assertEqual(capture.call_count, 5)
+        factory.assert_called_once_with(
+            0,
+            stabilization_seconds=1.5,
+            recovery_escalation=None,
+            diagnostic_sink=None,
+        )
+        self.assertEqual(camera.capture_calls, 5)
+        self.assertEqual((camera.enter_calls, camera.exit_calls), (1, 1))
         self.assertEqual(registered.embeddings, embeddings)
         self.assertEqual(registered.similarity_metric, SFACE_SIMILARITY_METRIC)
         self.assertIs(store.saved, registered)
+
+    def test_camera_recovery_escalation_is_forwarded_to_operation_session(self) -> None:
+        store = RecordingTemplateStore()
+        embeddings = tuple(embedding(value) for value in (0.1, 0.2, 0.3))
+        recovery_escalation = lambda: None
+        engine = FaceEngine(
+            enrollment_sample_count=3,
+            template_store=store,  # type: ignore[arg-type]
+            detector=PassthroughDetector(),  # type: ignore[arg-type]
+            embedder=FakeEmbedder(embeddings),  # type: ignore[arg-type]
+            camera_recovery_escalation=recovery_escalation,
+        )
+        camera = FakeCameraSession(["a", "b", "c"])
+
+        with patch("edge.face.engine.CameraCaptureSession", return_value=camera) as factory:
+            engine.register("EMP001")
+
+        factory.assert_called_once_with(
+            0,
+            stabilization_seconds=1.5,
+            recovery_escalation=recovery_escalation,
+            diagnostic_sink=None,
+        )
 
     def test_healthy_camera_capture_reaches_existing_detection_pipeline(self) -> None:
         store = RecordingTemplateStore()
@@ -185,7 +244,8 @@ class EngineConfigurationTests(unittest.TestCase):
             embedder=FakeEmbedder(embeddings),  # type: ignore[arg-type]
         )
 
-        with patch("edge.face.engine.capture_frame", return_value=captured_frame):
+        camera = FakeCameraSession([captured_frame] * 3)
+        with patch("edge.face.engine.CameraCaptureSession", return_value=camera):
             registered = engine.register("EMP001")
 
         self.assertEqual(detector.frames, [captured_frame] * 3)
@@ -199,11 +259,11 @@ class EngineConfigurationTests(unittest.TestCase):
             embedder=FakeEmbedder(),  # type: ignore[arg-type]
         )
 
-        with patch("edge.face.engine.capture_frame") as capture:
+        with patch("edge.face.engine.CameraCaptureSession") as session_factory:
             with self.assertRaises(AlreadyRegisteredError):
                 engine.register("EMP001")
 
-        capture.assert_not_called()
+        session_factory.assert_not_called()
         self.assertIsNone(store.saved)
 
     def test_failed_registration_does_not_replace_existing_template(self) -> None:
@@ -214,11 +274,55 @@ class EngineConfigurationTests(unittest.TestCase):
             detector=NoFaceDetector(),  # type: ignore[arg-type]
             embedder=FakeEmbedder(),  # type: ignore[arg-type]
         )
-        with patch("edge.face.engine.capture_frame", return_value="frame") as capture:
+        camera = FakeCameraSession(["frame"] * 3)
+        with patch("edge.face.engine.CameraCaptureSession", return_value=camera):
             with self.assertRaisesRegex(NoFaceError, "after 3 attempts"):
                 engine.register("EMP001")
-        self.assertEqual(capture.call_count, 3)
+        self.assertEqual(camera.capture_calls, 3)
+        self.assertEqual(camera.exit_calls, 1)
         self.assertIsNone(store.saved)
+
+    def test_recognition_collects_all_live_samples_in_one_camera_session(self) -> None:
+        employee = template("EMP001", (0.0, 0.1, 0.2))
+        live = tuple(embedding(value) for value in (0.1, 0.2, 0.3))
+        engine = FaceEngine(
+            sface_l2_threshold=0.5,
+            template_store=FakeTemplateStore([employee]),  # type: ignore[arg-type]
+            detector=PassthroughDetector(),  # type: ignore[arg-type]
+            embedder=FakeEmbedder(live),  # type: ignore[arg-type]
+        )
+        camera = FakeCameraSession(["a", "b", "c"])
+
+        with patch("edge.face.engine.CameraCaptureSession", return_value=camera) as factory:
+            result = engine.recognize()
+
+        self.assertTrue(result.matched)
+        self.assertEqual(camera.capture_calls, 3)
+        self.assertEqual((camera.enter_calls, camera.exit_calls), (1, 1))
+        factory.assert_called_once()
+
+    def test_unhealthy_camera_failure_never_reaches_detector_as_no_face(self) -> None:
+        for reason in ("BLACK_FRAME", "NEAR_BLACK_FRAME"):
+            with self.subTest(reason=reason):
+                store = RecordingTemplateStore()
+                detector = RecordingDetector()
+                engine = FaceEngine(
+                    enrollment_sample_count=3,
+                    template_store=store,  # type: ignore[arg-type]
+                    detector=detector,  # type: ignore[arg-type]
+                    embedder=FakeEmbedder(),  # type: ignore[arg-type]
+                )
+
+                with patch(
+                    "edge.face.engine.CameraCaptureSession",
+                    return_value=FailingCameraSession(reason),
+                ):
+                    with self.assertRaises(CameraError) as raised:
+                        engine.register("EMP001")
+
+                self.assertEqual(raised.exception.reason, reason)
+                self.assertEqual(detector.frames, [])
+                self.assertIsNone(store.saved)
 
     def test_registered_template_is_used_by_existing_recognition_path(self) -> None:
         enrollment = tuple(

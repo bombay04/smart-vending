@@ -123,11 +123,21 @@ def recognition_result(*, matched: bool) -> RecognitionResult:
 class PiUnlockServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.camera_environment_patch = patch.dict(
-            "os.environ", {"FACE_CAMERA_INDEX": "0"}
+            "os.environ",
+            {
+                "FACE_CAMERA_INDEX": "0",
+                "FACE_CAMERA_USB_RECOVERY_ENABLED": "false",
+            },
         )
         self.camera_environment_patch.start()
         self.client = pi_unlock_service.app.test_client()
         pi_unlock_service.face_engine = None
+        self.original_camera_usb_recovery = pi_unlock_service.camera_usb_recovery
+        self.original_camera_usb_recovery_initialized = (
+            pi_unlock_service.camera_usb_recovery_initialized
+        )
+        pi_unlock_service.camera_usb_recovery = None
+        pi_unlock_service.camera_usb_recovery_initialized = False
         self.clock = FakeClock()
         self.original_lockout = pi_unlock_service.face_authentication_lockout
         pi_unlock_service.face_authentication_lockout = (
@@ -136,6 +146,10 @@ class PiUnlockServiceTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         pi_unlock_service.face_engine = None
+        pi_unlock_service.camera_usb_recovery = self.original_camera_usb_recovery
+        pi_unlock_service.camera_usb_recovery_initialized = (
+            self.original_camera_usb_recovery_initialized
+        )
         pi_unlock_service.face_authentication_lockout = self.original_lockout
         self.camera_environment_patch.stop()
         if pi_unlock_service.face_authentication_lock.locked():
@@ -366,7 +380,12 @@ class PiUnlockServiceTests(unittest.TestCase):
         )
 
     def test_camera_open_read_and_black_failures_return_unavailable(self) -> None:
-        for reason in ("OPEN_FAILURE", "READ_FAILURE", "BLACK_FRAME"):
+        for reason in (
+            "OPEN_FAILURE",
+            "READ_FAILURE",
+            "BLACK_FRAME",
+            "NEAR_BLACK_FRAME",
+        ):
             with self.subTest(reason=reason):
                 self.set_face_outcome(
                     error=CameraError("sensitive camera detail", reason=reason)
@@ -388,7 +407,7 @@ class PiUnlockServiceTests(unittest.TestCase):
             self.set_face_outcome(matched=False)
             self.post_face_authentication()
         self.set_face_outcome(
-            error=CameraError("dead stream", reason="BLACK_FRAME")
+            error=CameraError("dead stream", reason="NEAR_BLACK_FRAME")
         )
 
         response = self.post_face_authentication()
@@ -446,7 +465,10 @@ class PiUnlockServiceTests(unittest.TestCase):
 
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(second_response.status_code, 200)
-        factory.assert_called_once_with(camera_index=0)
+        factory.assert_called_once_with(
+            camera_index=0,
+            camera_recovery_escalation=None,
+        )
 
     def test_camera_index_is_server_configured(self) -> None:
         engine = StubFaceEngine(recognition_result(matched=True))
@@ -457,7 +479,65 @@ class PiUnlockServiceTests(unittest.TestCase):
             response = self.post_face_authentication()
 
         self.assertEqual(response.status_code, 200)
-        factory.assert_called_once_with(camera_index=4)
+        factory.assert_called_once_with(
+            camera_index=4,
+            camera_recovery_escalation=None,
+        )
+
+    def test_camera_usb_recovery_is_disabled_by_default(self) -> None:
+        with patch.object(pi_unlock_service, "CameraUsbPowerRecovery") as factory:
+            recovery = pi_unlock_service.get_camera_usb_recovery()
+
+        self.assertIsNone(recovery)
+        factory.assert_not_called()
+
+    def test_enabled_camera_usb_recovery_is_configured_once(self) -> None:
+        recovery = object()
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "FACE_CAMERA_USB_RECOVERY_ENABLED": "true",
+                    "FACE_CAMERA_USB_RECOVERY_HELPER": "/fixed/camera-reset",
+                    "FACE_CAMERA_USB_RECOVERY_TIMEOUT_SECONDS": "15",
+                    "FACE_CAMERA_USB_RECOVERY_COOLDOWN_SECONDS": "90",
+                },
+            ),
+            patch.object(
+                pi_unlock_service,
+                "CameraUsbPowerRecovery",
+                return_value=recovery,
+            ) as factory,
+        ):
+            first = pi_unlock_service.get_camera_usb_recovery()
+            second = pi_unlock_service.get_camera_usb_recovery()
+
+        self.assertIs(first, recovery)
+        self.assertIs(second, recovery)
+        factory.assert_called_once_with(
+            Path("/fixed/camera-reset"),
+            timeout_seconds=15.0,
+            cooldown_seconds=90.0,
+        )
+
+    def test_enabled_recovery_callable_is_wired_into_face_engine(self) -> None:
+        engine = StubFaceEngine(recognition_result(matched=True))
+        recovery = object()
+        with (
+            patch.object(
+                pi_unlock_service,
+                "get_camera_usb_recovery",
+                return_value=recovery,
+            ),
+            patch.object(pi_unlock_service, "FaceEngine", return_value=engine) as factory,
+        ):
+            response = self.post_face_authentication()
+
+        self.assertEqual(response.status_code, 200)
+        factory.assert_called_once_with(
+            camera_index=0,
+            camera_recovery_escalation=recovery,
+        )
 
     def test_camera_status_ready_contains_no_biometric_data(self) -> None:
         with patch.object(pi_unlock_service, "capture_frame", return_value=object()) as capture:
@@ -466,7 +546,7 @@ class PiUnlockServiceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"status": "READY"})
         self.assertEqual(response.headers["Cache-Control"], "no-store")
-        capture.assert_called_once_with(0)
+        capture.assert_called_once_with(0, recovery_escalation=None)
         serialized = response.get_data(as_text=True).lower()
         for forbidden in (
             "embedding",
@@ -479,20 +559,41 @@ class PiUnlockServiceTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, serialized)
 
-    def test_camera_status_reports_safe_black_frame_reason(self) -> None:
-        with patch.object(
-            pi_unlock_service,
-            "capture_frame",
-            side_effect=CameraError("sensitive detail", reason="BLACK_FRAME"),
+    def test_enabled_recovery_callable_is_wired_into_camera_status(self) -> None:
+        recovery = object()
+        with (
+            patch.object(
+                pi_unlock_service,
+                "get_camera_usb_recovery",
+                return_value=recovery,
+            ),
+            patch.object(
+                pi_unlock_service, "capture_frame", return_value=object()
+            ) as capture,
         ):
             response = self.client.get("/camera/status")
 
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(
-            response.get_json(),
-            {"status": "UNAVAILABLE", "reason": "BLACK_FRAME"},
-        )
-        self.assertNotIn("sensitive", response.get_data(as_text=True).lower())
+        self.assertEqual(response.status_code, 200)
+        capture.assert_called_once_with(0, recovery_escalation=recovery)
+
+    def test_camera_status_reports_safe_unhealthy_frame_reason(self) -> None:
+        for reason in ("BLACK_FRAME", "NEAR_BLACK_FRAME"):
+            with self.subTest(reason=reason):
+                with patch.object(
+                    pi_unlock_service,
+                    "capture_frame",
+                    side_effect=CameraError("sensitive detail", reason=reason),
+                ):
+                    response = self.client.get("/camera/status")
+
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(
+                    response.get_json(),
+                    {"status": "UNAVAILABLE", "reason": reason},
+                )
+                self.assertNotIn(
+                    "sensitive", response.get_data(as_text=True).lower()
+                )
 
     def test_camera_status_does_not_change_authentication_failures(self) -> None:
         self.set_face_outcome(matched=False)

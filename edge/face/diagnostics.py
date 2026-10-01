@@ -10,13 +10,29 @@ from typing import TypeAlias
 @dataclass(frozen=True)
 class CameraCaptureDiagnostics:
     camera_index: int
+    backend: str
+    requested_width: int
+    requested_height: int
+    requested_fps: int
+    requested_fourcc: str
+    actual_width: int
+    actual_height: int
+    actual_fps: float
+    actual_fourcc: str
     frame_width: int
     frame_height: int
-    stabilization_seconds: float
-    stabilization_elapsed_milliseconds: float
-    stabilization_reads: int
-    successful_discarded_frames: int
-    post_stabilization_attempts: int
+    warmup_reads: int
+    unhealthy_frames: int
+    black_frames: int
+    near_black_frames: int
+    last_frame_health: str
+    grayscale_mean: float | None
+    grayscale_p99: float | None
+    bright_pixel_ratio: float | None
+    recovery_attempt: int
+    reopen_count: int
+    escalation_attempted: bool
+    time_to_first_healthy_milliseconds: float
 
 
 @dataclass(frozen=True)
@@ -92,12 +108,24 @@ def format_diagnostic(event: DiagnosticEvent) -> str:
         return (
             "DEBUG camera "
             f"index={event.camera_index} "
+            f"backend={event.backend} "
+            f"requested={event.requested_width}x{event.requested_height}"
+            f"@{event.requested_fps} fourcc={event.requested_fourcc} "
+            f"actual={event.actual_width}x{event.actual_height}"
+            f"@{event.actual_fps:.3f} fourcc={event.actual_fourcc} "
             f"frame={event.frame_width}x{event.frame_height} "
-            f"stabilizationSeconds={event.stabilization_seconds:.3f} "
-            f"stabilizationElapsedMs={event.stabilization_elapsed_milliseconds:.1f} "
-            f"stabilizationReads={event.stabilization_reads} "
-            f"discardedFrames={event.successful_discarded_frames} "
-            f"freshFrameAttempts={event.post_stabilization_attempts}"
+            f"warmupReads={event.warmup_reads} "
+            f"unhealthyFrames={event.unhealthy_frames} "
+            f"blackFrames={event.black_frames} "
+            f"nearBlackFrames={event.near_black_frames} "
+            f"lastFrameHealth={event.last_frame_health} "
+            f"grayscaleMean={_format_optional_float(event.grayscale_mean)} "
+            f"grayscaleP99={_format_optional_float(event.grayscale_p99)} "
+            f"brightPixelRatio={_format_optional_float(event.bright_pixel_ratio, 6)} "
+            f"recoveryAttempt={event.recovery_attempt} "
+            f"reopenCount={event.reopen_count} "
+            f"escalationAttempted={str(event.escalation_attempted).lower()} "
+            f"timeToHealthyMs={event.time_to_first_healthy_milliseconds:.1f}"
         )
 
     if isinstance(event, FaceDetectionDiagnostics):
@@ -155,6 +183,10 @@ def format_diagnostic(event: DiagnosticEvent) -> str:
         f"passedSamples={event.passed_samples}/{event.required_samples} "
         f"reason={event.reason}"
     )
+
+
+def _format_optional_float(value: float | None, precision: int = 3) -> str:
+    return "none" if value is None else f"{value:.{precision}f}"
 
 
 def _format_bounding_box(
