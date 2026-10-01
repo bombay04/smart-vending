@@ -28,6 +28,10 @@ sudo apt install alsa-utils
 | `MOCK_AUDIO` | No | `false` | When `true`, explicitly simulate successful audio responses without an asset, player, or speaker. Responses include `mockAudio: true`. |
 | `AUDIO_ALSA_DEVICE` | No | ALSA default | Server-side ALSA playback device passed to `aplay -D`; configure this explicitly on multi-device cabinets. |
 | `FACE_CAMERA_INDEX` | No | `0` | Non-negative server-side OpenCV camera index. It is never accepted from an HTTP request. |
+| `FACE_CAMERA_USB_RECOVERY_ENABLED` | No | `false` | Explicitly enables the fixed privileged camera USB power-recovery helper. |
+| `FACE_CAMERA_USB_RECOVERY_HELPER` | No | `/usr/local/sbin/smart-vending-camera-reset` | Absolute path to the installed, root-owned, no-argument helper. |
+| `FACE_CAMERA_USB_RECOVERY_TIMEOUT_SECONDS` | No | `20` | Subprocess timeout for one helper invocation; accepted range is 0.1–60 seconds. |
+| `FACE_CAMERA_USB_RECOVERY_COOLDOWN_SECONDS` | No | `60` | Process-wide monotonic cooldown after each attempted power cycle; accepted range is 1–3600 seconds. |
 | `PI_UNLOCK_HOST` | No | `127.0.0.1` | Address on which the HTTP service listens. |
 | `PI_UNLOCK_PORT` | No | `5000` | HTTP service port. |
 
@@ -173,7 +177,7 @@ curl -X POST http://localhost:5000/face/authenticate
 
 The service lazily initializes one `FaceEngine` and reuses its YuNet/SFace runtime for later requests. Recognition retains the engine's schema-v3 templates, default `1.128` SFace L2 threshold, three live samples, all-samples-pass consensus, ambiguous-candidate rejection, and bounded capture retries. `FACE_CAMERA_INDEX` selects the camera on the server and defaults to index `0`; request bodies cannot override it.
 
-Every capture validates frame contents before YuNet runs. A usable frame must be a finite numeric, three-channel BGR image at least 32 by 32 pixels. A frame whose maximum channel value is `2` or lower is a dead `BLACK_FRAME`. This conservative maximum-value rule catches the observed all-zero stream while allowing genuinely dark scenes that still contain any pixel detail above that near-zero floor. After an unhealthy open/read/frame result, the service releases the capture, waits 250 ms, reopens it, repeats the bounded 1.5-second/180-read warm-up, and revalidates up to two times. Recovery success continues through the unchanged YuNet/SFace pipeline. Recovery exhaustion is `UNAVAILABLE`, not `NO_FACE`.
+Every capture validates frame contents before YuNet runs. A usable frame must be a finite numeric, three-channel BGR image at least 32 by 32 pixels. A frame whose maximum channel value is `2` or lower is a dead `BLACK_FRAME`; a frame whose grayscale mean is at most `1.0` and p99 is at most `5.0` is a `NEAR_BLACK_FRAME`, even when sparse hot pixels are present. After an unhealthy open/read/frame result, the service releases the capture, waits 250 ms, reopens it, repeats the bounded 1.5-second/180-read warm-up, and revalidates up to two times. Recovery success continues through the unchanged YuNet/SFace pipeline. Recovery exhaustion is `UNAVAILABLE`, not `NO_FACE`.
 
 Responses are:
 
@@ -227,7 +231,62 @@ Check the camera without running face detection or returning biometric material:
 curl http://localhost:5000/camera/status
 ```
 
-A healthy capture returns HTTP `200` with `{"status":"READY"}`. A camera that remains unhealthy after bounded recovery returns HTTP `503`, for example `{"status":"UNAVAILABLE","reason":"BLACK_FRAME"}`. Safe reasons are `OPEN_FAILURE`, `READ_FAILURE`, `INVALID_FRAME`, and `BLACK_FRAME`; contention reports `BUSY`, and an unexpected internal status-check failure reports `CAMERA_ERROR`. Responses use `Cache-Control: no-store` and contain no image, crop, detection, landmark, embedding, template, identity, or matching score. The check shares the face-operation mutex and never reads or changes authentication failure/lockout state.
+A healthy capture returns HTTP `200` with `{"status":"READY"}`. A camera that remains unhealthy after bounded recovery returns HTTP `503`, for example `{"status":"UNAVAILABLE","reason":"BLACK_FRAME"}`. Safe reasons are `OPEN_FAILURE`, `READ_FAILURE`, `INVALID_FRAME`, `BLACK_FRAME`, and `NEAR_BLACK_FRAME`; contention reports `BUSY`, and an unexpected internal status-check failure reports `CAMERA_ERROR`. Responses use `Cache-Control: no-store` and contain no image, crop, detection, landmark, embedding, template, identity, or matching score. The check shares the face-operation mutex and never reads or changes authentication failure/lockout state.
+
+### Targeted camera USB power recovery
+
+Automatic USB recovery is disabled unless `FACE_CAMERA_USB_RECOVERY_ENABLED=true`. When enabled, the Pi service remains an unprivileged process and invokes exactly:
+
+```text
+/usr/bin/sudo -n /usr/local/sbin/smart-vending-camera-reset
+```
+
+The Python process supplies no hub, port, device ID, or other user-controlled argument, does not use a shell, applies a bounded subprocess timeout, and shares a process-wide monotonic cooldown across camera status, enrollment, and authentication operations. The helper is attempted at most once after a camera session has exhausted ordinary reopen recovery and released `VideoCapture`. Failure, timeout, absence, cooldown, or an unhealthy post-reset frame remains HTTP `503` and never changes face-authentication lockout state.
+
+The repository helper [smart-vending-camera-reset](../edge/camera/smart-vending-camera-reset) accepts no arguments. It targets only hub `1-1.1`, port `2`, powers that port off once and on once, then waits a bounded time for USB device `5258:4a55` to re-enumerate. Because this camera is a composite USB device, its camera-owned audio interfaces also reset. The separate cabinet speaker/output configuration is not changed.
+
+Repository code does not install the helper or grant privilege. On the Pi, verify that `uhubctl`, `udevadm`, `lsusb`, and `sleep` match the absolute paths used by the helper, then install it as root:
+
+```bash
+sudo apt install uhubctl usbutils
+sudo install -o root -g root -m 0755 \
+  edge/camera/smart-vending-camera-reset \
+  /usr/local/sbin/smart-vending-camera-reset
+```
+
+Assuming the Flask service runs as the dedicated unprivileged user `smartvending`, create only this sudoers entry with `sudo visudo -f /etc/sudoers.d/smart-vending-camera-reset`:
+
+```sudoers
+smartvending ALL=(root) NOPASSWD: /usr/local/sbin/smart-vending-camera-reset
+```
+
+Then secure and validate the rule:
+
+```bash
+sudo chown root:root /etc/sudoers.d/smart-vending-camera-reset
+sudo chmod 0440 /etc/sudoers.d/smart-vending-camera-reset
+sudo visudo -cf /etc/sudoers.d/smart-vending-camera-reset
+sudo -u smartvending /usr/bin/sudo -n /usr/local/sbin/smart-vending-camera-reset
+```
+
+Do not use `NOPASSWD: ALL`. If the actual service account differs, substitute only that account name; the allowed command must remain the single absolute helper path. Enable the service configuration only after the narrow rule is installed:
+
+```ini
+FACE_CAMERA_USB_RECOVERY_ENABLED=true
+FACE_CAMERA_USB_RECOVERY_HELPER=/usr/local/sbin/smart-vending-camera-reset
+FACE_CAMERA_USB_RECOVERY_TIMEOUT_SECONDS=20
+FACE_CAMERA_USB_RECOVERY_COOLDOWN_SECONDS=60
+```
+
+For physical validation, observe USB removal/re-enumeration in one terminal and invoke the fixed helper in another, then verify camera readiness:
+
+```bash
+sudo /usr/bin/udevadm monitor --kernel --subsystem-match=usb
+lsusb -d 5258:4a55
+sudo -u smartvending /usr/bin/sudo -n /usr/local/sbin/smart-vending-camera-reset
+lsusb -d 5258:4a55
+curl --fail http://localhost:5000/camera/status
+```
 
 Only one face operation can run at a time. Authentication and registration share the same non-blocking camera mutex. The endpoint never returns embeddings, template contents, images, aligned crops, or landmarks. `employeeCode` is only a recognition result; the backend `/api/v1/employees/auth/face` endpoint must still validate that the employee exists and is active before Restock Mode is authorized.
 

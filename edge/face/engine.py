@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 from .camera import CameraCaptureSession
 from .config import (
@@ -61,6 +62,7 @@ class FaceEngine:
         detector: YuNetFaceDetector | None = None,
         embedder: SFaceEmbedder | None = None,
         diagnostic_sink: DiagnosticSink | None = None,
+        camera_recovery_escalation: Callable[[], None] | None = None,
     ) -> None:
         if camera_index < 0:
             raise ValueError("camera_index must be non-negative.")
@@ -91,6 +93,7 @@ class FaceEngine:
         self.detector = detector or YuNetFaceDetector()
         self.embedder = embedder or SFaceEmbedder()
         self.diagnostic_sink = diagnostic_sink
+        self.camera_recovery_escalation = camera_recovery_escalation
 
     def register(self, employee_code: str) -> FaceTemplate:
         if self.template_store.exists(employee_code):
@@ -198,6 +201,7 @@ class FaceEngine:
         with CameraCaptureSession(
             self.camera_index,
             stabilization_seconds=self.stabilization_seconds,
+            recovery_escalation=self.camera_recovery_escalation,
             diagnostic_sink=self.diagnostic_sink,
         ) as camera:
             for sample_number in range(1, sample_count + 1):

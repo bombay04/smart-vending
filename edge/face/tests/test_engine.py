@@ -198,13 +198,39 @@ class EngineConfigurationTests(unittest.TestCase):
             registered = engine.register("EMP001")
 
         factory.assert_called_once_with(
-            0, stabilization_seconds=1.5, diagnostic_sink=None
+            0,
+            stabilization_seconds=1.5,
+            recovery_escalation=None,
+            diagnostic_sink=None,
         )
         self.assertEqual(camera.capture_calls, 5)
         self.assertEqual((camera.enter_calls, camera.exit_calls), (1, 1))
         self.assertEqual(registered.embeddings, embeddings)
         self.assertEqual(registered.similarity_metric, SFACE_SIMILARITY_METRIC)
         self.assertIs(store.saved, registered)
+
+    def test_camera_recovery_escalation_is_forwarded_to_operation_session(self) -> None:
+        store = RecordingTemplateStore()
+        embeddings = tuple(embedding(value) for value in (0.1, 0.2, 0.3))
+        recovery_escalation = lambda: None
+        engine = FaceEngine(
+            enrollment_sample_count=3,
+            template_store=store,  # type: ignore[arg-type]
+            detector=PassthroughDetector(),  # type: ignore[arg-type]
+            embedder=FakeEmbedder(embeddings),  # type: ignore[arg-type]
+            camera_recovery_escalation=recovery_escalation,
+        )
+        camera = FakeCameraSession(["a", "b", "c"])
+
+        with patch("edge.face.engine.CameraCaptureSession", return_value=camera) as factory:
+            engine.register("EMP001")
+
+        factory.assert_called_once_with(
+            0,
+            stabilization_seconds=1.5,
+            recovery_escalation=recovery_escalation,
+            diagnostic_sink=None,
+        )
 
     def test_healthy_camera_capture_reaches_existing_detection_pipeline(self) -> None:
         store = RecordingTemplateStore()
