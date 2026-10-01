@@ -67,6 +67,7 @@ CAMERA_STATUS_REASONS = {
     "READ_FAILURE",
     "INVALID_FRAME",
     "BLACK_FRAME",
+    "NEAR_BLACK_FRAME",
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

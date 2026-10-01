@@ -366,7 +366,12 @@ class PiUnlockServiceTests(unittest.TestCase):
         )
 
     def test_camera_open_read_and_black_failures_return_unavailable(self) -> None:
-        for reason in ("OPEN_FAILURE", "READ_FAILURE", "BLACK_FRAME"):
+        for reason in (
+            "OPEN_FAILURE",
+            "READ_FAILURE",
+            "BLACK_FRAME",
+            "NEAR_BLACK_FRAME",
+        ):
             with self.subTest(reason=reason):
                 self.set_face_outcome(
                     error=CameraError("sensitive camera detail", reason=reason)
@@ -388,7 +393,7 @@ class PiUnlockServiceTests(unittest.TestCase):
             self.set_face_outcome(matched=False)
             self.post_face_authentication()
         self.set_face_outcome(
-            error=CameraError("dead stream", reason="BLACK_FRAME")
+            error=CameraError("dead stream", reason="NEAR_BLACK_FRAME")
         )
 
         response = self.post_face_authentication()
@@ -479,20 +484,24 @@ class PiUnlockServiceTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, serialized)
 
-    def test_camera_status_reports_safe_black_frame_reason(self) -> None:
-        with patch.object(
-            pi_unlock_service,
-            "capture_frame",
-            side_effect=CameraError("sensitive detail", reason="BLACK_FRAME"),
-        ):
-            response = self.client.get("/camera/status")
+    def test_camera_status_reports_safe_unhealthy_frame_reason(self) -> None:
+        for reason in ("BLACK_FRAME", "NEAR_BLACK_FRAME"):
+            with self.subTest(reason=reason):
+                with patch.object(
+                    pi_unlock_service,
+                    "capture_frame",
+                    side_effect=CameraError("sensitive detail", reason=reason),
+                ):
+                    response = self.client.get("/camera/status")
 
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(
-            response.get_json(),
-            {"status": "UNAVAILABLE", "reason": "BLACK_FRAME"},
-        )
-        self.assertNotIn("sensitive", response.get_data(as_text=True).lower())
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(
+                    response.get_json(),
+                    {"status": "UNAVAILABLE", "reason": reason},
+                )
+                self.assertNotIn(
+                    "sensitive", response.get_data(as_text=True).lower()
+                )
 
     def test_camera_status_does_not_change_authentication_failures(self) -> None:
         self.set_face_outcome(matched=False)

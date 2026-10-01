@@ -32,8 +32,14 @@ class DiagnosticsTests(unittest.TestCase):
                 warmup_reads=3,
                 unhealthy_frames=2,
                 black_frames=2,
+                near_black_frames=0,
+                last_frame_health="HEALTHY",
+                grayscale_mean=90.0,
+                grayscale_p99=180.0,
+                bright_pixel_ratio=0.75,
                 recovery_attempt=1,
                 reopen_count=1,
+                escalation_attempted=False,
                 time_to_first_healthy_milliseconds=42.0,
             )
         )
@@ -41,7 +47,10 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertIn("backend=V4L2", output)
         self.assertIn("requested=640x480@30 fourcc=MJPG", output)
         self.assertIn("blackFrames=2", output)
+        self.assertIn("lastFrameHealth=HEALTHY", output)
+        self.assertIn("brightPixelRatio=0.750000", output)
         self.assertIn("reopenCount=1", output)
+        self.assertIn("escalationAttempted=false", output)
         self.assertNotIn("pixels", output)
         self.assertNotIn("embedding", output)
 

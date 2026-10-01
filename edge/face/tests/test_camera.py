@@ -14,6 +14,26 @@ def healthy_frame(value: int = 120) -> numpy.ndarray:
     return numpy.full((48, 64, 3), value, dtype=numpy.uint8)
 
 
+def observed_near_black_frame() -> numpy.ndarray:
+    frame = numpy.zeros((480, 640, 3), dtype=numpy.uint8)
+    frame[0, 0] = 145
+    return frame
+
+
+def sparse_artifact_near_black_frame() -> numpy.ndarray:
+    frame = numpy.zeros((480, 640, 3), dtype=numpy.uint8)
+    frame.reshape(-1, 3)[:2000] = 100
+    return frame
+
+
+def meaningful_dim_frame() -> numpy.ndarray:
+    gradient = numpy.tile(
+        numpy.linspace(1, 12, 64, dtype=numpy.uint8),
+        (48, 1),
+    )
+    return numpy.repeat(gradient[:, :, numpy.newaxis], 3, axis=2)
+
+
 class FakeCapture:
     def __init__(
         self,
@@ -140,13 +160,27 @@ class CameraTests(unittest.TestCase):
         self.assertEqual(int(frame[0, 0, 0]), 90)
         self.assertTrue(fake_capture.released)
 
-    def test_black_and_near_zero_frames_are_unhealthy_but_dark_detail_is_usable(self) -> None:
+    def test_exact_black_and_observed_sparse_near_black_frames_are_rejected(self) -> None:
         self.assertEqual(frame_health_reason(healthy_frame(0)), "BLACK_FRAME")
         self.assertEqual(frame_health_reason(healthy_frame(2)), "BLACK_FRAME")
+        self.assertEqual(
+            frame_health_reason(observed_near_black_frame()),
+            "NEAR_BLACK_FRAME",
+        )
 
-        dark_frame = healthy_frame(0)
-        dark_frame[0, 0, 0] = 3
-        self.assertIsNone(frame_health_reason(dark_frame))
+    def test_sparse_artifacts_above_ratio_threshold_cannot_veto_near_black(self) -> None:
+        frame = sparse_artifact_near_black_frame()
+        bright_ratio = float(numpy.mean(frame[:, :, 0] > 16))
+
+        self.assertGreater(bright_ratio, 0.001)
+        self.assertEqual(float(numpy.percentile(frame[:, :, 0], 99)), 0.0)
+        self.assertEqual(frame_health_reason(frame), "NEAR_BLACK_FRAME")
+
+    def test_normal_frame_is_healthy(self) -> None:
+        self.assertIsNone(frame_health_reason(healthy_frame(120)))
+
+    def test_dim_frame_with_meaningful_distribution_and_detail_is_healthy(self) -> None:
+        self.assertIsNone(frame_health_reason(meaningful_dim_frame()))
 
     def test_invalid_dimensions_and_channel_data_are_rejected(self) -> None:
         self.assertEqual(
@@ -215,6 +249,30 @@ class CameraTests(unittest.TestCase):
                 )
         self.assertEqual(raised.exception.reason, "BLACK_FRAME")
         self.assertTrue(fake_capture.released)
+
+    def test_opened_near_black_device_is_not_healthy(self) -> None:
+        fake_capture = FakeCapture([observed_near_black_frame()])
+        diagnostics: list[CameraCaptureDiagnostics] = []
+        with patch(
+            "edge.face.camera.require_cv2", return_value=FakeCv2(fake_capture)
+        ):
+            with self.assertRaises(CameraError) as raised:
+                capture_frame(
+                    0,
+                    stabilization_seconds=0.0,
+                    capture_attempts=1,
+                    recovery_attempts=0,
+                    diagnostic_sink=diagnostics.append,
+                )
+        self.assertEqual(raised.exception.reason, "NEAR_BLACK_FRAME")
+        self.assertTrue(fake_capture.released)
+        self.assertEqual(diagnostics[0].last_frame_health, "NEAR_BLACK_FRAME")
+        self.assertEqual(diagnostics[0].near_black_frames, 1)
+        self.assertIsNotNone(diagnostics[0].grayscale_mean)
+        self.assertIsNotNone(diagnostics[0].bright_pixel_ratio)
+        self.assertLess(float(diagnostics[0].grayscale_mean), 1.0)
+        self.assertEqual(diagnostics[0].grayscale_p99, 0.0)
+        self.assertLess(float(diagnostics[0].bright_pixel_ratio), 0.001)
 
     def test_camera_open_failure_exhausts_recovery_and_releases(self) -> None:
         captures = [FakeCapture(opened=False) for _ in range(3)]
@@ -294,6 +352,108 @@ class CameraTests(unittest.TestCase):
         self.assertTrue(first_capture.released)
         self.assertTrue(recovered_capture.released)
         sleep.assert_called_once()
+
+    def test_escalation_hook_is_not_called_when_capture_is_healthy(self) -> None:
+        fake_capture = FakeCapture([healthy_frame()])
+        hook_calls: list[str] = []
+
+        with patch(
+            "edge.face.camera.require_cv2", return_value=FakeCv2(fake_capture)
+        ):
+            frame = capture_frame(
+                0,
+                stabilization_seconds=0.0,
+                recovery_attempts=1,
+                recovery_escalation=lambda: hook_calls.append("called"),
+            )
+
+        self.assertEqual(int(frame[0, 0, 0]), 120)
+        self.assertEqual(hook_calls, [])
+
+    def test_escalation_hook_runs_once_after_reopen_exhaustion_and_can_recover(self) -> None:
+        captures = [
+            FakeCapture([observed_near_black_frame()]),
+            FakeCapture([observed_near_black_frame()]),
+            FakeCapture([healthy_frame(90)]),
+        ]
+        fake_cv2 = FakeCv2(captures)
+        hook_calls: list[str] = []
+
+        def recovery_hook() -> None:
+            self.assertTrue(captures[0].released)
+            self.assertTrue(captures[1].released)
+            hook_calls.append("called")
+
+        with (
+            patch("edge.face.camera.require_cv2", return_value=fake_cv2),
+            patch("edge.face.camera.time.sleep"),
+        ):
+            frame = capture_frame(
+                0,
+                stabilization_seconds=0.0,
+                capture_attempts=1,
+                recovery_attempts=1,
+                recovery_escalation=recovery_hook,
+            )
+
+        self.assertEqual(int(frame[0, 0, 0]), 90)
+        self.assertEqual(hook_calls, ["called"])
+        self.assertEqual(len(fake_cv2.open_calls), 3)
+        self.assertTrue(all(capture.released for capture in captures))
+
+    def test_continued_failure_after_escalation_stays_bounded(self) -> None:
+        captures = [
+            FakeCapture([observed_near_black_frame()]) for _ in range(3)
+        ]
+        fake_cv2 = FakeCv2(captures)
+        hook_calls: list[str] = []
+
+        with (
+            patch("edge.face.camera.require_cv2", return_value=fake_cv2),
+            patch("edge.face.camera.time.sleep"),
+        ):
+            with self.assertRaises(CameraError) as raised:
+                capture_frame(
+                    0,
+                    stabilization_seconds=0.0,
+                    capture_attempts=1,
+                    recovery_attempts=1,
+                    recovery_escalation=lambda: hook_calls.append("called"),
+                )
+
+        self.assertEqual(raised.exception.reason, "NEAR_BLACK_FRAME")
+        self.assertEqual(hook_calls, ["called"])
+        self.assertEqual(len(fake_cv2.open_calls), 3)
+        self.assertTrue(all(capture.released for capture in captures))
+
+    def test_escalation_hook_exception_fails_safely_without_another_open(self) -> None:
+        captures = [
+            FakeCapture([observed_near_black_frame()]) for _ in range(2)
+        ]
+        fake_cv2 = FakeCv2(captures)
+        hook_calls: list[str] = []
+
+        def failing_hook() -> None:
+            hook_calls.append("called")
+            raise RuntimeError("uhubctl is intentionally not wired")
+
+        with (
+            patch("edge.face.camera.require_cv2", return_value=fake_cv2),
+            patch("edge.face.camera.time.sleep"),
+        ):
+            with self.assertRaises(CameraError) as raised:
+                capture_frame(
+                    0,
+                    stabilization_seconds=0.0,
+                    capture_attempts=1,
+                    recovery_attempts=1,
+                    recovery_escalation=failing_hook,
+                )
+
+        self.assertEqual(raised.exception.reason, "NEAR_BLACK_FRAME")
+        self.assertEqual(hook_calls, ["called"])
+        self.assertEqual(len(fake_cv2.open_calls), 2)
+        self.assertTrue(all(capture.released for capture in captures))
 
     def test_session_releases_capture_when_caller_raises(self) -> None:
         fake_capture = FakeCapture([healthy_frame()])

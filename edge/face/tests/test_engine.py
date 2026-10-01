@@ -107,8 +107,11 @@ class FakeCameraSession:
 
 
 class FailingCameraSession:
+    def __init__(self, reason: str = "BLACK_FRAME") -> None:
+        self.reason = reason
+
     def __enter__(self) -> FailingCameraSession:
-        raise CameraError("black stream", reason="BLACK_FRAME")
+        raise CameraError("unhealthy stream", reason=self.reason)
 
     def __exit__(self, *_exc_info: object) -> None:
         pass
@@ -272,25 +275,28 @@ class EngineConfigurationTests(unittest.TestCase):
         self.assertEqual((camera.enter_calls, camera.exit_calls), (1, 1))
         factory.assert_called_once()
 
-    def test_black_camera_failure_never_reaches_detector_as_no_face(self) -> None:
-        store = RecordingTemplateStore()
-        detector = RecordingDetector()
-        engine = FaceEngine(
-            enrollment_sample_count=3,
-            template_store=store,  # type: ignore[arg-type]
-            detector=detector,  # type: ignore[arg-type]
-            embedder=FakeEmbedder(),  # type: ignore[arg-type]
-        )
+    def test_unhealthy_camera_failure_never_reaches_detector_as_no_face(self) -> None:
+        for reason in ("BLACK_FRAME", "NEAR_BLACK_FRAME"):
+            with self.subTest(reason=reason):
+                store = RecordingTemplateStore()
+                detector = RecordingDetector()
+                engine = FaceEngine(
+                    enrollment_sample_count=3,
+                    template_store=store,  # type: ignore[arg-type]
+                    detector=detector,  # type: ignore[arg-type]
+                    embedder=FakeEmbedder(),  # type: ignore[arg-type]
+                )
 
-        with patch(
-            "edge.face.engine.CameraCaptureSession", return_value=FailingCameraSession()
-        ):
-            with self.assertRaises(CameraError) as raised:
-                engine.register("EMP001")
+                with patch(
+                    "edge.face.engine.CameraCaptureSession",
+                    return_value=FailingCameraSession(reason),
+                ):
+                    with self.assertRaises(CameraError) as raised:
+                        engine.register("EMP001")
 
-        self.assertEqual(raised.exception.reason, "BLACK_FRAME")
-        self.assertEqual(detector.frames, [])
-        self.assertIsNone(store.saved)
+                self.assertEqual(raised.exception.reason, reason)
+                self.assertEqual(detector.frames, [])
+                self.assertIsNone(store.saved)
 
     def test_registered_template_is_used_by_existing_recognition_path(self) -> None:
         enrollment = tuple(

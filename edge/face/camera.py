@@ -6,6 +6,8 @@ import logging
 import math
 import sys
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import numpy
@@ -24,6 +26,9 @@ from .config import (
     MAX_CAMERA_STABILIZATION_SECONDS,
     MAX_STABILIZATION_FRAME_READS,
     MIN_USABLE_FRAME_DIMENSION,
+    NEAR_BLACK_BRIGHT_PIXEL_THRESHOLD,
+    NEAR_BLACK_MAX_GRAYSCALE_MEAN,
+    NEAR_BLACK_MAX_GRAYSCALE_P99,
     POST_STABILIZATION_CAPTURE_ATTEMPTS,
 )
 from .diagnostics import CameraCaptureDiagnostics, DiagnosticSink
@@ -35,11 +40,25 @@ from .opencv_support import require_cv2
 logger = logging.getLogger("pi-unlock-service.camera")
 
 
+@dataclass(frozen=True)
+class _FrameHealth:
+    reason: str | None
+    grayscale_mean: float | None = None
+    grayscale_p99: float | None = None
+    bright_pixel_ratio: float | None = None
+
+
 def frame_health_reason(frame: Any) -> str | None:
     """Return None for a usable BGR frame, otherwise a safe operational reason."""
 
+    return _assess_frame_health(frame).reason
+
+
+def _assess_frame_health(frame: Any) -> _FrameHealth:
+    """Classify a frame using conservative whole-image brightness statistics."""
+
     if frame is None or getattr(frame, "size", 0) <= 0:
-        return "READ_FAILURE"
+        return _FrameHealth("READ_FAILURE")
 
     try:
         array = numpy.asarray(frame)
@@ -50,14 +69,45 @@ def frame_health_reason(frame: Any) -> str | None:
             or array.shape[2] != 3
             or not numpy.issubdtype(array.dtype, numpy.number)
         ):
-            return "INVALID_FRAME"
+            return _FrameHealth("INVALID_FRAME")
         if not bool(numpy.all(numpy.isfinite(array))):
-            return "INVALID_FRAME"
+            return _FrameHealth("INVALID_FRAME")
         if float(numpy.max(array)) <= BLACK_FRAME_MAX_PIXEL_VALUE:
-            return "BLACK_FRAME"
+            return _FrameHealth(
+                "BLACK_FRAME",
+                grayscale_mean=float(numpy.mean(array)),
+                grayscale_p99=float(numpy.percentile(array, 99)),
+                bright_pixel_ratio=0.0,
+            )
+
+        # BGR luminance avoids a single bright channel or hot pixel making an
+        # otherwise empty frame appear usable. These statistics describe the
+        # distribution of light across pixels, not merely the maximum value.
+        values = array.astype(numpy.float32, copy=False)
+        grayscale = (
+            values[:, :, 0] * 0.114
+            + values[:, :, 1] * 0.587
+            + values[:, :, 2] * 0.299
+        )
+        grayscale_mean = float(numpy.mean(grayscale))
+        grayscale_p99 = float(numpy.percentile(grayscale, 99))
+        bright_pixel_ratio = float(
+            numpy.mean(grayscale > NEAR_BLACK_BRIGHT_PIXEL_THRESHOLD)
+        )
+        reason = (
+            "NEAR_BLACK_FRAME"
+            if grayscale_mean <= NEAR_BLACK_MAX_GRAYSCALE_MEAN
+            and grayscale_p99 <= NEAR_BLACK_MAX_GRAYSCALE_P99
+            else None
+        )
+        return _FrameHealth(
+            reason,
+            grayscale_mean=grayscale_mean,
+            grayscale_p99=grayscale_p99,
+            bright_pixel_ratio=bright_pixel_ratio,
+        )
     except (TypeError, ValueError, OverflowError):
-        return "INVALID_FRAME"
-    return None
+        return _FrameHealth("INVALID_FRAME")
 
 
 def _safe_capture_value(capture: Any, property_id: Any) -> float:
@@ -92,6 +142,7 @@ class CameraCaptureSession:
         capture_attempts: int = POST_STABILIZATION_CAPTURE_ATTEMPTS,
         recovery_attempts: int = DEFAULT_CAMERA_RECOVERY_ATTEMPTS,
         recovery_delay_seconds: float = DEFAULT_CAMERA_RECOVERY_DELAY_SECONDS,
+        recovery_escalation: Callable[[], None] | None = None,
         diagnostic_sink: DiagnosticSink | None = None,
     ) -> None:
         if camera_index < 0:
@@ -123,6 +174,8 @@ class CameraCaptureSession:
                 "recovery_delay_seconds must be between 0.0 and "
                 f"{MAX_CAMERA_RECOVERY_DELAY_SECONDS}."
             )
+        if recovery_escalation is not None and not callable(recovery_escalation):
+            raise ValueError("recovery_escalation must be callable.")
 
         self.camera_index = camera_index
         self.width = width
@@ -134,11 +187,13 @@ class CameraCaptureSession:
         self.capture_attempts = capture_attempts
         self.recovery_attempts = recovery_attempts
         self.recovery_delay_seconds = recovery_delay_seconds
+        self.recovery_escalation = recovery_escalation
         self.diagnostic_sink = diagnostic_sink
         self._cv2: Any | None = None
         self._capture: Any | None = None
         self._backend = "DEFAULT"
         self._reopen_count = 0
+        self._escalation_attempted = False
         self._pending_frame: Any | None = None
 
     def __enter__(self) -> CameraCaptureSession:
@@ -180,17 +235,41 @@ class CameraCaptureSession:
             except CameraError as error:
                 last_error = error
                 self.close()
-                if self._reopen_count >= self.recovery_attempts:
-                    break
-                self._reopen_count += 1
-                logger.warning(
-                    "Camera recovery attempt %s/%s after %s",
-                    self._reopen_count,
-                    self.recovery_attempts,
-                    error.reason,
-                )
-                time.sleep(self.recovery_delay_seconds)
-                warmup = True
+                if self._reopen_count < self.recovery_attempts:
+                    self._reopen_count += 1
+                    logger.warning(
+                        "Camera recovery attempt %s/%s after %s",
+                        self._reopen_count,
+                        self.recovery_attempts,
+                        error.reason,
+                    )
+                    time.sleep(self.recovery_delay_seconds)
+                    warmup = True
+                    continue
+                if (
+                    self.recovery_escalation is not None
+                    and not self._escalation_attempted
+                ):
+                    self._escalation_attempted = True
+                    logger.warning(
+                        "Invoking configured camera recovery escalation after %s",
+                        error.reason,
+                    )
+                    try:
+                        self.recovery_escalation()
+                    except Exception as escalation_error:
+                        logger.error(
+                            "Camera recovery escalation failed (%s)",
+                            type(escalation_error).__name__,
+                        )
+                        raise CameraError(
+                            "Camera recovery escalation failed.",
+                            reason=error.reason,
+                        ) from escalation_error
+                    time.sleep(self.recovery_delay_seconds)
+                    warmup = True
+                    continue
+                break
 
         if last_error is None:
             raise RuntimeError("Camera recovery ended without a result.")
@@ -306,7 +385,9 @@ class CameraCaptureSession:
         read_count = 0
         unhealthy_frames = 0
         black_frames = 0
+        near_black_frames = 0
         last_reason = "READ_FAILURE"
+        last_health = _FrameHealth("READ_FAILURE")
         healthy_frame = None
 
         if warmup and self.stabilization_seconds > 0.0:
@@ -315,7 +396,13 @@ class CameraCaptureSession:
                     break
                 captured, frame = self._read_frame()
                 read_count += 1
-                reason = frame_health_reason(frame) if captured else "READ_FAILURE"
+                health = (
+                    _assess_frame_health(frame)
+                    if captured
+                    else _FrameHealth("READ_FAILURE")
+                )
+                last_health = health
+                reason = health.reason
                 if reason is None:
                     healthy_frame = frame
                     break
@@ -323,12 +410,20 @@ class CameraCaptureSession:
                 unhealthy_frames += 1
                 if reason == "BLACK_FRAME":
                     black_frames += 1
+                elif reason == "NEAR_BLACK_FRAME":
+                    near_black_frames += 1
 
         post_warmup_reads = 0
         while healthy_frame is None and post_warmup_reads < self.capture_attempts:
             captured, frame = self._read_frame()
             post_warmup_reads += 1
-            reason = frame_health_reason(frame) if captured else "READ_FAILURE"
+            health = (
+                _assess_frame_health(frame)
+                if captured
+                else _FrameHealth("READ_FAILURE")
+            )
+            last_health = health
+            reason = health.reason
             if reason is None:
                 healthy_frame = frame
                 break
@@ -336,6 +431,8 @@ class CameraCaptureSession:
             unhealthy_frames += 1
             if reason == "BLACK_FRAME":
                 black_frames += 1
+            elif reason == "NEAR_BLACK_FRAME":
+                near_black_frames += 1
 
         read_count += post_warmup_reads
         elapsed_milliseconds = (time.monotonic() - started) * 1000.0
@@ -344,9 +441,20 @@ class CameraCaptureSession:
             warmup_reads=read_count,
             unhealthy_frames=unhealthy_frames,
             black_frames=black_frames,
+            near_black_frames=near_black_frames,
+            frame_health=last_health,
             elapsed_milliseconds=elapsed_milliseconds,
         )
         if healthy_frame is None:
+            logger.debug(
+                "Camera health failure reason=%s grayscaleMean=%s "
+                "grayscaleP99=%s brightPixelRatio=%s escalationAttempted=%s",
+                last_reason,
+                last_health.grayscale_mean,
+                last_health.grayscale_p99,
+                last_health.bright_pixel_ratio,
+                self._escalation_attempted,
+            )
             raise CameraError(
                 f"Camera index {self.camera_index} did not return a healthy fresh frame.",
                 reason=last_reason,
@@ -360,6 +468,8 @@ class CameraCaptureSession:
         warmup_reads: int,
         unhealthy_frames: int,
         black_frames: int,
+        near_black_frames: int,
+        frame_health: _FrameHealth,
         elapsed_milliseconds: float,
     ) -> None:
         if self.diagnostic_sink is None or self._capture is None or self._cv2 is None:
@@ -399,8 +509,14 @@ class CameraCaptureSession:
                 warmup_reads=warmup_reads,
                 unhealthy_frames=unhealthy_frames,
                 black_frames=black_frames,
+                near_black_frames=near_black_frames,
+                last_frame_health=frame_health.reason or "HEALTHY",
+                grayscale_mean=frame_health.grayscale_mean,
+                grayscale_p99=frame_health.grayscale_p99,
+                bright_pixel_ratio=frame_health.bright_pixel_ratio,
                 recovery_attempt=self._reopen_count,
                 reopen_count=self._reopen_count,
+                escalation_attempted=self._escalation_attempted,
                 time_to_first_healthy_milliseconds=elapsed_milliseconds,
             )
         )
@@ -418,6 +534,7 @@ def capture_frame(
     capture_attempts: int = POST_STABILIZATION_CAPTURE_ATTEMPTS,
     recovery_attempts: int = DEFAULT_CAMERA_RECOVERY_ATTEMPTS,
     recovery_delay_seconds: float = DEFAULT_CAMERA_RECOVERY_DELAY_SECONDS,
+    recovery_escalation: Callable[[], None] | None = None,
     diagnostic_sink: DiagnosticSink | None = None,
 ) -> Any:
     """Capture one healthy frame in an explicitly released camera session."""
@@ -433,6 +550,7 @@ def capture_frame(
         capture_attempts=capture_attempts,
         recovery_attempts=recovery_attempts,
         recovery_delay_seconds=recovery_delay_seconds,
+        recovery_escalation=recovery_escalation,
         diagnostic_sink=diagnostic_sink,
     ) as session:
         return session.capture_frame()

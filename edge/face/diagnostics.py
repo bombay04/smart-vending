@@ -24,8 +24,14 @@ class CameraCaptureDiagnostics:
     warmup_reads: int
     unhealthy_frames: int
     black_frames: int
+    near_black_frames: int
+    last_frame_health: str
+    grayscale_mean: float | None
+    grayscale_p99: float | None
+    bright_pixel_ratio: float | None
     recovery_attempt: int
     reopen_count: int
+    escalation_attempted: bool
     time_to_first_healthy_milliseconds: float
 
 
@@ -111,8 +117,14 @@ def format_diagnostic(event: DiagnosticEvent) -> str:
             f"warmupReads={event.warmup_reads} "
             f"unhealthyFrames={event.unhealthy_frames} "
             f"blackFrames={event.black_frames} "
+            f"nearBlackFrames={event.near_black_frames} "
+            f"lastFrameHealth={event.last_frame_health} "
+            f"grayscaleMean={_format_optional_float(event.grayscale_mean)} "
+            f"grayscaleP99={_format_optional_float(event.grayscale_p99)} "
+            f"brightPixelRatio={_format_optional_float(event.bright_pixel_ratio, 6)} "
             f"recoveryAttempt={event.recovery_attempt} "
             f"reopenCount={event.reopen_count} "
+            f"escalationAttempted={str(event.escalation_attempted).lower()} "
             f"timeToHealthyMs={event.time_to_first_healthy_milliseconds:.1f}"
         )
 
@@ -171,6 +183,10 @@ def format_diagnostic(event: DiagnosticEvent) -> str:
         f"passedSamples={event.passed_samples}/{event.required_samples} "
         f"reason={event.reason}"
     )
+
+
+def _format_optional_float(value: float | None, precision: int = 3) -> str:
+    return "none" if value is None else f"{value:.{precision}f}"
 
 
 def _format_bounding_box(
