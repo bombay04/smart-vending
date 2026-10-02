@@ -22,14 +22,10 @@ import {
 import { getPortalSessionState } from "../portal-session-state.mjs";
 import type { RegistrationEmployee } from "../types/employee";
 
-interface AdminPortalProps {
-  onBack: () => void;
-}
-
 const sortEmployees = (employees: RegistrationEmployee[]) =>
   [...employees].sort((a, b) => a.employeeCode.localeCompare(b.employeeCode));
 
-function AdminPortal({ onBack }: AdminPortalProps) {
+function AdminPortal() {
   const [employees, setEmployees] = useState<RegistrationEmployee[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -384,9 +380,6 @@ function AdminPortal({ onBack }: AdminPortalProps) {
             <h1>Admin / Employee Management</h1>
             <p>Manage employees and initiate kiosk face registration.</p>
           </div>
-          <button type="button" onClick={onBack}>
-            Back to Home
-          </button>
         </header>
 
         <section

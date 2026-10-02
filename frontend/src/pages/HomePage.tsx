@@ -11,6 +11,7 @@ import EmployeeAuthentication from "../components/EmployeeAuthentication";
 import RestockMode from "../components/RestockMode";
 import EmployeeFaceRegistration from "../components/EmployeeFaceRegistration";
 import {
+  cancelKioskSession,
   completeEmployeeOffboarding,
   fetchCurrentKioskSession,
   reportDraftDeleteResult,
@@ -25,6 +26,7 @@ import type { AuthenticatedEmployee } from "../types/employee";
 import type { MockRestockResult } from "../api/restock";
 import type { Slot } from "../types/slot";
 import { decideKioskSessionAction } from "../kiosk-session-flow.mjs";
+import { cancelRestockSessionAndCleanup } from "../restock-session-cleanup.mjs";
 
 interface PurchaseSuccess {
   slotNumber: number;
@@ -139,18 +141,22 @@ function HomePage() {
       });
   }, []);
 
-  const exitRestockMode = useCallback(() => {
+  const clearStaffWorkflowState = useCallback(() => {
     setAuthenticatedEmployee(null);
     setActiveStaffSession(null);
     staffWorkflowCompletedRef.current = false;
     setActiveMode("customer");
   }, []);
 
-  const cancelEmployeeAuthentication = useCallback(() => {
-    setAuthenticatedEmployee(null);
-    setActiveStaffSession(null);
-    setActiveMode("customer");
-  }, []);
+  const cancelActiveRestockSession = useCallback(async () => {
+    if (activeStaffSession?.type !== "RESTOCK_AUTH") return;
+
+    await cancelRestockSessionAndCleanup({
+      sessionId: activeStaffSession.id,
+      cancelSession: cancelKioskSession,
+      clearLocalState: clearStaffWorkflowState,
+    });
+  }, [activeStaffSession, clearStaffWorkflowState]);
 
   const handleEmployeeAuthenticated = useCallback(
     (employee: AuthenticatedEmployee) => {
@@ -371,7 +377,7 @@ function HomePage() {
       <EmployeeAuthentication
         sessionId={activeStaffSession.id}
         onAuthenticated={handleEmployeeAuthenticated}
-        onCancel={cancelEmployeeAuthentication}
+        onCancel={cancelActiveRestockSession}
       />
     );
   }
@@ -385,7 +391,8 @@ function HomePage() {
       <RestockMode
         sessionId={activeStaffSession.id}
         authenticatedEmployee={authenticatedEmployee}
-        onExit={exitRestockMode}
+        onExit={cancelActiveRestockSession}
+        onCompletedExit={clearStaffWorkflowState}
         onRestockSuccess={handleRestockSuccess}
       />
     );
@@ -398,10 +405,10 @@ function HomePage() {
     return (
       <EmployeeFaceRegistration
         session={activeStaffSession}
-        onCancel={cancelEmployeeAuthentication}
+        onCancel={clearStaffWorkflowState}
         onCompleted={() => {
           staffWorkflowCompletedRef.current = true;
-          cancelEmployeeAuthentication();
+          clearStaffWorkflowState();
         }}
       />
     );

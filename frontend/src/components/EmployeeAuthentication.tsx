@@ -16,7 +16,7 @@ import { validateEmployeeAndNotify } from "../audio-feedback.mjs";
 interface EmployeeAuthenticationProps {
   sessionId: number;
   onAuthenticated: (employee: AuthenticatedEmployee) => void;
-  onCancel: () => void;
+  onCancel: () => Promise<void>;
 }
 
 type AuthenticationState =
@@ -99,6 +99,8 @@ function EmployeeAuthentication({
   );
   const [lockoutSeconds, setLockoutSeconds] = useState<number | null>(null);
   const [lockedUntilMs, setLockedUntilMs] = useState<number | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const activeRequestRef = useRef<AbortController | null>(null);
   const requestInProgressRef = useRef(false);
   const completionTimerRef = useRef<number | null>(null);
@@ -270,7 +272,8 @@ function EmployeeAuthentication({
     }
   }
 
-  function handleCancel() {
+  async function handleCancel() {
+    if (isCancelling) return;
     activeRequestRef.current?.abort();
     if (completionTimerRef.current !== null) {
       window.clearTimeout(completionTimerRef.current);
@@ -278,7 +281,18 @@ function EmployeeAuthentication({
     }
     requestInProgressRef.current = false;
     setAuthenticatedEmployee(null);
-    onCancel();
+    setCancelError(null);
+    setIsCancelling(true);
+    try {
+      await onCancel();
+    } catch {
+      setCancelError(
+        "Unable to close the restock session. Check the connection and try again.",
+      );
+      setAuthenticationState("IDLE");
+    } finally {
+      setIsCancelling(false);
+    }
   }
 
   const content = STATE_CONTENT[authenticationState];
@@ -332,13 +346,18 @@ function EmployeeAuthentication({
               Welcome, {authenticatedEmployee.name}
             </p>
           )}
+          {cancelError && (
+            <p className="employee-auth-attempts">{cancelError}</p>
+          )}
         </div>
 
         <div className="employee-auth-actions">
           <button
             className="employee-auth-submit"
             type="button"
-            disabled={isChecking || isScanning || isSuccessful || isLocked}
+            disabled={
+              isChecking || isScanning || isSuccessful || isLocked || isCancelling
+            }
             onClick={() => void handleScan()}
           >
             {isChecking
@@ -354,9 +373,10 @@ function EmployeeAuthentication({
           <button
             className="employee-auth-cancel"
             type="button"
-            onClick={handleCancel}
+            disabled={isCancelling}
+            onClick={() => void handleCancel()}
           >
-            Back to Customer Mode
+            {isCancelling ? "Closing Restock Session..." : "Back to Customer Mode"}
           </button>
         </div>
       </section>

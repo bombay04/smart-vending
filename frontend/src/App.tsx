@@ -28,11 +28,6 @@ function App() {
     return () => window.removeEventListener("popstate", syncPathname);
   }, []);
 
-  const returnToCustomerKiosk = () => {
-    window.history.replaceState(null, "", CUSTOMER_KIOSK_PATH);
-    setPathname(CUSTOMER_KIOSK_PATH);
-  };
-
   useEffect(() => {
     const preventKioskContextMenu = (event: MouseEvent) => {
       const target = event.target;
@@ -56,11 +51,11 @@ function App() {
   }
 
   if (pathname === STAFF_PORTAL_PATH) {
-    return <StaffPortal onBack={returnToCustomerKiosk} />;
+    return <StaffPortal />;
   }
 
   if (pathname === ADMIN_PORTAL_PATH) {
-    return <AdminPortal onBack={returnToCustomerKiosk} />;
+    return <AdminPortal />;
   }
 
   return null;
