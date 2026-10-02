@@ -166,7 +166,7 @@ test("portals expose only role-owned cancellation and responsive busy states", a
   assert.match(adminPortal, /session\?\.type !== "FACE_REGISTRATION"/);
   assert.match(staffPortal, /portalState === "KIOSK_BUSY"/);
   assert.match(adminPortal, /portalState === "KIOSK_BUSY"/);
-  assert.match(staffPortal, /Another kiosk workflow is active/);
+  assert.match(staffPortal, /เครื่องกำลังทำงานอื่นอยู่/);
   assert.match(adminPortal, /Another kiosk workflow is active/);
   assert.doesNotMatch(staffPortal, /Back to Home/);
   assert.doesNotMatch(adminPortal, /Back to Home/);
