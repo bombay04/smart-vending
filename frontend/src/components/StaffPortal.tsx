@@ -31,7 +31,7 @@ function StaffPortal() {
       } catch {
         if (!stopped) {
           setSessionLoaded(true);
-          setSessionError("Kiosk session status is unavailable.");
+          setSessionError("ไม่สามารถตรวจสอบสถานะเครื่องได้");
         }
       } finally {
         if (!stopped) timeoutId = window.setTimeout(poll, 1500);
@@ -50,6 +50,12 @@ function StaffPortal() {
     return () => window.clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    if (message === null) return;
+    const timeoutId = window.setTimeout(() => setMessage(null), 2500);
+    return () => window.clearTimeout(timeoutId);
+  }, [message]);
+
   async function handleStartRestock() {
     if (sessionBusy || session !== null) return;
     setSessionBusy(true);
@@ -57,10 +63,11 @@ function StaffPortal() {
     setMessage(null);
     try {
       setSession(await startRestockSession());
-      setMessage("The kiosk is waiting for employee face authentication.");
     } catch (error) {
       setSessionError(
-        error instanceof Error ? error.message : "Session request failed.",
+        error instanceof Error
+          ? `ไม่สามารถเริ่มการเติมสินค้าได้: ${error.message}`
+          : "ไม่สามารถเริ่มการเติมสินค้าได้",
       );
     } finally {
       setSessionBusy(false);
@@ -75,10 +82,12 @@ function StaffPortal() {
     try {
       await cancelKioskSession(session.id);
       setSession(null);
-      setMessage("Restock session cancelled.");
+      setMessage("ยกเลิกการเติมสินค้าแล้ว");
     } catch (error) {
       setSessionError(
-        error instanceof Error ? error.message : "Session request failed.",
+        error instanceof Error
+          ? `ไม่สามารถยกเลิกการเติมสินค้าได้: ${error.message}`
+          : "ไม่สามารถยกเลิกการเติมสินค้าได้",
       );
     } finally {
       setSessionBusy(false);
@@ -98,11 +107,8 @@ function StaffPortal() {
       <div className="staff-portal-container">
         <header className="staff-portal-header">
           <div>
-            <p className="mode-label mode-label--employee">
-              Prototype Staff Portal
-            </p>
-            <h1>Staff Operations</h1>
-            <p>Start and monitor restocking on the customer kiosk.</p>
+            <p className="mode-label mode-label--employee">สำหรับพนักงาน</p>
+            <h1>จัดการเติมสินค้า</h1>
           </div>
         </header>
 
@@ -112,11 +118,8 @@ function StaffPortal() {
         >
           <div className="staff-section-heading">
             <div>
-              <h2 id="restock-session-title">Restock status</h2>
-              <p>
-                The kiosk verifies an active employee before opening Restock
-                Mode.
-              </p>
+              <h2 id="restock-session-title">สถานะการเติมสินค้า</h2>
+              <p>เครื่องจะตรวจสอบพนักงานก่อนเข้าสู่โหมดเติมสินค้า</p>
             </div>
             {portalState === "IDLE" && (
               <button
@@ -127,38 +130,15 @@ function StaffPortal() {
                 }
                 onClick={() => void handleStartRestock()}
               >
-                {sessionBusy ? "Starting..." : "Start Restock"}
+                {sessionBusy ? "กำลังเริ่ม..." : "เริ่มเติมสินค้า"}
               </button>
             )}
           </div>
 
-          {portalState === "OWN_SESSION" && session !== null && (
-            <div className="staff-active-session" role="status">
-              <div>
-                <strong>Restock authentication ACTIVE</strong>
-                <p>Kiosk waiting for employee face authentication.</p>
-                <span>
-                  Expires in {secondsRemaining}s ·{" "}
-                  {new Date(session.expiresAt).toLocaleTimeString()}
-                </span>
-              </div>
-              <button
-                type="button"
-                disabled={sessionBusy}
-                onClick={() => void handleCancelRestock()}
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-
           {portalState === "KIOSK_BUSY" && (
             <div className="staff-busy-session" role="status">
-              <strong>Kiosk busy</strong>
-              <p>
-                Another kiosk workflow is active. Restock can start when it
-                finishes or expires.
-              </p>
+              <strong>เครื่องกำลังทำงานอื่นอยู่</strong>
+              <p>เริ่มเติมสินค้าได้เมื่องานปัจจุบันเสร็จสิ้นหรือหมดเวลา</p>
             </div>
           )}
 
@@ -170,6 +150,39 @@ function StaffPortal() {
           )}
         </section>
       </div>
+
+      {portalState === "OWN_SESSION" && session !== null && (
+        <div className="staff-restock-modal-backdrop">
+          <section
+            className="staff-restock-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="staff-restock-modal-title"
+            aria-describedby="staff-restock-modal-description"
+          >
+            <div className="staff-restock-modal-icon" aria-hidden="true">
+              ◉
+            </div>
+            <h2 id="staff-restock-modal-title">
+              กำลังรอยืนยันตัวตนพนักงาน
+            </h2>
+            <p id="staff-restock-modal-description">
+              กรุณาสแกนใบหน้าที่หน้าจอเครื่องขายสินค้า
+            </p>
+            <p className="staff-restock-countdown" role="timer" aria-live="off">
+              หมดอายุใน {secondsRemaining} วินาที
+            </p>
+            <button
+              className="staff-restock-cancel"
+              type="button"
+              disabled={sessionBusy}
+              onClick={() => void handleCancelRestock()}
+            >
+              {sessionBusy ? "กำลังยกเลิก..." : "ยกเลิก"}
+            </button>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

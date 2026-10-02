@@ -44,8 +44,8 @@ test("the remote portals separate staff restock from admin employee workflows", 
   assert.match(app, /<StaffPortal/);
   assert.match(app, /<AdminPortal/);
 
-  assert.match(staffPortal, /Staff Operations/);
-  assert.match(staffPortal, /Start Restock/);
+  assert.match(staffPortal, /จัดการเติมสินค้า/);
+  assert.match(staffPortal, /เริ่มเติมสินค้า/);
   assert.match(staffPortal, /cancelKioskSession/);
   assert.doesNotMatch(staffPortal, /Add Employee/);
   assert.doesNotMatch(staffPortal, /Employee directory/);
