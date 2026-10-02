@@ -135,6 +135,11 @@ test("cancellation and completion are constrained and completion is idempotent",
     (await transitionKioskSessionWithStore(cancelled!.id, "CANCELLED", cancelledStore, NOW)).status,
     "CANCELLED",
   );
+  assert.equal(
+    (await transitionKioskSessionWithStore(cancelled!.id, "CANCELLED", cancelledStore, NOW)).status,
+    "CANCELLED",
+  );
+  assert.equal(await getCurrentKioskSessionWithStore(cancelledStore, NOW), null);
   await assert.rejects(
     transitionKioskSessionWithStore(cancelled!.id, "COMPLETED", cancelledStore, NOW),
     (error: unknown) => error instanceof HttpError && error.statusCode === 409,

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { decideKioskSessionAction } from "../src/kiosk-session-flow.mjs";
 import { getPortalSessionState } from "../src/portal-session-state.mjs";
+import { cancelRestockSessionAndCleanup } from "../src/restock-session-cleanup.mjs";
 
 const restock = { id: 10, type: "RESTOCK_AUTH", employee: null };
 const registration = {
@@ -65,6 +66,51 @@ test("cancelled or expired sessions exit an unfinished staff flow", () => {
   assert.equal(action({ currentMode: "employee-auth" }), "EXIT_STAFF");
 });
 
+test("Pi restock exits cancel backend state before clearing local state", async () => {
+  let backendSession = restock;
+  let localState = { mode: "restock", employeeId: 7, sessionId: restock.id };
+  const events = [];
+
+  await cancelRestockSessionAndCleanup({
+    sessionId: restock.id,
+    async cancelSession(sessionId) {
+      assert.equal(sessionId, restock.id);
+      events.push("backend-cancelled");
+      backendSession = null;
+    },
+    clearLocalState() {
+      events.push("local-cleared");
+      localState = { mode: "customer", employeeId: null, sessionId: null };
+    },
+  });
+
+  assert.deepEqual(events, ["backend-cancelled", "local-cleared"]);
+  assert.equal(backendSession, null);
+  assert.deepEqual(localState, {
+    mode: "customer",
+    employeeId: null,
+    sessionId: null,
+  });
+  assert.equal(getPortalSessionState(backendSession, "RESTOCK_AUTH"), "IDLE");
+});
+
+test("failed backend cleanup retains the local restock flow for retry", async () => {
+  let localClearCount = 0;
+  await assert.rejects(
+    cancelRestockSessionAndCleanup({
+      sessionId: restock.id,
+      async cancelSession() {
+        throw new Error("offline");
+      },
+      clearLocalState() {
+        localClearCount += 1;
+      },
+    }),
+    /offline/,
+  );
+  assert.equal(localClearCount, 0);
+});
+
 test("customer and direct-route source expose no local staff entry bypass", async () => {
   const [home, app, registrationSource] = await Promise.all([
     readFile(new URL("../src/pages/HomePage.tsx", import.meta.url), "utf8"),
@@ -116,11 +162,14 @@ test("portals expose only role-owned cancellation and responsive busy states", a
     readFile(new URL("../src/App.css", import.meta.url), "utf8"),
   ]);
   assert.match(staffPortal, /session\?\.type !== "RESTOCK_AUTH"/);
+  assert.match(staffPortal, /await cancelKioskSession\(session\.id\)/);
   assert.match(adminPortal, /session\?\.type !== "FACE_REGISTRATION"/);
   assert.match(staffPortal, /portalState === "KIOSK_BUSY"/);
   assert.match(adminPortal, /portalState === "KIOSK_BUSY"/);
   assert.match(staffPortal, /Another kiosk workflow is active/);
   assert.match(adminPortal, /Another kiosk workflow is active/);
+  assert.doesNotMatch(staffPortal, /Back to Home/);
+  assert.doesNotMatch(adminPortal, /Back to Home/);
   assert.match(css, /@media \(max-width: 900px\)/);
   assert.match(css, /\.staff-active-session[\s\S]*flex-direction: column/);
   assert.match(css, /\.staff-employee-row[\s\S]*grid-template-columns/);
@@ -157,6 +206,11 @@ test("local restock and registration screens retain session guards", async () =>
     /validateFaceAuthenticatedEmployee\([\s\S]*sessionId/,
   );
   assert.match(restockMode, /createMockRestock\(sessionId, employeeId\)/);
+  assert.match(home, /cancelRestockSessionAndCleanup/);
+  assert.match(home, /cancelSession: cancelKioskSession/);
+  assert.match(home, /onExit=\{cancelActiveRestockSession\}/);
+  assert.match(home, /onCompletedExit=\{clearStaffWorkflowState\}/);
+  assert.match(restockMode, /window\.setTimeout\(\s*onCompletedExit/);
   assert.match(registrationSource, /authorizedSession\?\.id !== session\.id/);
   assert.match(home, /PROCESS_DRAFT_DELETE/);
   assert.match(home, /PROCESS_OFFBOARDING/);

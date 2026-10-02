@@ -21,7 +21,8 @@ interface ValidatedSlotStatus extends HardwareSlotStatus {
 interface RestockModeProps {
   sessionId: number;
   authenticatedEmployee: AuthenticatedEmployee;
-  onExit: () => void;
+  onExit: () => Promise<void>;
+  onCompletedExit: () => void;
   onRestockSuccess: (restock: MockRestockResult) => void;
 }
 
@@ -61,6 +62,7 @@ function RestockMode({
   sessionId,
   authenticatedEmployee,
   onExit,
+  onCompletedExit,
   onRestockSuccess,
 }: RestockModeProps) {
   const [slots, setSlots] = useState<ValidatedSlotStatus[] | null>(null);
@@ -68,6 +70,7 @@ function RestockMode({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [restockError, setRestockError] = useState<string | null>(null);
   const [isSuccessful, setIsSuccessful] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
   const submissionInProgressRef = useRef(false);
   const allSlotsReady =
     slots !== null &&
@@ -132,12 +135,29 @@ function RestockMode({
       return undefined;
     }
 
-    const timeoutId = window.setTimeout(onExit, SUCCESS_DISPLAY_DURATION_MS);
+    const timeoutId = window.setTimeout(
+      onCompletedExit,
+      SUCCESS_DISPLAY_DURATION_MS,
+    );
 
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [isSuccessful, onExit]);
+  }, [isSuccessful, onCompletedExit]);
+
+  async function handleExitRestockMode() {
+    if (isSubmitting || isExiting) return;
+    setIsExiting(true);
+    setRestockError(null);
+    try {
+      await onExit();
+    } catch {
+      setRestockError(
+        "Unable to close the restock session. Check the connection and try again.",
+      );
+      setIsExiting(false);
+    }
+  }
 
   async function handleConfirmRestock() {
     if (!allSlotsReady || submissionInProgressRef.current) {
@@ -210,10 +230,10 @@ function RestockMode({
           <button
             className="restock-exit-button"
             type="button"
-            disabled={isSubmitting}
-            onClick={onExit}
+            disabled={isSubmitting || isExiting}
+            onClick={() => void handleExitRestockMode()}
           >
-            Exit Restock Mode
+            {isExiting ? "Closing Restock Session..." : "Exit Restock Mode"}
           </button>
         </header>
 

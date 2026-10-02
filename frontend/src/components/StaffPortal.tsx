@@ -7,11 +7,7 @@ import {
 } from "../api/kiosk-session";
 import { getPortalSessionState } from "../portal-session-state.mjs";
 
-interface StaffPortalProps {
-  onBack: () => void;
-}
-
-function StaffPortal({ onBack }: StaffPortalProps) {
+function StaffPortal() {
   const [session, setSession] = useState<KioskSession | null>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [sessionBusy, setSessionBusy] = useState(false);
@@ -108,9 +104,6 @@ function StaffPortal({ onBack }: StaffPortalProps) {
             <h1>Staff Operations</h1>
             <p>Start and monitor restocking on the customer kiosk.</p>
           </div>
-          <button type="button" onClick={onBack}>
-            Back to Home
-          </button>
         </header>
 
         <section
