@@ -23,17 +23,13 @@ type RegistrationState =
 
 const CONTENT: Record<
   RegistrationState,
-  { title: string; instruction: string }
+  { title?: string; instruction?: string }
 > = {
   CHECKING: {
     title: "กำลังตรวจสอบการลงทะเบียน",
     instruction: "Checking this Pi for an existing local template...",
   },
-  READY: {
-    title: "พร้อมลงทะเบียน",
-    instruction:
-      "Ask the named employee to face the camera alone, then start registration.",
-  },
+  READY: {},
   CAPTURING: {
     title: "กำลังบันทึกใบหน้า",
     instruction:
@@ -214,8 +210,8 @@ function EmployeeFaceRegistration({
           aria-live="polite"
           aria-busy={busy}
         >
-          <h2>{CONTENT[state].title}</h2>
-          <p>{CONTENT[state].instruction}</p>
+          {CONTENT[state].title && <h2>{CONTENT[state].title}</h2>}
+          {CONTENT[state].instruction && <p>{CONTENT[state].instruction}</p>}
           <p className="employee-registration-identity">
             {employee.name} - {employee.employeeCode}
           </p>
@@ -232,7 +228,7 @@ function EmployeeFaceRegistration({
               type="button"
               onClick={() => void capture()}
             >
-              {retryCapture ? "Try Capture Again" : "Start Face Registration"}
+              {retryCapture ? "Try Capture Again" : "เริ่มสแกนใบหน้า"}
             </button>
           )}
           {(state === "SYNC_REQUIRED" || state === "SYNC_ERROR") && (
@@ -253,7 +249,7 @@ function EmployeeFaceRegistration({
           disabled={isCancelling}
           onClick={() => void handleCancel()}
         >
-          {isCancelling ? "Returning to Customer Mode..." : "Back to Customer Mode"}
+          {isCancelling ? "Returning to Customer Mode..." : "กลับสู่หน้าหลัก"}
         </button>
       </section>
     </main>

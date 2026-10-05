@@ -61,6 +61,10 @@ test("authoritative FACE_REGISTRATION state drives the accessible active modal",
   assert.match(admin, /aria-modal="true"/);
   assert.match(admin, />\s*กำลังลงทะเบียนใบหน้า\s*</);
   assert.doesNotMatch(admin, /กำลังลงทะเบียนใบหน้าพนักงาน/);
+  assert.doesNotMatch(
+    admin,
+    /กรุณาดำเนินการลงทะเบียนที่หน้าจอเครื่องขายสินค้า/,
+  );
   assert.match(admin, /หมดอายุใน \{secondsRemaining\} วินาที/);
   assert.match(admin, /handleCancelFaceRegistration/);
   assert.doesNotMatch(admin, /Face registration status/);
@@ -178,13 +182,19 @@ test("Pi face setup keeps Back enabled during capture and reuses the scan indica
   assert.doesNotMatch(registration, /Authorized Staff Session/i);
   assert.doesNotMatch(registration, /Employee Face Setup/);
   assert.match(registration, /title: "กำลังตรวจสอบการลงทะเบียน"/);
-  assert.match(registration, /title: "พร้อมลงทะเบียน"/);
+  assert.doesNotMatch(registration, /พร้อมลงทะเบียน/);
+  assert.doesNotMatch(
+    registration,
+    /Ask the named employee to face the camera alone, then start registration\./,
+  );
   assert.match(registration, /title: "กำลังบันทึกใบหน้า"/);
   assert.match(registration, /title: "ลงทะเบียนสำเร็จ"/);
+  assert.match(registration, /"เริ่มสแกนใบหน้า"/);
+  assert.match(registration, /"กลับสู่หน้าหลัก"/);
   assert.match(registration, /activeRequestRef\.current\?\.abort\(\)/);
   assert.match(registration, /await onCancel\(\)/);
   assert.match(registration, /disabled=\{isCancelling\}/);
-  assert.doesNotMatch(registration, /disabled=\{busy\}[\s\S]*Back to Customer Mode/);
+  assert.doesNotMatch(registration, /disabled=\{busy\}[\s\S]*กลับสู่หน้าหลัก/);
   assert.match(home, /cancelActiveFaceRegistrationSession/);
   assert.match(home, /cancelFaceRegistrationSessionAndCleanup/);
   assert.match(home, /onCancel=\{cancelActiveFaceRegistrationSession\}/);

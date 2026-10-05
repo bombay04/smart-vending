@@ -849,7 +849,6 @@ function AdminPortal() {
               role="dialog"
               aria-modal="true"
               aria-labelledby="admin-face-registration-modal-title"
-              aria-describedby="admin-face-registration-modal-description"
             >
               <div className="admin-feedback-modal-icon" aria-hidden="true">
                 ◎
@@ -860,9 +859,6 @@ function AdminPortal() {
               <p className="admin-feedback-modal-identity">
                 {session.employee?.employeeCode}
                 {session.employee?.name ? ` - ${session.employee.name}` : ""}
-              </p>
-              <p id="admin-face-registration-modal-description">
-                กรุณาดำเนินการลงทะเบียนที่หน้าจอเครื่องขายสินค้า
               </p>
               <p className="admin-face-registration-countdown" role="timer">
                 หมดอายุใน {secondsRemaining} วินาที
