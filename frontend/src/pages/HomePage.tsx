@@ -10,6 +10,7 @@ import { playAudioFeedback } from "../api/audio";
 import EmployeeAuthentication from "../components/EmployeeAuthentication";
 import RestockMode from "../components/RestockMode";
 import EmployeeFaceRegistration from "../components/EmployeeFaceRegistration";
+import { cancelFaceRegistrationSessionAndCleanup } from "../face-registration-session-cleanup.mjs";
 import {
   cancelKioskSession,
   completeEmployeeOffboarding,
@@ -152,6 +153,16 @@ function HomePage() {
     if (activeStaffSession?.type !== "RESTOCK_AUTH") return;
 
     await cancelRestockSessionAndCleanup({
+      sessionId: activeStaffSession.id,
+      cancelSession: cancelKioskSession,
+      clearLocalState: clearStaffWorkflowState,
+    });
+  }, [activeStaffSession, clearStaffWorkflowState]);
+
+  const cancelActiveFaceRegistrationSession = useCallback(async () => {
+    if (activeStaffSession?.type !== "FACE_REGISTRATION") return;
+
+    await cancelFaceRegistrationSessionAndCleanup({
       sessionId: activeStaffSession.id,
       cancelSession: cancelKioskSession,
       clearLocalState: clearStaffWorkflowState,
@@ -405,7 +416,8 @@ function HomePage() {
     return (
       <EmployeeFaceRegistration
         session={activeStaffSession}
-        onCancel={clearStaffWorkflowState}
+        onCancel={cancelActiveFaceRegistrationSession}
+        onSessionEnded={clearStaffWorkflowState}
         onCompleted={() => {
           staffWorkflowCompletedRef.current = true;
           clearStaffWorkflowState();

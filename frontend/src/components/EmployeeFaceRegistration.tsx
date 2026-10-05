@@ -79,22 +79,26 @@ const CONTENT: Record<
 
 interface EmployeeFaceRegistrationProps {
   session: KioskSession;
-  onCancel: () => void;
+  onCancel: () => Promise<void>;
+  onSessionEnded: () => void;
   onCompleted: () => void;
 }
 
 function EmployeeFaceRegistration({
   session,
   onCancel,
+  onSessionEnded,
   onCompleted,
 }: EmployeeFaceRegistrationProps) {
   const employee = session.employee;
   const [state, setState] = useState<RegistrationState>("CHECKING");
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const activeRequestRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (employee === null) {
-      onCancel();
+      onSessionEnded();
       return undefined;
     }
     const controller = new AbortController();
@@ -110,7 +114,7 @@ function EmployeeFaceRegistration({
         if (!controller.signal.aborted) setState("PI_UNAVAILABLE");
       });
     return () => controller.abort();
-  }, [employee, onCancel]);
+  }, [employee, onSessionEnded]);
 
   useEffect(() => {
     if (state !== "SUCCESS") return undefined;
@@ -147,7 +151,7 @@ function EmployeeFaceRegistration({
         authorizedSession.type !== "FACE_REGISTRATION" ||
         authorizedSession.employee?.id !== employee.id
       ) {
-        onCancel();
+        onSessionEnded();
         return;
       }
       await registerEmployeeFace(employee.employeeCode, controller.signal);
@@ -161,6 +165,22 @@ function EmployeeFaceRegistration({
             error.status === "UNAVAILABLE" ? "PI_UNAVAILABLE" : error.status,
           );
       } else setState("PI_UNAVAILABLE");
+    }
+  }
+
+  async function handleCancel() {
+    if (isCancelling) return;
+    activeRequestRef.current?.abort();
+    setCancelError(null);
+    setIsCancelling(true);
+    try {
+      await onCancel();
+    } catch {
+      setCancelError(
+        "Unable to end face registration. Check the connection and try again.",
+      );
+    } finally {
+      setIsCancelling(false);
     }
   }
 
@@ -181,6 +201,14 @@ function EmployeeFaceRegistration({
         aria-labelledby="registration-title"
       >
         <p className="mode-label mode-label--admin">Authorized Staff Session</p>
+        <div
+          className={`face-scan-indicator face-scan-indicator--${
+            state === "CAPTURING" ? "scanning" : state.toLowerCase()
+          }`}
+          aria-hidden="true"
+        >
+          <span>{state === "SUCCESS" ? "✓" : "◎"}</span>
+        </div>
         <h1 id="registration-title">Employee Face Setup</h1>
         <div
           className="employee-registration-status"
@@ -192,6 +220,11 @@ function EmployeeFaceRegistration({
           <p className="employee-registration-identity">
             {employee.name} - {employee.employeeCode}
           </p>
+          {cancelError && (
+            <p className="employee-registration-error" role="alert">
+              {cancelError}
+            </p>
+          )}
         </div>
         <div className="employee-registration-actions">
           {(state === "READY" || retryCapture) && (
@@ -218,10 +251,10 @@ function EmployeeFaceRegistration({
         <button
           className="employee-registration-back"
           type="button"
-          disabled={busy}
-          onClick={onCancel}
+          disabled={isCancelling}
+          onClick={() => void handleCancel()}
         >
-          Back to Customer Mode
+          {isCancelling ? "Returning to Customer Mode..." : "Back to Customer Mode"}
         </button>
       </section>
     </main>

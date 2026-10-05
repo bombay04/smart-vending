@@ -455,6 +455,16 @@
   letter-spacing: -0.04em;
 }
 
+.employee-registration-card .face-scan-indicator {
+  border-color: #c4b5fd;
+  color: #6d28d9;
+  background: #f5f3ff;
+}
+
+.employee-registration-card .face-scan-indicator--scanning {
+  border-color: #a78bfa;
+}
+
 .employee-registration-status {
   min-height: 132px;
   margin-top: 28px;
@@ -476,6 +486,11 @@
 .employee-registration-status .employee-registration-identity {
   color: #166534;
   font-weight: 850;
+}
+
+.employee-registration-status .employee-registration-error {
+  color: #991b1b;
+  font-weight: 800;
 }
 
 .employee-registration-actions {
@@ -832,6 +847,16 @@
   gap: 8px;
 }
 
+@media (min-width: 901px) {
+  .admin-employee-actions--draft {
+    flex-wrap: nowrap;
+  }
+
+  .admin-employee-actions--draft button {
+    white-space: nowrap;
+  }
+}
+
 .admin-employee-actions button {
   min-height: 38px;
   padding: 7px 10px;
@@ -920,7 +945,7 @@
 }
 
 .staff-setup-required {
-  color: #6d28d9;
+  color: #a16207;
   font-weight: 850;
 }
 
@@ -1052,6 +1077,194 @@
 }
 
 .staff-restock-cancel:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.admin-modal-backdrop {
+  position: fixed;
+  z-index: 1100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: clamp(16px, 4vw, 32px);
+  overflow-y: auto;
+  background: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(2px);
+}
+
+.admin-feedback-modal,
+.admin-face-registration-modal,
+.admin-cleanup-modal {
+  width: min(100%, 560px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  padding: clamp(28px, 6vw, 48px);
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  border-radius: 28px;
+  background: #ffffff;
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.34);
+  text-align: center;
+}
+
+.admin-feedback-modal-icon {
+  display: grid;
+  width: 76px;
+  height: 76px;
+  place-items: center;
+  margin: 0 auto 22px;
+  border-radius: 24px;
+  color: #6d28d9;
+  background: #f5f3ff;
+  font-size: 2.5rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.admin-feedback-modal-icon svg {
+  width: 42px;
+  height: 42px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.admin-feedback-modal--success .admin-feedback-modal-icon {
+  background: transparent;
+}
+
+.admin-feedback-modal--success h2 {
+  color: #111827;
+}
+
+.admin-feedback-modal-icon .admin-success-check-icon {
+  width: 76px;
+  height: 76px;
+}
+
+.admin-success-check-icon circle {
+  fill: #00c800;
+  stroke: none;
+}
+
+.admin-success-check-icon path {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.admin-feedback-modal--busy .admin-feedback-modal-icon {
+  color: #a16207;
+  background: #fffbeb;
+}
+
+.admin-feedback-modal--warning .admin-feedback-modal-icon {
+  color: #a16207;
+  background: #fffbeb;
+}
+
+.admin-feedback-modal h2,
+.admin-face-registration-modal h2,
+.admin-cleanup-modal h2 {
+  margin: 0;
+  color: #2e1065;
+  font-size: clamp(1.65rem, 5vw, 2.25rem);
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.admin-feedback-modal p,
+.admin-face-registration-modal p,
+.admin-cleanup-modal p {
+  margin: 14px 0 0;
+  color: #52627a;
+  font-size: clamp(1rem, 3vw, 1.15rem);
+  line-height: 1.65;
+}
+
+.admin-feedback-modal .admin-feedback-modal-identity,
+.admin-face-registration-modal .admin-feedback-modal-identity,
+.admin-cleanup-modal .admin-feedback-modal-identity {
+  color: #172033;
+  font-size: clamp(1.15rem, 3.5vw, 1.4rem);
+  font-weight: 900;
+}
+
+.admin-feedback-modal button,
+.admin-face-registration-actions button {
+  width: 100%;
+  min-height: 54px;
+  margin-top: 28px;
+  padding: 10px 20px;
+  border: 0;
+  border-radius: 14px;
+  color: #ffffff;
+  background: #6d28d9;
+  font: inherit;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.admin-face-registration-actions {
+  display: grid;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.admin-face-registration-actions button {
+  margin-top: 0;
+}
+
+.admin-face-registration-actions .admin-face-registration-close {
+  border: 1px solid #c4b5fd;
+  color: #5b21b6;
+  background: #ffffff;
+}
+
+.admin-face-registration-modal .admin-face-registration-countdown {
+  margin-top: 24px;
+  color: #6d28d9;
+  font-size: clamp(1.3rem, 4vw, 1.65rem);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-cleanup-modal .admin-cleanup-countdown {
+  margin-top: 24px;
+  color: #6d28d9;
+  font-size: clamp(1.3rem, 4vw, 1.65rem);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-cleanup-close {
+  width: 100%;
+  min-height: 54px;
+  margin-top: 28px;
+  padding: 10px 20px;
+  border: 1px solid #c4b5fd;
+  border-radius: 14px;
+  color: #5b21b6;
+  background: #ffffff;
+  font: inherit;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.admin-face-registration-modal .admin-face-registration-error {
+  color: #991b1b;
+  font-weight: 800;
+}
+
+.admin-face-registration-actions .admin-face-registration-cancel {
+  background: #b91c1c;
+}
+
+.admin-face-registration-actions button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -1476,7 +1689,21 @@
     padding: 16px;
   }
 
+  .admin-modal-backdrop {
+    align-items: center;
+    padding: 16px;
+  }
+
   .staff-restock-modal {
+    max-height: calc(100dvh - 32px);
+    padding: 28px 20px;
+    border-radius: 22px;
+  }
+
+
+  .admin-feedback-modal,
+  .admin-face-registration-modal,
+  .admin-cleanup-modal {
     max-height: calc(100dvh - 32px);
     padding: 28px 20px;
     border-radius: 22px;

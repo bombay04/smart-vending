@@ -53,7 +53,7 @@ test("the remote portals separate staff restock from admin employee workflows", 
   assert.doesNotMatch(staffPortal, /Start Face Registration/);
   assert.doesNotMatch(staffPortal, /startFaceRegistrationSession/);
 
-  assert.match(adminPortal, /Admin \/ Employee Management/);
+  assert.match(adminPortal, /<h1>Employee Management<\/h1>/);
   assert.match(adminPortal, /id="admin-employee-name"/);
   assert.match(adminPortal, /fetchEmployeesForFaceRegistration/);
   assert.match(adminPortal, /createEmployee\(name/);
@@ -93,10 +93,8 @@ test("admin draft deletion and offboarding are confirmed session workflows", asy
   assert.match(adminPortal, /startEmployeeDraftDelete\(employee\.id\)/);
   assert.match(adminPortal, /offboardEmployee\(employee\.id\)/);
   assert.match(adminPortal, /Waiting for kiosk biometric cleanup/);
-  assert.match(
-    adminPortal,
-    /Local face data exists; the employee was preserved and deactivated/,
-  );
+  assert.match(adminPortal, /type: "CLEANUP_RESULT"/);
+  assert.match(adminPortal, /tone: "WARNING"/);
   assert.match(adminPortal, /await loadEmployees\(\)/);
   assert.match(adminPortal, /rowErrors\[employee\.id\]/);
   assert.match(

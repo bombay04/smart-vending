@@ -1,0 +1,184 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const source = (path) =>
+  readFile(new URL(`../${path}`, import.meta.url), "utf8");
+
+test("employee creation stays independent from kiosk state and uses an expiring modal", async () => {
+  const admin = await source("src/components/AdminPortal.tsx");
+  const createHandler = admin.match(
+    /async function handleCreate[\s\S]*?\r?\n  }\r?\n\r?\n  function setEmployeeBusy/,
+  )?.[0];
+
+  assert.ok(createHandler);
+  assert.match(createHandler, /createEmployee\(name\)/);
+  assert.match(createHandler, /setEmployees/);
+  assert.match(createHandler, /setName\(""\)/);
+  assert.match(createHandler, /type: "EMPLOYEE_CREATED"/);
+  assert.doesNotMatch(createHandler, /session|portalState|KIOSK_BUSY/);
+  assert.match(admin, /const EMPLOYEE_CREATED_MODAL_MS = 3000/);
+  assert.match(admin, /เพิ่มพนักงานสำเร็จ/);
+  assert.doesNotMatch(admin, /เพิ่มข้อมูลพนักงานเรียบร้อยแล้ว/);
+  assert.doesNotMatch(admin, /Created \$\{employee\.employeeCode\}/);
+  assert.doesNotMatch(admin, /staff-message--success/);
+});
+
+test("busy kiosk feedback blocks only session creation and can close or retry", async () => {
+  const [admin, kioskApi] = await Promise.all([
+    source("src/components/AdminPortal.tsx"),
+    source("src/api/kiosk-session.ts"),
+  ]);
+
+  assert.match(admin, /const KIOSK_BUSY_MODAL_MS = 5000/);
+  assert.match(
+    admin,
+    /startFaceRegistrationSession\(employee\.id\)[\s\S]*KioskSessionRequestError[\s\S]*showTimedModal\(\{ type: "KIOSK_BUSY" \}/,
+  );
+  assert.match(admin, /error\.status === 409/);
+  assert.match(admin, /Another staff session is already active for this kiosk/);
+  assert.match(admin, /เครื่องกำลังถูกใช้งาน/);
+  assert.match(admin, /onClick=\{dismissTimedModal\}/);
+  assert.match(admin, />\s*ตกลง\s*</);
+  assert.match(kioskApi, /class KioskSessionRequestError extends Error/);
+  assert.match(kioskApi, /response\.status/);
+});
+
+test("authoritative FACE_REGISTRATION state drives the accessible active modal", async () => {
+  const [admin, css] = await Promise.all([
+    source("src/components/AdminPortal.tsx"),
+    source("src/App.css"),
+  ]);
+
+  assert.match(admin, /fetchCurrentKioskSession/);
+  assert.match(admin, /setSession\(current\)/);
+  assert.match(
+    admin,
+    /portalState === "OWN_SESSION" &&[\s\S]*session !== null &&[\s\S]*hiddenFaceRegistrationSessionId !== session\.id/,
+  );
+  assert.match(admin, /className="admin-face-registration-modal"/);
+  assert.match(admin, /role="dialog"/);
+  assert.match(admin, /aria-modal="true"/);
+  assert.match(admin, /หมดอายุใน \{secondsRemaining\} วินาที/);
+  assert.match(admin, /handleCancelFaceRegistration/);
+  assert.doesNotMatch(admin, /Face registration status/);
+  assert.doesNotMatch(admin, /Face registration ACTIVE/);
+  assert.match(css, /\.admin-modal-backdrop[\s\S]*position: fixed/);
+  assert.match(css, /\.admin-face-registration-modal[\s\S]*width: min\(100%, 560px\)/);
+});
+
+test("active registration modal can hide without changing its authoritative session", async () => {
+  const admin = await source("src/components/AdminPortal.tsx");
+
+  assert.match(
+    admin,
+    /hiddenFaceRegistrationSessionId !== session\.id[\s\S]*className="admin-face-registration-modal"/,
+  );
+  assert.match(
+    admin,
+    /onClick=\{\(\) =>[\s\S]*setHiddenFaceRegistrationSessionId\(session\.id\)[\s\S]*>\s*ปิด\s*</,
+  );
+  assert.match(
+    admin,
+    /const activeFaceRegistrationSessionId =[\s\S]*session\?\.type === "FACE_REGISTRATION"[\s\S]*setHiddenFaceRegistrationSessionId/,
+  );
+  assert.doesNotMatch(
+    admin,
+    /setHiddenFaceRegistrationSessionId\(session\.id\)[\s\S]{0,120}(cancelKioskSession|setSession\(null\))/,
+  );
+});
+
+test("hidden active registration does not block employee creation or backend conflict checks", async () => {
+  const admin = await source("src/components/AdminPortal.tsx");
+  const createHandler = admin.match(
+    /async function handleCreate[\s\S]*?\r?\n  }\r?\n\r?\n  function setEmployeeBusy/,
+  )?.[0];
+  const startHandler = admin.match(
+    /async function handleStartFaceRegistration[\s\S]*?\r?\n  }\r?\n\r?\n  async function handleCancelFaceRegistration/,
+  )?.[0];
+
+  assert.ok(createHandler);
+  assert.ok(startHandler);
+  assert.doesNotMatch(createHandler, /session|hiddenFaceRegistrationSessionId/);
+  assert.match(startHandler, /startFaceRegistrationSession\(employee\.id\)/);
+  assert.doesNotMatch(startHandler, /if \(session !== null\)/);
+  assert.match(startHandler, /error\.status === 409/);
+  assert.match(startHandler, /type: "KIOSK_BUSY"/);
+});
+
+test("registration cancellation and polling still own session lifecycle", async () => {
+  const admin = await source("src/components/AdminPortal.tsx");
+
+  assert.match(
+    admin,
+    /async function handleCancelFaceRegistration[\s\S]*await cancelKioskSession\(session\.id\);[\s\S]*setSession\(null\)/,
+  );
+  assert.match(admin, /"ยกเลิกการลงทะเบียน"/);
+  assert.match(admin, /const current = await fetchCurrentKioskSession/);
+  assert.match(admin, /previousSessionRef\.current = current;[\s\S]*setSession\(current\)/);
+  assert.match(
+    admin,
+    /hiddenSessionId === activeFaceRegistrationSessionId[\s\S]*\? hiddenSessionId[\s\S]*: null/,
+  );
+});
+
+test("directory headers and authoritative draft actions match lifecycle eligibility", async () => {
+  const admin = await source("src/components/AdminPortal.tsx");
+
+  assert.match(
+    admin,
+    /<span>ID<\/span>[\s\S]*<span>Name<\/span>[\s\S]*<span>Status<\/span>[\s\S]*<span>Face Status<\/span>/,
+  );
+  assert.match(admin, /\{!employee\.canDeleteDraft && \(/);
+  assert.match(admin, /\{employee\.canDeleteDraft && \(/);
+  assert.match(admin, />\s*Edit\s*</);
+  assert.match(admin, />\s*Delete Draft\s*</);
+  assert.match(admin, />\s*Start Face Registration\s*</);
+  assert.match(admin, /"Deactivate"/);
+  assert.match(admin, />\s*Offboard\s*</);
+  assert.doesNotMatch(admin, /faceStatus\s*===/);
+});
+
+test("draft cleanup runs in the background without showing an active inspection modal", async () => {
+  const admin = await source("src/components/AdminPortal.tsx");
+
+  assert.match(admin, /startEmployeeDraftDelete\(employee\.id\)/);
+  assert.match(admin, /previous\?\.type === "EMPLOYEE_DRAFT_DELETE"/);
+  assert.doesNotMatch(admin, /กำลังตรวจสอบข้อมูลพนักงาน/);
+  assert.match(
+    admin,
+    /offboardingSession !== null[\s\S]*className="admin-cleanup-modal"/,
+  );
+});
+
+test("cleanup completion uses timed result modals while polling remains authoritative", async () => {
+  const admin = await source("src/components/AdminPortal.tsx");
+
+  assert.match(admin, /const CLEANUP_SUCCESS_MODAL_MS = 3000/);
+  assert.match(admin, /const CLEANUP_RESULT_MODAL_MS = 5000/);
+  assert.match(admin, /type: "CLEANUP_RESULT"/);
+  assert.match(admin, /tone: "SUCCESS"/);
+  assert.match(admin, /tone: "WARNING"/);
+  assert.match(admin, /previous\.type === "EMPLOYEE_DRAFT_DELETE"/);
+  assert.match(admin, /previous\?\.type === "EMPLOYEE_OFFBOARDING"/);
+  assert.match(admin, /await loadEmployees\(\)/);
+  assert.doesNotMatch(admin, /lifecycleMessage/);
+});
+
+test("Pi face setup keeps Back enabled during capture and reuses the scan indicator", async () => {
+  const [registration, home] = await Promise.all([
+    source("src/components/EmployeeFaceRegistration.tsx"),
+    source("src/pages/HomePage.tsx"),
+  ]);
+
+  assert.match(registration, /className=\{`face-scan-indicator/);
+  assert.match(registration, /state === "CAPTURING" \? "scanning"/);
+  assert.match(registration, /activeRequestRef\.current\?\.abort\(\)/);
+  assert.match(registration, /await onCancel\(\)/);
+  assert.match(registration, /disabled=\{isCancelling\}/);
+  assert.doesNotMatch(registration, /disabled=\{busy\}[\s\S]*Back to Customer Mode/);
+  assert.match(home, /cancelActiveFaceRegistrationSession/);
+  assert.match(home, /cancelFaceRegistrationSessionAndCleanup/);
+  assert.match(home, /onCancel=\{cancelActiveFaceRegistrationSession\}/);
+  assert.match(home, /onSessionEnded=\{clearStaffWorkflowState\}/);
+});

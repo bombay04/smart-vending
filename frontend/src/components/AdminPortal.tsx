@@ -16,6 +16,7 @@ import {
 import {
   cancelKioskSession,
   fetchCurrentKioskSession,
+  KioskSessionRequestError,
   startFaceRegistrationSession,
   type KioskSession,
 } from "../api/kiosk-session";
@@ -25,13 +26,42 @@ import type { RegistrationEmployee } from "../types/employee";
 const sortEmployees = (employees: RegistrationEmployee[]) =>
   [...employees].sort((a, b) => a.employeeCode.localeCompare(b.employeeCode));
 
+const EMPLOYEE_CREATED_MODAL_MS = 3000;
+const KIOSK_BUSY_MODAL_MS = 5000;
+const CLEANUP_SUCCESS_MODAL_MS = 3000;
+const CLEANUP_RESULT_MODAL_MS = 5000;
+
+type TimedModal =
+  | { type: "EMPLOYEE_CREATED" }
+  | { type: "KIOSK_BUSY" }
+  | {
+      type: "CLEANUP_RESULT";
+      tone: "SUCCESS" | "WARNING";
+      title: string;
+      body: string;
+    };
+
+function SuccessCheckIcon() {
+  return (
+    <svg
+      className="admin-success-check-icon"
+      viewBox="0 0 64 64"
+      focusable="false"
+    >
+      <circle cx="32" cy="32" r="32" />
+      <path d="M15 32.5 26 44l23-25" />
+    </svg>
+  );
+}
+
 function AdminPortal() {
   const [employees, setEmployees] = useState<RegistrationEmployee[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [name, setName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [timedModal, setTimedModal] = useState<TimedModal | null>(null);
   const [editingEmployeeId, setEditingEmployeeId] = useState<number | null>(
     null,
   );
@@ -47,12 +77,46 @@ function AdminPortal() {
   );
   const [rowErrors, setRowErrors] = useState<Record<number, string>>({});
   const [session, setSession] = useState<KioskSession | null>(null);
-  const [sessionLoaded, setSessionLoaded] = useState(false);
   const [sessionBusy, setSessionBusy] = useState(false);
-  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [faceSessionError, setFaceSessionError] = useState<string | null>(null);
+  const [hiddenFaceRegistrationSessionId, setHiddenFaceRegistrationSessionId] =
+    useState<number | null>(null);
+  const [hiddenCleanupSessionId, setHiddenCleanupSessionId] = useState<
+    number | null
+  >(null);
   const [now, setNow] = useState(Date.now());
   const requestRef = useRef<AbortController | null>(null);
   const previousSessionRef = useRef<KioskSession | null>(null);
+  const modalTimerRef = useRef<number | null>(null);
+
+  const dismissTimedModal = useCallback(() => {
+    if (modalTimerRef.current !== null) {
+      window.clearTimeout(modalTimerRef.current);
+      modalTimerRef.current = null;
+    }
+    setTimedModal(null);
+  }, []);
+
+  const showTimedModal = useCallback(
+    (nextModal: TimedModal, durationMs: number) => {
+      dismissTimedModal();
+      setTimedModal(nextModal);
+      modalTimerRef.current = window.setTimeout(() => {
+        modalTimerRef.current = null;
+        setTimedModal(null);
+      }, durationMs);
+    },
+    [dismissTimedModal],
+  );
+
+  useEffect(
+    () => () => {
+      if (modalTimerRef.current !== null) {
+        window.clearTimeout(modalTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const loadEmployees = useCallback(async () => {
     const controller = new AbortController();
@@ -100,41 +164,74 @@ function AdminPortal() {
               (employee) => employee.id === previous.employeeId,
             );
             if (refreshedEmployees === null) {
-              setMessage(
-                "Kiosk cleanup ended. Refresh the employee directory to confirm the result.",
+              showTimedModal(
+                {
+                  type: "CLEANUP_RESULT",
+                  tone: "WARNING",
+                  title: "ไม่สามารถยืนยันผลการดำเนินการได้",
+                  body: "กรุณารีเฟรชรายชื่อพนักงานเพื่อตรวจสอบผลอีกครั้ง",
+                },
+                CLEANUP_RESULT_MODAL_MS,
               );
             } else if (
               previous.type === "EMPLOYEE_DRAFT_DELETE" &&
               refreshedEmployee?.faceRegistered
             ) {
-              setMessage(
-                "Local face data exists; the employee was preserved and deactivated. Use Offboard to remove it.",
+              showTimedModal(
+                {
+                  type: "CLEANUP_RESULT",
+                  tone: "WARNING",
+                  title: "ไม่สามารถลบ Draft ได้",
+                  body:
+                    "ตรวจพบข้อมูลใบหน้าของพนักงาน ระบบเก็บข้อมูลพนักงานไว้เพื่อรักษาประวัติการใช้งาน",
+                },
+                CLEANUP_RESULT_MODAL_MS,
               );
             } else if (
               previous.type === "EMPLOYEE_DRAFT_DELETE" &&
               refreshedEmployee === undefined
             ) {
-              setMessage("Verified unused draft deleted.");
+              showTimedModal(
+                {
+                  type: "CLEANUP_RESULT",
+                  tone: "SUCCESS",
+                  title: "ลบข้อมูลพนักงานสำเร็จ",
+                  body: `${previous.employee?.employeeCode ?? "พนักงาน"} ถูกลบออกจากระบบแล้ว`,
+                },
+                CLEANUP_SUCCESS_MODAL_MS,
+              );
             } else if (previous.type === "EMPLOYEE_DRAFT_DELETE") {
-              setMessage(
-                "The employee changed during verification and was not deleted.",
+              showTimedModal(
+                {
+                  type: "CLEANUP_RESULT",
+                  tone: "WARNING",
+                  title: "ไม่สามารถลบข้อมูลพนักงานได้",
+                  body:
+                    "สถานะพนักงานมีการเปลี่ยนแปลงระหว่างการตรวจสอบ กรุณาตรวจสอบข้อมูลอีกครั้ง",
+                },
+                CLEANUP_RESULT_MODAL_MS,
               );
             } else {
-              setMessage(
-                "Offboarding biometric cleanup completed. History was retained.",
+              showTimedModal(
+                {
+                  type: "CLEANUP_RESULT",
+                  tone: "SUCCESS",
+                  title: "นำพนักงานออกจากระบบสำเร็จ",
+                  body:
+                    "ลบข้อมูลใบหน้าเรียบร้อยแล้ว ประวัติการใช้งานของพนักงานยังคงถูกเก็บไว้",
+                },
+                CLEANUP_SUCCESS_MODAL_MS,
               );
             }
           }
           previousSessionRef.current = current;
           setSession(current);
-          setSessionLoaded(true);
-          setSessionError(null);
+          if (current?.type !== "FACE_REGISTRATION") {
+            setFaceSessionError(null);
+          }
         }
       } catch {
-        if (!stopped) {
-          setSessionLoaded(true);
-          setSessionError("Kiosk session status is unavailable.");
-        }
+        // Keep the last authoritative session while polling retries.
       } finally {
         if (!stopped) timeoutId = window.setTimeout(poll, 1500);
       }
@@ -145,7 +242,7 @@ function AdminPortal() {
       controller?.abort();
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [loadEmployees]);
+  }, [loadEmployees, showTimedModal]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
@@ -156,16 +253,14 @@ function AdminPortal() {
     event.preventDefault();
     if (!name.trim() || isCreating) return;
     setIsCreating(true);
-    setMessage(null);
+    setCreateError(null);
     try {
       const employee = await createEmployee(name);
       setEmployees((current) => sortEmployees([...current, employee]));
-      setMessage(
-        `Created ${employee.employeeCode} for ${employee.name}. Start face registration separately when ready.`,
-      );
+      showTimedModal({ type: "EMPLOYEE_CREATED" }, EMPLOYEE_CREATED_MODAL_MS);
       setName("");
     } catch {
-      setMessage("Employee creation failed. Check the backend and try again.");
+      setCreateError("Employee creation failed. Check the backend and try again.");
     } finally {
       setIsCreating(false);
     }
@@ -279,7 +374,7 @@ function AdminPortal() {
     if (busyEmployeeIds.has(employee.id) || session !== null) return;
     setEmployeeBusy(employee.id, true);
     setRowError(employee.id, null);
-    setMessage(null);
+    dismissTimedModal();
     try {
       const cleanupSession =
         action === "EMPLOYEE_DRAFT_DELETE"
@@ -301,11 +396,6 @@ function AdminPortal() {
       );
       setDeleteConfirmationId(null);
       setOffboardConfirmationId(null);
-      setMessage(
-        action === "EMPLOYEE_DRAFT_DELETE"
-          ? `Waiting for the kiosk to verify ${employee.employeeCode} has no local face data.`
-          : `Access disabled. Waiting for kiosk biometric cleanup for ${employee.employeeCode}.`,
-      );
     } catch (error) {
       setRowError(
         employee.id,
@@ -322,17 +412,28 @@ function AdminPortal() {
   }
 
   async function handleStartFaceRegistration(employee: RegistrationEmployee) {
-    if (sessionBusy || session !== null) return;
+    if (sessionBusy) return;
     setSessionBusy(true);
-    setSessionError(null);
-    setMessage(null);
+    setFaceSessionError(null);
+    dismissTimedModal();
+    setRowError(employee.id, null);
     try {
-      setSession(await startFaceRegistrationSession(employee.id));
-      setMessage(`The kiosk is waiting to register ${employee.employeeCode}.`);
+      const registrationSession = await startFaceRegistrationSession(employee.id);
+      previousSessionRef.current = registrationSession;
+      setSession(registrationSession);
     } catch (error) {
-      setSessionError(
-        error instanceof Error ? error.message : "Session request failed.",
-      );
+      if (
+        error instanceof KioskSessionRequestError &&
+        error.status === 409 &&
+        error.message === "Another staff session is already active for this kiosk."
+      ) {
+        showTimedModal({ type: "KIOSK_BUSY" }, KIOSK_BUSY_MODAL_MS);
+      } else {
+        setRowError(
+          employee.id,
+          error instanceof Error ? error.message : "Session request failed.",
+        );
+      }
     } finally {
       setSessionBusy(false);
     }
@@ -341,14 +442,12 @@ function AdminPortal() {
   async function handleCancelFaceRegistration() {
     if (session?.type !== "FACE_REGISTRATION" || sessionBusy) return;
     setSessionBusy(true);
-    setSessionError(null);
-    setMessage(null);
+    setFaceSessionError(null);
     try {
       await cancelKioskSession(session.id);
       setSession(null);
-      setMessage("Face-registration session cancelled.");
     } catch (error) {
-      setSessionError(
+      setFaceSessionError(
         error instanceof Error ? error.message : "Session request failed.",
       );
     } finally {
@@ -357,11 +456,37 @@ function AdminPortal() {
   }
 
   const portalState = getPortalSessionState(session, "FACE_REGISTRATION");
+  useEffect(() => {
+    if (portalState === "OWN_SESSION") dismissTimedModal();
+  }, [dismissTimedModal, portalState]);
+
+  const activeFaceRegistrationSessionId =
+    session?.type === "FACE_REGISTRATION" ? session.id : null;
+  useEffect(() => {
+    setHiddenFaceRegistrationSessionId((hiddenSessionId) =>
+      hiddenSessionId === null ||
+      hiddenSessionId === activeFaceRegistrationSessionId
+        ? hiddenSessionId
+        : null,
+    );
+  }, [activeFaceRegistrationSessionId]);
+
   const cleanupSession =
     session?.type === "EMPLOYEE_DRAFT_DELETE" ||
     session?.type === "EMPLOYEE_OFFBOARDING"
       ? session
       : null;
+  const offboardingSession =
+    cleanupSession?.type === "EMPLOYEE_OFFBOARDING" ? cleanupSession : null;
+  const activeCleanupSessionId = offboardingSession?.id ?? null;
+  useEffect(() => {
+    setHiddenCleanupSessionId((hiddenSessionId) =>
+      hiddenSessionId === null || hiddenSessionId === activeCleanupSessionId
+        ? hiddenSessionId
+        : null,
+    );
+  }, [activeCleanupSessionId]);
+
   const secondsRemaining = session
     ? Math.max(
         0,
@@ -374,89 +499,9 @@ function AdminPortal() {
       <div className="staff-portal-container">
         <header className="staff-portal-header">
           <div>
-            <p className="mode-label mode-label--admin">
-              Prototype Admin Portal
-            </p>
-            <h1>Admin / Employee Management</h1>
-            <p>Manage employees and initiate kiosk face registration.</p>
+            <h1>Employee Management</h1>
           </div>
         </header>
-
-        <section
-          className="staff-session-section"
-          aria-labelledby="registration-session-title"
-        >
-          <div className="staff-section-heading">
-            <div>
-              <h2 id="registration-session-title">Face registration status</h2>
-              <p>
-                Registration runs locally on the kiosk for the selected active
-                employee.
-              </p>
-            </div>
-          </div>
-
-          {portalState === "OWN_SESSION" && session !== null && (
-            <div className="staff-active-session" role="status">
-              <div>
-                <strong>Face registration ACTIVE</strong>
-                <p>
-                  Kiosk waiting to register {session.employee?.name} ({" "}
-                  {session.employee?.employeeCode}).
-                </p>
-                <span>
-                  Expires in {secondsRemaining}s ·{" "}
-                  {new Date(session.expiresAt).toLocaleTimeString()}
-                </span>
-              </div>
-              <button
-                type="button"
-                disabled={sessionBusy}
-                onClick={() => void handleCancelFaceRegistration()}
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-
-          {cleanupSession !== null && (
-            <div className="staff-active-session" role="status">
-              <div>
-                <strong>Waiting for kiosk biometric cleanup</strong>
-                <p>
-                  {cleanupSession.type === "EMPLOYEE_DRAFT_DELETE"
-                    ? "The kiosk is verifying that no local face template exists for"
-                    : "The employee is inactive while the kiosk removes the local face template for"}{" "}
-                  {cleanupSession.employee?.name} (
-                  {cleanupSession.employee?.employeeCode}).
-                </p>
-                <span>Expires in {secondsRemaining}s</span>
-              </div>
-            </div>
-          )}
-
-          {portalState === "KIOSK_BUSY" && cleanupSession === null && (
-            <div className="staff-busy-session" role="status">
-              <strong>Kiosk busy</strong>
-              <p>
-                Another kiosk workflow is active. Face registration can start
-                when it finishes or expires.
-              </p>
-            </div>
-          )}
-
-          {portalState === "IDLE" && sessionLoaded && !sessionError && (
-            <p className="staff-message">
-              No face-registration session is active.
-            </p>
-          )}
-          {sessionError && (
-            <p className="staff-message staff-message--error">{sessionError}</p>
-          )}
-          {message && (
-            <p className="staff-message staff-message--success">{message}</p>
-          )}
-        </section>
 
         <section
           className="staff-add-employee"
@@ -464,10 +509,6 @@ function AdminPortal() {
         >
           <div>
             <h2 id="add-employee-title">Add Employee</h2>
-            <p>
-              This creates the employee record only. It does not start face
-              registration.
-            </p>
           </div>
           <form onSubmit={(event) => void handleCreate(event)}>
             <label htmlFor="admin-employee-name">Employee name</label>
@@ -485,6 +526,11 @@ function AdminPortal() {
               </button>
             </div>
           </form>
+          {createError && (
+            <p className="staff-message staff-message--error" role="alert">
+              {createError}
+            </p>
+          )}
         </section>
 
         <section
@@ -494,9 +540,6 @@ function AdminPortal() {
           <div className="staff-section-heading">
             <div>
               <h2 id="employee-list-title">Employee directory</h2>
-              <p>
-                Face status is workflow metadata and contains no biometric data.
-              </p>
             </div>
             <button
               type="button"
@@ -528,9 +571,9 @@ function AdminPortal() {
                 className="staff-employee-row staff-employee-row--header"
                 role="row"
               >
-                <span>Code</span>
+                <span>ID</span>
                 <span>Name</span>
-                <span>Employee</span>
+                <span>Status</span>
                 <span>Face Status</span>
                 <span>Actions</span>
               </div>
@@ -662,7 +705,13 @@ function AdminPortal() {
                         </div>
                       </div>
                     ) : (
-                      <div className="admin-employee-actions">
+                      <div
+                        className={`admin-employee-actions${
+                          employee.canDeleteDraft
+                            ? " admin-employee-actions--draft"
+                            : ""
+                        }`}
+                      >
                         <button
                           type="button"
                           disabled={
@@ -673,39 +722,43 @@ function AdminPortal() {
                         >
                           Edit
                         </button>
-                        <button
-                          type="button"
-                          disabled={
-                            busyEmployeeIds.has(employee.id) ||
-                            employee.activeCleanupType !== null
-                          }
-                          title="Temporarily disable access. Face registration is retained."
-                          onClick={() => void handleActiveChange(employee)}
-                        >
-                          {busyEmployeeIds.has(employee.id)
-                            ? "Updating..."
-                            : employee.isActive
-                              ? "Deactivate"
-                              : "Activate"}
-                        </button>
-                        <button
-                          className="admin-delete-action"
-                          type="button"
-                          disabled={
-                            busyEmployeeIds.has(employee.id) ||
-                            employee.activeCleanupType !== null ||
-                            session !== null
-                          }
-                          title="Disable access and remove the face template. History is retained."
-                          onClick={() => {
-                            setEditingEmployeeId(null);
-                            setDeleteConfirmationId(null);
-                            setRowError(employee.id, null);
-                            setOffboardConfirmationId(employee.id);
-                          }}
-                        >
-                          Offboard
-                        </button>
+                        {!employee.canDeleteDraft && (
+                          <>
+                            <button
+                              type="button"
+                              disabled={
+                                busyEmployeeIds.has(employee.id) ||
+                                employee.activeCleanupType !== null
+                              }
+                              title="Temporarily disable access. Face registration is retained."
+                              onClick={() => void handleActiveChange(employee)}
+                            >
+                              {busyEmployeeIds.has(employee.id)
+                                ? "Updating..."
+                                : employee.isActive
+                                  ? "Deactivate"
+                                  : "Activate"}
+                            </button>
+                            <button
+                              className="admin-delete-action"
+                              type="button"
+                              disabled={
+                                busyEmployeeIds.has(employee.id) ||
+                                employee.activeCleanupType !== null ||
+                                session !== null
+                              }
+                              title="Disable access and remove the face template. History is retained."
+                              onClick={() => {
+                                setEditingEmployeeId(null);
+                                setDeleteConfirmationId(null);
+                                setRowError(employee.id, null);
+                                setOffboardConfirmationId(employee.id);
+                              }}
+                            >
+                              Offboard
+                            </button>
+                          </>
+                        )}
                         {employee.canDeleteDraft && (
                           <button
                             className="admin-delete-action"
@@ -728,9 +781,7 @@ function AdminPortal() {
                         )}
                         {!employee.faceRegistered &&
                           employee.isActive &&
-                          portalState === "IDLE" &&
-                          sessionLoaded &&
-                          !sessionError && (
+                          employee.activeCleanupType === null && (
                             <button
                               className="staff-face-action"
                               type="button"
@@ -763,6 +814,173 @@ function AdminPortal() {
           )}
         </section>
       </div>
+
+      {timedModal?.type === "EMPLOYEE_CREATED" && (
+        <div className="admin-modal-backdrop">
+          <section
+            className="admin-feedback-modal admin-feedback-modal--success"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="employee-created-modal-title"
+          >
+            <div className="admin-feedback-modal-icon" aria-hidden="true">
+              <SuccessCheckIcon />
+            </div>
+            <h2 id="employee-created-modal-title">เพิ่มพนักงานสำเร็จ</h2>
+          </section>
+        </div>
+      )}
+
+      {timedModal?.type === "KIOSK_BUSY" && (
+        <div className="admin-modal-backdrop">
+          <section
+            className="admin-feedback-modal admin-feedback-modal--busy"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="kiosk-busy-modal-title"
+            aria-describedby="kiosk-busy-modal-description"
+          >
+            <div className="admin-feedback-modal-icon" aria-hidden="true">
+              !
+            </div>
+            <h2 id="kiosk-busy-modal-title">เครื่องกำลังถูกใช้งาน</h2>
+            <p id="kiosk-busy-modal-description">
+              ไม่สามารถเริ่มลงทะเบียนใบหน้าได้ในขณะนี้
+              <br />
+              กรุณารอให้ขั้นตอนปัจจุบันเสร็จสิ้นแล้วลองอีกครั้ง
+            </p>
+            <button type="button" onClick={dismissTimedModal}>
+              ตกลง
+            </button>
+          </section>
+        </div>
+      )}
+
+      {timedModal?.type === "CLEANUP_RESULT" && (
+        <div className="admin-modal-backdrop">
+          <section
+            className={`admin-feedback-modal admin-feedback-modal--${
+              timedModal.tone === "SUCCESS" ? "success" : "warning"
+            }`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cleanup-result-modal-title"
+            aria-describedby={
+              timedModal.tone === "WARNING"
+                ? "cleanup-result-modal-description"
+                : undefined
+            }
+          >
+            <div className="admin-feedback-modal-icon" aria-hidden="true">
+              {timedModal.tone === "SUCCESS" ? <SuccessCheckIcon /> : "!"}
+            </div>
+            <h2 id="cleanup-result-modal-title">{timedModal.title}</h2>
+            {timedModal.tone === "WARNING" && (
+              <p id="cleanup-result-modal-description">{timedModal.body}</p>
+            )}
+          </section>
+        </div>
+      )}
+
+      {offboardingSession !== null &&
+        hiddenCleanupSessionId !== offboardingSession.id &&
+        timedModal === null && (
+          <div className="admin-modal-backdrop">
+            <section
+              className="admin-cleanup-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="admin-cleanup-modal-title"
+              aria-describedby="admin-cleanup-modal-description"
+            >
+              <div className="admin-feedback-modal-icon" aria-hidden="true">
+                ◎
+              </div>
+              <h2 id="admin-cleanup-modal-title">กำลังนำพนักงานออกจากระบบ</h2>
+              <p className="admin-feedback-modal-identity">
+                {offboardingSession.employee?.employeeCode}
+                {offboardingSession.employee?.name
+                  ? ` - ${offboardingSession.employee.name}`
+                  : ""}
+              </p>
+              <p id="admin-cleanup-modal-description">
+                เครื่องกำลังลบข้อมูลใบหน้าที่จัดเก็บไว้
+                <br />
+                ประวัติการใช้งานของพนักงานจะยังคงถูกเก็บไว้
+              </p>
+              <p className="admin-cleanup-countdown" role="timer">
+                หมดอายุใน {secondsRemaining} วินาที
+              </p>
+              <button
+                className="admin-cleanup-close"
+                type="button"
+                onClick={() =>
+                  setHiddenCleanupSessionId(offboardingSession.id)
+                }
+              >
+                ปิด
+              </button>
+            </section>
+          </div>
+        )}
+
+      {portalState === "OWN_SESSION" &&
+        session !== null &&
+        hiddenFaceRegistrationSessionId !== session.id && (
+          <div className="admin-modal-backdrop">
+            <section
+              className="admin-face-registration-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="admin-face-registration-modal-title"
+              aria-describedby="admin-face-registration-modal-description"
+            >
+              <div className="admin-feedback-modal-icon" aria-hidden="true">
+                ◎
+              </div>
+              <h2 id="admin-face-registration-modal-title">
+                กำลังลงทะเบียนใบหน้าพนักงาน
+              </h2>
+              <p className="admin-feedback-modal-identity">
+                {session.employee?.employeeCode}
+                {session.employee?.name ? ` - ${session.employee.name}` : ""}
+              </p>
+              <p id="admin-face-registration-modal-description">
+                กรุณาดำเนินการลงทะเบียนที่หน้าจอเครื่องขายสินค้า
+              </p>
+              <p className="admin-face-registration-countdown" role="timer">
+                หมดอายุใน {secondsRemaining} วินาที
+              </p>
+              {faceSessionError && (
+                <p className="admin-face-registration-error" role="alert">
+                  {faceSessionError}
+                </p>
+              )}
+              <div className="admin-face-registration-actions">
+                <button
+                  className="admin-face-registration-close"
+                  type="button"
+                  disabled={sessionBusy}
+                  onClick={() =>
+                    setHiddenFaceRegistrationSessionId(session.id)
+                  }
+                >
+                  ปิด
+                </button>
+                <button
+                  className="admin-face-registration-cancel"
+                  type="button"
+                  disabled={sessionBusy}
+                  onClick={() => void handleCancelFaceRegistration()}
+                >
+                  {sessionBusy
+                    ? "กำลังยกเลิก..."
+                    : "ยกเลิกการลงทะเบียน"}
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
     </main>
   );
 }

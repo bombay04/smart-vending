@@ -111,6 +111,53 @@ test("failed backend cleanup retains the local restock flow for retry", async ()
   assert.equal(localClearCount, 0);
 });
 
+test("Pi face-registration exit cancels backend state before returning to customer mode", async () => {
+  const { cancelFaceRegistrationSessionAndCleanup } = await import(
+    "../src/face-registration-session-cleanup.mjs"
+  );
+  let backendSession = registration;
+  let localMode = "face-registration";
+  const events = [];
+
+  await cancelFaceRegistrationSessionAndCleanup({
+    sessionId: registration.id,
+    async cancelSession(sessionId) {
+      assert.equal(sessionId, registration.id);
+      events.push("backend-cancelled");
+      backendSession = null;
+    },
+    clearLocalState() {
+      events.push("customer-mode");
+      localMode = "customer";
+    },
+  });
+
+  assert.deepEqual(events, ["backend-cancelled", "customer-mode"]);
+  assert.equal(localMode, "customer");
+  assert.equal(getPortalSessionState(backendSession, "FACE_REGISTRATION"), "IDLE");
+});
+
+test("failed face-registration cancellation keeps the Pi workflow available for retry", async () => {
+  const { cancelFaceRegistrationSessionAndCleanup } = await import(
+    "../src/face-registration-session-cleanup.mjs"
+  );
+  let localClearCount = 0;
+
+  await assert.rejects(
+    cancelFaceRegistrationSessionAndCleanup({
+      sessionId: registration.id,
+      async cancelSession() {
+        throw new Error("offline");
+      },
+      clearLocalState() {
+        localClearCount += 1;
+      },
+    }),
+    /offline/,
+  );
+  assert.equal(localClearCount, 0);
+});
+
 test("customer and direct-route source expose no local staff entry bypass", async () => {
   const [home, app, registrationSource] = await Promise.all([
     readFile(new URL("../src/pages/HomePage.tsx", import.meta.url), "utf8"),
@@ -165,13 +212,16 @@ test("portals expose only role-owned cancellation and responsive busy states", a
   assert.match(staffPortal, /await cancelKioskSession\(session\.id\)/);
   assert.match(adminPortal, /session\?\.type !== "FACE_REGISTRATION"/);
   assert.match(staffPortal, /portalState === "KIOSK_BUSY"/);
-  assert.match(adminPortal, /portalState === "KIOSK_BUSY"/);
+  assert.match(
+    adminPortal,
+    /KioskSessionRequestError[\s\S]*error\.status === 409[\s\S]*showTimedModal\(\{ type: "KIOSK_BUSY" \}/,
+  );
   assert.match(staffPortal, /เครื่องกำลังทำงานอื่นอยู่/);
-  assert.match(adminPortal, /Another kiosk workflow is active/);
+  assert.match(adminPortal, /เครื่องกำลังถูกใช้งาน/);
   assert.doesNotMatch(staffPortal, /Back to Home/);
   assert.doesNotMatch(adminPortal, /Back to Home/);
   assert.match(css, /@media \(max-width: 900px\)/);
-  assert.match(css, /\.staff-active-session[\s\S]*flex-direction: column/);
+  assert.match(css, /\.admin-modal-backdrop[\s\S]*position: fixed/);
   assert.match(css, /\.staff-employee-row[\s\S]*grid-template-columns/);
 });
 

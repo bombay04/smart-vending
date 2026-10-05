@@ -28,6 +28,16 @@ export interface KioskSession {
 
 const sessionsUrl = `${API_BASE_URL}/api/v1/kiosk-sessions`;
 
+export class KioskSessionRequestError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "KioskSessionRequestError";
+  }
+}
+
 export function isKioskSession(value: unknown): value is KioskSession {
   if (typeof value !== "object" || value === null) return false;
   const session = value as Record<string, unknown>;
@@ -90,7 +100,8 @@ async function readSession(response: Response): Promise<KioskSession> {
     error?: unknown;
   };
   if (!response.ok || !isKioskSession(payload.session)) {
-    throw new Error(
+    throw new KioskSessionRequestError(
+      response.status,
       typeof payload.error === "string"
         ? payload.error
         : "Kiosk session request failed.",
