@@ -1094,8 +1094,7 @@
 }
 
 .admin-feedback-modal,
-.admin-face-registration-modal,
-.admin-cleanup-modal {
+.admin-face-registration-modal {
   width: min(100%, 560px);
   max-height: calc(100dvh - 32px);
   overflow-y: auto;
@@ -1168,8 +1167,7 @@
 }
 
 .admin-feedback-modal h2,
-.admin-face-registration-modal h2,
-.admin-cleanup-modal h2 {
+.admin-face-registration-modal h2 {
   margin: 0;
   color: #2e1065;
   font-size: clamp(1.65rem, 5vw, 2.25rem);
@@ -1178,8 +1176,7 @@
 }
 
 .admin-feedback-modal p,
-.admin-face-registration-modal p,
-.admin-cleanup-modal p {
+.admin-face-registration-modal p {
   margin: 14px 0 0;
   color: #52627a;
   font-size: clamp(1rem, 3vw, 1.15rem);
@@ -1187,8 +1184,7 @@
 }
 
 .admin-feedback-modal .admin-feedback-modal-identity,
-.admin-face-registration-modal .admin-feedback-modal-identity,
-.admin-cleanup-modal .admin-feedback-modal-identity {
+.admin-face-registration-modal .admin-feedback-modal-identity {
   color: #172033;
   font-size: clamp(1.15rem, 3.5vw, 1.4rem);
   font-weight: 900;
@@ -1219,40 +1215,12 @@
   margin-top: 0;
 }
 
-.admin-face-registration-actions .admin-face-registration-close {
-  border: 1px solid #c4b5fd;
-  color: #5b21b6;
-  background: #ffffff;
-}
-
 .admin-face-registration-modal .admin-face-registration-countdown {
   margin-top: 24px;
   color: #6d28d9;
   font-size: clamp(1.3rem, 4vw, 1.65rem);
   font-weight: 900;
   font-variant-numeric: tabular-nums;
-}
-
-.admin-cleanup-modal .admin-cleanup-countdown {
-  margin-top: 24px;
-  color: #6d28d9;
-  font-size: clamp(1.3rem, 4vw, 1.65rem);
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-}
-
-.admin-cleanup-close {
-  width: 100%;
-  min-height: 54px;
-  margin-top: 28px;
-  padding: 10px 20px;
-  border: 1px solid #c4b5fd;
-  border-radius: 14px;
-  color: #5b21b6;
-  background: #ffffff;
-  font: inherit;
-  font-weight: 850;
-  cursor: pointer;
 }
 
 .admin-face-registration-modal .admin-face-registration-error {
@@ -1702,8 +1670,7 @@
 
 
   .admin-feedback-modal,
-  .admin-face-registration-modal,
-  .admin-cleanup-modal {
+  .admin-face-registration-modal {
     max-height: calc(100dvh - 32px);
     padding: 28px 20px;
     border-radius: 22px;

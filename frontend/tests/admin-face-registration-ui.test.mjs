@@ -54,7 +54,7 @@ test("authoritative FACE_REGISTRATION state drives the accessible active modal",
   assert.match(admin, /setSession\(current\)/);
   assert.match(
     admin,
-    /portalState === "OWN_SESSION" &&[\s\S]*session !== null &&[\s\S]*hiddenFaceRegistrationSessionId !== session\.id/,
+    /portalState === "OWN_SESSION" && session !== null && \(/,
   );
   assert.match(admin, /className="admin-face-registration-modal"/);
   assert.match(admin, /role="dialog"/);
@@ -67,28 +67,20 @@ test("authoritative FACE_REGISTRATION state drives the accessible active modal",
   assert.match(css, /\.admin-face-registration-modal[\s\S]*width: min\(100%, 560px\)/);
 });
 
-test("active registration modal can hide without changing its authoritative session", async () => {
+test("active registration modal cannot be dismissed without cancelling its session", async () => {
   const admin = await source("src/components/AdminPortal.tsx");
 
+  assert.doesNotMatch(admin, /hiddenFaceRegistrationSessionId/);
+  assert.doesNotMatch(admin, /admin-face-registration-close/);
+  assert.doesNotMatch(admin, />\s*ปิด\s*</);
+  assert.match(admin, /"ยกเลิกการลงทะเบียน"/);
   assert.match(
     admin,
-    /hiddenFaceRegistrationSessionId !== session\.id[\s\S]*className="admin-face-registration-modal"/,
-  );
-  assert.match(
-    admin,
-    /onClick=\{\(\) =>[\s\S]*setHiddenFaceRegistrationSessionId\(session\.id\)[\s\S]*>\s*ปิด\s*</,
-  );
-  assert.match(
-    admin,
-    /const activeFaceRegistrationSessionId =[\s\S]*session\?\.type === "FACE_REGISTRATION"[\s\S]*setHiddenFaceRegistrationSessionId/,
-  );
-  assert.doesNotMatch(
-    admin,
-    /setHiddenFaceRegistrationSessionId\(session\.id\)[\s\S]{0,120}(cancelKioskSession|setSession\(null\))/,
+    /onClick=\{\(\) => void handleCancelFaceRegistration\(\)\}/,
   );
 });
 
-test("hidden active registration does not block employee creation or backend conflict checks", async () => {
+test("face registration start still delegates kiosk conflicts to the backend", async () => {
   const admin = await source("src/components/AdminPortal.tsx");
   const createHandler = admin.match(
     /async function handleCreate[\s\S]*?\r?\n  }\r?\n\r?\n  function setEmployeeBusy/,
@@ -99,7 +91,7 @@ test("hidden active registration does not block employee creation or backend con
 
   assert.ok(createHandler);
   assert.ok(startHandler);
-  assert.doesNotMatch(createHandler, /session|hiddenFaceRegistrationSessionId/);
+  assert.doesNotMatch(createHandler, /session/);
   assert.match(startHandler, /startFaceRegistrationSession\(employee\.id\)/);
   assert.doesNotMatch(startHandler, /if \(session !== null\)/);
   assert.match(startHandler, /error\.status === 409/);
@@ -116,10 +108,6 @@ test("registration cancellation and polling still own session lifecycle", async 
   assert.match(admin, /"ยกเลิกการลงทะเบียน"/);
   assert.match(admin, /const current = await fetchCurrentKioskSession/);
   assert.match(admin, /previousSessionRef\.current = current;[\s\S]*setSession\(current\)/);
-  assert.match(
-    admin,
-    /hiddenSessionId === activeFaceRegistrationSessionId[\s\S]*\? hiddenSessionId[\s\S]*: null/,
-  );
 });
 
 test("directory headers and authoritative draft actions match lifecycle eligibility", async () => {
@@ -147,11 +135,16 @@ test("draft cleanup runs in the background without showing an active inspection 
   assert.doesNotMatch(admin, /กำลังตรวจสอบข้อมูลพนักงาน/);
   assert.match(
     admin,
-    /offboardingSession !== null[\s\S]*className="admin-cleanup-modal"/,
+    /employee\.activeCleanupType === "EMPLOYEE_OFFBOARDING" && \([\s\S]*Waiting for kiosk biometric cleanup/,
   );
+  assert.doesNotMatch(
+    admin,
+    /employee\.activeCleanupType !== null && \([\s\S]*Waiting for kiosk biometric cleanup/,
+  );
+  assert.doesNotMatch(admin, /className="admin-cleanup-modal"/);
 });
 
-test("cleanup completion uses timed result modals while polling remains authoritative", async () => {
+test("draft completion uses timed result modals while polling remains authoritative", async () => {
   const admin = await source("src/components/AdminPortal.tsx");
 
   assert.match(admin, /const CLEANUP_SUCCESS_MODAL_MS = 3000/);
@@ -160,8 +153,10 @@ test("cleanup completion uses timed result modals while polling remains authorit
   assert.match(admin, /tone: "SUCCESS"/);
   assert.match(admin, /tone: "WARNING"/);
   assert.match(admin, /previous\.type === "EMPLOYEE_DRAFT_DELETE"/);
-  assert.match(admin, /previous\?\.type === "EMPLOYEE_OFFBOARDING"/);
   assert.match(admin, /await loadEmployees\(\)/);
+  assert.match(admin, /ลบข้อมูลพนักงานสำเร็จ/);
+  assert.doesNotMatch(admin, /นำพนักงานออกจากระบบสำเร็จ/);
+  assert.doesNotMatch(admin, /กำลังนำพนักงานออกจากระบบ/);
   assert.doesNotMatch(admin, /lifecycleMessage/);
 });
 

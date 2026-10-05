@@ -79,11 +79,6 @@ function AdminPortal() {
   const [session, setSession] = useState<KioskSession | null>(null);
   const [sessionBusy, setSessionBusy] = useState(false);
   const [faceSessionError, setFaceSessionError] = useState<string | null>(null);
-  const [hiddenFaceRegistrationSessionId, setHiddenFaceRegistrationSessionId] =
-    useState<number | null>(null);
-  const [hiddenCleanupSessionId, setHiddenCleanupSessionId] = useState<
-    number | null
-  >(null);
   const [now, setNow] = useState(Date.now());
   const requestRef = useRef<AbortController | null>(null);
   const previousSessionRef = useRef<KioskSession | null>(null);
@@ -163,7 +158,10 @@ function AdminPortal() {
             const refreshedEmployee = refreshedEmployees?.find(
               (employee) => employee.id === previous.employeeId,
             );
-            if (refreshedEmployees === null) {
+            if (
+              previous.type === "EMPLOYEE_DRAFT_DELETE" &&
+              refreshedEmployees === null
+            ) {
               showTimedModal(
                 {
                   type: "CLEANUP_RESULT",
@@ -210,17 +208,6 @@ function AdminPortal() {
                     "สถานะพนักงานมีการเปลี่ยนแปลงระหว่างการตรวจสอบ กรุณาตรวจสอบข้อมูลอีกครั้ง",
                 },
                 CLEANUP_RESULT_MODAL_MS,
-              );
-            } else {
-              showTimedModal(
-                {
-                  type: "CLEANUP_RESULT",
-                  tone: "SUCCESS",
-                  title: "นำพนักงานออกจากระบบสำเร็จ",
-                  body:
-                    "ลบข้อมูลใบหน้าเรียบร้อยแล้ว ประวัติการใช้งานของพนักงานยังคงถูกเก็บไว้",
-                },
-                CLEANUP_SUCCESS_MODAL_MS,
               );
             }
           }
@@ -459,33 +446,6 @@ function AdminPortal() {
   useEffect(() => {
     if (portalState === "OWN_SESSION") dismissTimedModal();
   }, [dismissTimedModal, portalState]);
-
-  const activeFaceRegistrationSessionId =
-    session?.type === "FACE_REGISTRATION" ? session.id : null;
-  useEffect(() => {
-    setHiddenFaceRegistrationSessionId((hiddenSessionId) =>
-      hiddenSessionId === null ||
-      hiddenSessionId === activeFaceRegistrationSessionId
-        ? hiddenSessionId
-        : null,
-    );
-  }, [activeFaceRegistrationSessionId]);
-
-  const cleanupSession =
-    session?.type === "EMPLOYEE_DRAFT_DELETE" ||
-    session?.type === "EMPLOYEE_OFFBOARDING"
-      ? session
-      : null;
-  const offboardingSession =
-    cleanupSession?.type === "EMPLOYEE_OFFBOARDING" ? cleanupSession : null;
-  const activeCleanupSessionId = offboardingSession?.id ?? null;
-  useEffect(() => {
-    setHiddenCleanupSessionId((hiddenSessionId) =>
-      hiddenSessionId === null || hiddenSessionId === activeCleanupSessionId
-        ? hiddenSessionId
-        : null,
-    );
-  }, [activeCleanupSessionId]);
 
   const secondsRemaining = session
     ? Math.max(
@@ -797,7 +757,7 @@ function AdminPortal() {
                           )}
                       </div>
                     )}
-                    {employee.activeCleanupType !== null && (
+                    {employee.activeCleanupType === "EMPLOYEE_OFFBOARDING" && (
                       <span className="admin-row-status" role="status">
                         Waiting for kiosk biometric cleanup
                       </span>
@@ -882,51 +842,7 @@ function AdminPortal() {
         </div>
       )}
 
-      {offboardingSession !== null &&
-        hiddenCleanupSessionId !== offboardingSession.id &&
-        timedModal === null && (
-          <div className="admin-modal-backdrop">
-            <section
-              className="admin-cleanup-modal"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="admin-cleanup-modal-title"
-              aria-describedby="admin-cleanup-modal-description"
-            >
-              <div className="admin-feedback-modal-icon" aria-hidden="true">
-                ◎
-              </div>
-              <h2 id="admin-cleanup-modal-title">กำลังนำพนักงานออกจากระบบ</h2>
-              <p className="admin-feedback-modal-identity">
-                {offboardingSession.employee?.employeeCode}
-                {offboardingSession.employee?.name
-                  ? ` - ${offboardingSession.employee.name}`
-                  : ""}
-              </p>
-              <p id="admin-cleanup-modal-description">
-                เครื่องกำลังลบข้อมูลใบหน้าที่จัดเก็บไว้
-                <br />
-                ประวัติการใช้งานของพนักงานจะยังคงถูกเก็บไว้
-              </p>
-              <p className="admin-cleanup-countdown" role="timer">
-                หมดอายุใน {secondsRemaining} วินาที
-              </p>
-              <button
-                className="admin-cleanup-close"
-                type="button"
-                onClick={() =>
-                  setHiddenCleanupSessionId(offboardingSession.id)
-                }
-              >
-                ปิด
-              </button>
-            </section>
-          </div>
-        )}
-
-      {portalState === "OWN_SESSION" &&
-        session !== null &&
-        hiddenFaceRegistrationSessionId !== session.id && (
+      {portalState === "OWN_SESSION" && session !== null && (
           <div className="admin-modal-backdrop">
             <section
               className="admin-face-registration-modal"
@@ -957,16 +873,6 @@ function AdminPortal() {
                 </p>
               )}
               <div className="admin-face-registration-actions">
-                <button
-                  className="admin-face-registration-close"
-                  type="button"
-                  disabled={sessionBusy}
-                  onClick={() =>
-                    setHiddenFaceRegistrationSessionId(session.id)
-                  }
-                >
-                  ปิด
-                </button>
                 <button
                   className="admin-face-registration-cancel"
                   type="button"
