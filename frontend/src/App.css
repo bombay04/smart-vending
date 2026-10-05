@@ -1217,7 +1217,7 @@
 
 .admin-face-registration-modal .admin-face-registration-countdown {
   margin-top: 24px;
-  color: #6d28d9;
+  color: #111827;
   font-size: clamp(1.3rem, 4vw, 1.65rem);
   font-weight: 900;
   font-variant-numeric: tabular-nums;

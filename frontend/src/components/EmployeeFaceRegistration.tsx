@@ -26,53 +26,53 @@ const CONTENT: Record<
   { title: string; instruction: string }
 > = {
   CHECKING: {
-    title: "Checking registration",
+    title: "กำลังตรวจสอบการลงทะเบียน",
     instruction: "Checking this Pi for an existing local template...",
   },
   READY: {
-    title: "Ready to register",
+    title: "พร้อมลงทะเบียน",
     instruction:
       "Ask the named employee to face the camera alone, then start registration.",
   },
   CAPTURING: {
-    title: "Capturing face",
+    title: "กำลังบันทึกใบหน้า",
     instruction:
       "Keep one face centered while five stabilized captures are collected.",
   },
   SYNC_REQUIRED: {
-    title: "Status sync required",
+    title: "ต้องซิงค์สถานะ",
     instruction:
       "A local template already exists. Sync its status without capturing again.",
   },
   SYNCING: {
-    title: "Syncing status",
+    title: "กำลังซิงค์สถานะ",
     instruction:
       "The local template remains safe while backend metadata and the session are completed...",
   },
   SYNC_ERROR: {
-    title: "Status sync incomplete",
+    title: "ซิงค์สถานะไม่สำเร็จ",
     instruction:
       "The template is saved locally. Retry sync without recapturing.",
   },
   SUCCESS: {
-    title: "Registration complete",
+    title: "ลงทะเบียนสำเร็จ",
     instruction:
       "The local template was saved and the authorized session is complete.",
   },
   NO_FACE: {
-    title: "No face detected",
+    title: "ไม่พบใบหน้า",
     instruction: "Move into view, improve lighting, and try again.",
   },
   MULTIPLE_FACES: {
-    title: "Multiple faces detected",
+    title: "ตรวจพบหลายใบหน้า",
     instruction: "Only the authorized employee may remain in camera view.",
   },
   BUSY: {
-    title: "Camera busy",
+    title: "กล้องกำลังถูกใช้งาน",
     instruction: "Another scan is using the camera. Try again shortly.",
   },
   PI_UNAVAILABLE: {
-    title: "Pi service unavailable",
+    title: "ไม่สามารถเชื่อมต่อบริการ Pi ได้",
     instruction: "Check the local face service and try again.",
   },
 };
@@ -200,7 +200,6 @@ function EmployeeFaceRegistration({
         className="employee-registration-card"
         aria-labelledby="registration-title"
       >
-        <p className="mode-label mode-label--admin">Authorized Staff Session</p>
         <div
           className={`face-scan-indicator face-scan-indicator--${
             state === "CAPTURING" ? "scanning" : state.toLowerCase()
@@ -209,7 +208,7 @@ function EmployeeFaceRegistration({
         >
           <span>{state === "SUCCESS" ? "✓" : "◎"}</span>
         </div>
-        <h1 id="registration-title">Employee Face Setup</h1>
+        <h1 id="registration-title">ลงทะเบียนใบหน้า</h1>
         <div
           className="employee-registration-status"
           aria-live="polite"

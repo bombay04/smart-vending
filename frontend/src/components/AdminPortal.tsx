@@ -855,7 +855,7 @@ function AdminPortal() {
                 ◎
               </div>
               <h2 id="admin-face-registration-modal-title">
-                กำลังลงทะเบียนใบหน้าพนักงาน
+                กำลังลงทะเบียนใบหน้า
               </h2>
               <p className="admin-feedback-modal-identity">
                 {session.employee?.employeeCode}

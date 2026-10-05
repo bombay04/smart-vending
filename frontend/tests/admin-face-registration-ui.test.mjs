@@ -59,12 +59,18 @@ test("authoritative FACE_REGISTRATION state drives the accessible active modal",
   assert.match(admin, /className="admin-face-registration-modal"/);
   assert.match(admin, /role="dialog"/);
   assert.match(admin, /aria-modal="true"/);
+  assert.match(admin, />\s*กำลังลงทะเบียนใบหน้า\s*</);
+  assert.doesNotMatch(admin, /กำลังลงทะเบียนใบหน้าพนักงาน/);
   assert.match(admin, /หมดอายุใน \{secondsRemaining\} วินาที/);
   assert.match(admin, /handleCancelFaceRegistration/);
   assert.doesNotMatch(admin, /Face registration status/);
   assert.doesNotMatch(admin, /Face registration ACTIVE/);
   assert.match(css, /\.admin-modal-backdrop[\s\S]*position: fixed/);
   assert.match(css, /\.admin-face-registration-modal[\s\S]*width: min\(100%, 560px\)/);
+  assert.match(
+    css,
+    /\.admin-face-registration-modal \.admin-face-registration-countdown \{[\s\S]*?color: #111827;/,
+  );
 });
 
 test("active registration modal cannot be dismissed without cancelling its session", async () => {
@@ -168,6 +174,13 @@ test("Pi face setup keeps Back enabled during capture and reuses the scan indica
 
   assert.match(registration, /className=\{`face-scan-indicator/);
   assert.match(registration, /state === "CAPTURING" \? "scanning"/);
+  assert.match(registration, />ลงทะเบียนใบหน้า<\/h1>/);
+  assert.doesNotMatch(registration, /Authorized Staff Session/i);
+  assert.doesNotMatch(registration, /Employee Face Setup/);
+  assert.match(registration, /title: "กำลังตรวจสอบการลงทะเบียน"/);
+  assert.match(registration, /title: "พร้อมลงทะเบียน"/);
+  assert.match(registration, /title: "กำลังบันทึกใบหน้า"/);
+  assert.match(registration, /title: "ลงทะเบียนสำเร็จ"/);
   assert.match(registration, /activeRequestRef\.current\?\.abort\(\)/);
   assert.match(registration, /await onCancel\(\)/);
   assert.match(registration, /disabled=\{isCancelling\}/);
