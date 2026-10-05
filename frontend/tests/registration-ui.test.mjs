@@ -81,8 +81,11 @@ test("admin draft deletion and offboarding are confirmed session workflows", asy
     source("src/api/employee-auth.ts"),
   ]);
 
-  assert.match(adminPortal, /Delete Draft \{employee\.employeeCode\}\?/);
-  assert.match(
+  assert.doesNotMatch(
+    adminPortal,
+    /Delete Draft \{employee\.employeeCode\}\?/,
+  );
+  assert.doesNotMatch(
     adminPortal,
     /Permanently delete this unused employee after the[\s\S]*kiosk verifies/,
   );

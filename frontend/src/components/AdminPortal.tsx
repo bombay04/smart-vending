@@ -602,11 +602,6 @@ function AdminPortal() {
                       </div>
                     ) : deleteConfirmationId === employee.id ? (
                       <div className="admin-delete-confirmation">
-                        <strong>Delete Draft {employee.employeeCode}?</strong>
-                        <span>
-                          Permanently delete this unused employee after the
-                          kiosk verifies that no face template exists.
-                        </span>
                         <div className="admin-employee-actions">
                           <button
                             className="admin-delete-action"
