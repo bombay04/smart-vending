@@ -23,78 +23,77 @@ type RegistrationState =
 
 const CONTENT: Record<
   RegistrationState,
-  { title: string; instruction: string }
+  { title?: string; instruction?: string }
 > = {
   CHECKING: {
-    title: "Checking registration",
-    instruction: "Checking this Pi for an existing local template...",
+    title: "กำลังตรวจสอบการลงทะเบียน",
+    instruction: "กำลังตรวจสอบข้อมูลใบหน้าที่บันทึกไว้ในเครื่อง...",
   },
-  READY: {
-    title: "Ready to register",
-    instruction:
-      "Ask the named employee to face the camera alone, then start registration.",
-  },
+  READY: { instruction: "กรุณามองตรงไปที่กล้อง" },
   CAPTURING: {
-    title: "Capturing face",
+    title: "กำลังบันทึกใบหน้า",
     instruction:
-      "Keep one face centered while five stabilized captures are collected.",
+      "กรุณามองตรงไปที่กล้องและอยู่ในตำแหน่งเดิม ขณะระบบกำลังบันทึกใบหน้า",
   },
   SYNC_REQUIRED: {
-    title: "Status sync required",
+    title: "ต้องซิงค์สถานะ",
     instruction:
-      "A local template already exists. Sync its status without capturing again.",
+      "พบข้อมูลใบหน้าที่บันทึกไว้แล้ว กรุณาซิงค์สถานะโดยไม่ต้องสแกนใหม่",
   },
   SYNCING: {
-    title: "Syncing status",
-    instruction:
-      "The local template remains safe while backend metadata and the session are completed...",
+    title: "กำลังซิงค์สถานะ",
+    instruction: "กำลังซิงค์สถานะการลงทะเบียน กรุณารอสักครู่...",
   },
   SYNC_ERROR: {
-    title: "Status sync incomplete",
+    title: "ซิงค์สถานะไม่สำเร็จ",
     instruction:
-      "The template is saved locally. Retry sync without recapturing.",
+      "บันทึกข้อมูลใบหน้าแล้ว กรุณาลองซิงค์สถานะอีกครั้งโดยไม่ต้องสแกนใหม่",
   },
   SUCCESS: {
-    title: "Registration complete",
-    instruction:
-      "The local template was saved and the authorized session is complete.",
+    title: "ลงทะเบียนสำเร็จ",
+    instruction: "บันทึกข้อมูลใบหน้าและลงทะเบียนเรียบร้อยแล้ว",
   },
   NO_FACE: {
-    title: "No face detected",
-    instruction: "Move into view, improve lighting, and try again.",
+    title: "ไม่พบใบหน้า",
+    instruction:
+      "กรุณาจัดใบหน้าให้อยู่ในตำแหน่งที่กล้องมองเห็น ปรับแสงให้เหมาะสม แล้วลองอีกครั้ง",
   },
   MULTIPLE_FACES: {
-    title: "Multiple faces detected",
-    instruction: "Only the authorized employee may remain in camera view.",
+    title: "ตรวจพบหลายใบหน้า",
+    instruction: "กรุณาให้พนักงานที่ลงทะเบียนอยู่หน้ากล้องเพียงคนเดียว",
   },
   BUSY: {
-    title: "Camera busy",
-    instruction: "Another scan is using the camera. Try again shortly.",
+    title: "กล้องกำลังถูกใช้งาน",
+    instruction: "มีการใช้งานกล้องอยู่ กรุณาลองอีกครั้งในอีกสักครู่",
   },
   PI_UNAVAILABLE: {
-    title: "Pi service unavailable",
-    instruction: "Check the local face service and try again.",
+    title: "ไม่สามารถเชื่อมต่อบริการ Pi ได้",
+    instruction: "กรุณาตรวจสอบบริการสแกนใบหน้าบนเครื่อง แล้วลองอีกครั้ง",
   },
 };
 
 interface EmployeeFaceRegistrationProps {
   session: KioskSession;
-  onCancel: () => void;
+  onCancel: () => Promise<void>;
+  onSessionEnded: () => void;
   onCompleted: () => void;
 }
 
 function EmployeeFaceRegistration({
   session,
   onCancel,
+  onSessionEnded,
   onCompleted,
 }: EmployeeFaceRegistrationProps) {
   const employee = session.employee;
   const [state, setState] = useState<RegistrationState>("CHECKING");
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const activeRequestRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (employee === null) {
-      onCancel();
+      onSessionEnded();
       return undefined;
     }
     const controller = new AbortController();
@@ -110,7 +109,7 @@ function EmployeeFaceRegistration({
         if (!controller.signal.aborted) setState("PI_UNAVAILABLE");
       });
     return () => controller.abort();
-  }, [employee, onCancel]);
+  }, [employee, onSessionEnded]);
 
   useEffect(() => {
     if (state !== "SUCCESS") return undefined;
@@ -147,7 +146,7 @@ function EmployeeFaceRegistration({
         authorizedSession.type !== "FACE_REGISTRATION" ||
         authorizedSession.employee?.id !== employee.id
       ) {
-        onCancel();
+        onSessionEnded();
         return;
       }
       await registerEmployeeFace(employee.employeeCode, controller.signal);
@@ -161,6 +160,22 @@ function EmployeeFaceRegistration({
             error.status === "UNAVAILABLE" ? "PI_UNAVAILABLE" : error.status,
           );
       } else setState("PI_UNAVAILABLE");
+    }
+  }
+
+  async function handleCancel() {
+    if (isCancelling) return;
+    activeRequestRef.current?.abort();
+    setCancelError(null);
+    setIsCancelling(true);
+    try {
+      await onCancel();
+    } catch {
+      setCancelError(
+        "ไม่สามารถยกเลิกการลงทะเบียนใบหน้าได้ กรุณาตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง",
+      );
+    } finally {
+      setIsCancelling(false);
     }
   }
 
@@ -180,18 +195,30 @@ function EmployeeFaceRegistration({
         className="employee-registration-card"
         aria-labelledby="registration-title"
       >
-        <p className="mode-label mode-label--admin">Authorized Staff Session</p>
-        <h1 id="registration-title">Employee Face Setup</h1>
+        <div
+          className={`face-scan-indicator face-scan-indicator--${
+            state === "CAPTURING" ? "scanning" : state.toLowerCase()
+          }`}
+          aria-hidden="true"
+        >
+          <span>{state === "SUCCESS" ? "✓" : "◎"}</span>
+        </div>
+        <h1 id="registration-title">ลงทะเบียนใบหน้า</h1>
         <div
           className="employee-registration-status"
           aria-live="polite"
           aria-busy={busy}
         >
-          <h2>{CONTENT[state].title}</h2>
-          <p>{CONTENT[state].instruction}</p>
+          {CONTENT[state].title && <h2>{CONTENT[state].title}</h2>}
+          {CONTENT[state].instruction && <p>{CONTENT[state].instruction}</p>}
           <p className="employee-registration-identity">
-            {employee.name} - {employee.employeeCode}
+            {employee.employeeCode} {employee.name}
           </p>
+          {cancelError && (
+            <p className="employee-registration-error" role="alert">
+              {cancelError}
+            </p>
+          )}
         </div>
         <div className="employee-registration-actions">
           {(state === "READY" || retryCapture) && (
@@ -200,7 +227,7 @@ function EmployeeFaceRegistration({
               type="button"
               onClick={() => void capture()}
             >
-              {retryCapture ? "Try Capture Again" : "Start Face Registration"}
+              {retryCapture ? "ลองสแกนอีกครั้ง" : "เริ่มสแกนใบหน้า"}
             </button>
           )}
           {(state === "SYNC_REQUIRED" || state === "SYNC_ERROR") && (
@@ -210,18 +237,18 @@ function EmployeeFaceRegistration({
               onClick={() => void syncCompletion()}
             >
               {state === "SYNC_ERROR"
-                ? "Retry Status Sync"
-                : "Sync Registration Status"}
+                ? "ลองซิงค์สถานะอีกครั้ง"
+                : "ซิงค์สถานะการลงทะเบียน"}
             </button>
           )}
         </div>
         <button
           className="employee-registration-back"
           type="button"
-          disabled={busy}
-          onClick={onCancel}
+          disabled={isCancelling}
+          onClick={() => void handleCancel()}
         >
-          Back to Customer Mode
+          {isCancelling ? "กำลังกลับสู่หน้าหลัก..." : "กลับสู่หน้าหลัก"}
         </button>
       </section>
     </main>

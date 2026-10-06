@@ -47,23 +47,28 @@ test("the remote portals separate staff restock from admin employee workflows", 
   assert.match(staffPortal, /จัดการเติมสินค้า/);
   assert.match(staffPortal, /เริ่มเติมสินค้า/);
   assert.match(staffPortal, /cancelKioskSession/);
-  assert.doesNotMatch(staffPortal, /Add Employee/);
-  assert.doesNotMatch(staffPortal, /Employee directory/);
-  assert.doesNotMatch(staffPortal, /Face Setup Required/);
-  assert.doesNotMatch(staffPortal, /Start Face Registration/);
+  assert.doesNotMatch(staffPortal, /เพิ่มพนักงาน/);
+  assert.doesNotMatch(staffPortal, /รายชื่อพนักงาน/);
+  assert.doesNotMatch(staffPortal, /ต้องลงทะเบียนใบหน้า/);
+  assert.doesNotMatch(staffPortal, /เริ่มลงทะเบียนใบหน้า/);
   assert.doesNotMatch(staffPortal, /startFaceRegistrationSession/);
 
-  assert.match(adminPortal, /Admin \/ Employee Management/);
+  assert.match(adminPortal, /<h1>ระบบจัดการพนักงาน<\/h1>/);
+  assert.match(adminPortal, /<h2 id="add-employee-title">เพิ่มพนักงาน<\/h2>/);
+  assert.match(adminPortal, />กรอกชื่อพนักงาน<\/label>/);
+  assert.match(adminPortal, /\+ เพิ่มพนักงาน/);
+  assert.match(adminPortal, /<h2 id="employee-list-title">รายชื่อพนักงาน<\/h2>/);
   assert.match(adminPortal, /id="admin-employee-name"/);
   assert.match(adminPortal, /fetchEmployeesForFaceRegistration/);
   assert.match(adminPortal, /createEmployee\(name/);
-  assert.match(adminPortal, /Face Setup Required/);
-  assert.match(adminPortal, /Start Face Registration/);
-  assert.match(adminPortal, />\s*Edit\s*</);
-  assert.match(adminPortal, /"Deactivate"/);
-  assert.match(adminPortal, /"Activate"/);
-  assert.match(adminPortal, />\s*Offboard\s*</);
-  assert.match(adminPortal, />\s*Delete Draft\s*</);
+  assert.match(adminPortal, /ต้องลงทะเบียนใบหน้า/);
+  assert.match(adminPortal, /เริ่มลงทะเบียนใบหน้า/);
+  assert.match(adminPortal, />\s*แก้ไข\s*</);
+  assert.match(adminPortal, /"ปิดใช้งาน"/);
+  assert.match(adminPortal, /"เปิดใช้งาน"/);
+  assert.match(adminPortal, />\s*นำออกจากระบบ\s*</);
+  assert.match(adminPortal, />\s*ลบแบบร่าง\s*</);
+  assert.doesNotMatch(adminPortal, />\s*Refresh\s*</);
   assert.match(adminPortal, /handleSaveName/);
   assert.match(adminPortal, /handleActiveChange/);
   assert.match(employeeApi, /method: "PATCH"/);
@@ -81,22 +86,29 @@ test("admin draft deletion and offboarding are confirmed session workflows", asy
     source("src/api/employee-auth.ts"),
   ]);
 
-  assert.match(adminPortal, /Delete Draft \{employee\.employeeCode\}\?/);
-  assert.match(
+  assert.doesNotMatch(
+    adminPortal,
+    /Delete Draft \{employee\.employeeCode\}\?/,
+  );
+  assert.doesNotMatch(
     adminPortal,
     /Permanently delete this unused employee after the[\s\S]*kiosk verifies/,
   );
-  assert.match(adminPortal, /Confirm Delete Draft/);
-  assert.match(adminPortal, /Offboard \{employee\.employeeCode\}\?/);
-  assert.match(adminPortal, /Confirm Offboard/);
+  assert.match(adminPortal, /ยืนยันการลบแบบร่าง/);
+  assert.match(adminPortal, /ยืนยันการนำออก/);
+  assert.match(adminPortal, />\s*ยกเลิก\s*</);
+  assert.doesNotMatch(adminPortal, /Offboard \{employee\.employeeCode\}\?/);
+  assert.doesNotMatch(
+    adminPortal,
+    /Disable access and remove this employee(?:&apos;|')s face template/,
+  );
+  assert.doesNotMatch(adminPortal, /History is retained\./);
   assert.match(adminPortal, /setDeleteConfirmationId\(employee\.id\)/);
   assert.match(adminPortal, /startEmployeeDraftDelete\(employee\.id\)/);
   assert.match(adminPortal, /offboardEmployee\(employee\.id\)/);
   assert.match(adminPortal, /Waiting for kiosk biometric cleanup/);
-  assert.match(
-    adminPortal,
-    /Local face data exists; the employee was preserved and deactivated/,
-  );
+  assert.match(adminPortal, /type: "CLEANUP_RESULT"/);
+  assert.match(adminPortal, /tone: "WARNING"/);
   assert.match(adminPortal, /await loadEmployees\(\)/);
   assert.match(adminPortal, /rowErrors\[employee\.id\]/);
   assert.match(
@@ -113,7 +125,7 @@ test("admin draft deletion and offboarding are confirmed session workflows", asy
 test("registered or used employees never receive the draft hard-delete control", async () => {
   const adminPortal = await source("src/components/AdminPortal.tsx");
   assert.match(adminPortal, /\{employee\.canDeleteDraft && \(/);
-  assert.match(adminPortal, /Delete Draft/);
+  assert.match(adminPortal, /ลบแบบร่าง/);
   assert.match(adminPortal, /employee\.activeCleanupType !== null/);
 });
 
@@ -121,7 +133,7 @@ test("inactive employees are not offered face registration", async () => {
   const adminPortal = await source("src/components/AdminPortal.tsx");
   assert.match(
     adminPortal,
-    /!employee\.faceRegistered &&[\s\S]*employee\.isActive &&[\s\S]*Start Face Registration/,
+    /!employee\.faceRegistered &&[\s\S]*employee\.isActive &&[\s\S]*เริ่มลงทะเบียนใบหน้า/,
   );
 });
 
@@ -140,7 +152,7 @@ test("local face setup uses the session-bound employee and metadata-only sync re
   assert.match(registration, /authorizedSession\?\.id !== session\.id/);
   assert.match(registration, /retryCapture/);
   assert.match(registration, /SYNC_ERROR/);
-  assert.match(registration, /Retry Status Sync/);
+  assert.match(registration, /ลองซิงค์สถานะอีกครั้ง/);
   assert.doesNotMatch(registration, /type="text"/);
 });
 
