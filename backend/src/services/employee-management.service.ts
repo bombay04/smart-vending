@@ -5,6 +5,8 @@ import { PILOT_KIOSK_MACHINE_ID } from "./kiosk-session.service";
 const EMPLOYEE_CODE_PATTERN = /^EMP(\d+)$/;
 const MAX_EMPLOYEE_NAME_LENGTH = 120;
 const MAX_CREATE_ATTEMPTS = 3;
+export const EMPLOYEE_NAME_CONFLICT_CODE = "EMPLOYEE_NAME_CONFLICT";
+const EMPLOYEE_NAME_CONFLICT_MESSAGE = "An employee with this name already exists.";
 const UNSAFE_DELETE_MESSAGE =
   "This employee has enrollment or usage history and cannot be deleted. Deactivate the employee instead.";
 
@@ -65,6 +67,21 @@ export function normalizeEmployeeName(name: unknown): string {
     throw new HttpError(`name must contain 1-${MAX_EMPLOYEE_NAME_LENGTH} characters.`, 400);
   }
   return normalizedName;
+}
+
+export function normalizeEmployeeNameForComparison(name: string): string {
+  return name.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
+}
+
+export function assertUniqueEmployeeName(candidateName: string, existingNames: string[]): void {
+  const comparisonName = normalizeEmployeeNameForComparison(candidateName);
+  if (
+    existingNames.some(
+      (existingName) => normalizeEmployeeNameForComparison(existingName) === comparisonName,
+    )
+  ) {
+    throw new HttpError(EMPLOYEE_NAME_CONFLICT_MESSAGE, 409, EMPLOYEE_NAME_CONFLICT_CODE);
+  }
 }
 
 export function formatEmployeeCode(employeeCodeNumber: bigint): string {
@@ -191,6 +208,13 @@ export async function createEmployee(name: unknown): Promise<EmployeeManagementR
   return createEmployeeWithRetry(name, (normalizedName) =>
     prisma.$transaction(
       async (transaction) => {
+        const existingEmployees = await transaction.employee.findMany({
+          select: { name: true },
+        });
+        assertUniqueEmployeeName(
+          normalizedName,
+          existingEmployees.map((employee) => employee.name),
+        );
         const [sequenceValue] = await transaction.$queryRaw<
           Array<{ employeeCodeNumber: bigint }>
         >`SELECT nextval('"EmployeeCodeNumber_seq"') AS "employeeCodeNumber"`;

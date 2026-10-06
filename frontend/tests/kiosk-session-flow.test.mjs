@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { decideKioskSessionAction } from "../src/kiosk-session-flow.mjs";
+import {
+  decideKioskSessionAction,
+  didKioskSessionEnd,
+} from "../src/kiosk-session-flow.mjs";
 import { getPortalSessionState } from "../src/portal-session-state.mjs";
 import { cancelRestockSessionAndCleanup } from "../src/restock-session-cleanup.mjs";
 
@@ -64,6 +67,36 @@ test("employee cleanup is background-only and waits for safe customer idle", () 
 });
 test("cancelled or expired sessions exit an unfinished staff flow", () => {
   assert.equal(action({ currentMode: "employee-auth" }), "EXIT_STAFF");
+});
+
+test("a face-registration active-to-ended transition is reported once", () => {
+  assert.equal(
+    didKioskSessionEnd(registration, null, "FACE_REGISTRATION"),
+    true,
+  );
+  assert.equal(
+    didKioskSessionEnd(registration, registration, "FACE_REGISTRATION"),
+    false,
+  );
+  assert.equal(didKioskSessionEnd(null, null, "FACE_REGISTRATION"), false);
+  assert.equal(
+    didKioskSessionEnd(registration, restock, "FACE_REGISTRATION"),
+    true,
+  );
+  assert.equal(
+    didKioskSessionEnd(draftDelete, null, "FACE_REGISTRATION"),
+    false,
+  );
+
+  let reloadCount = 0;
+  let previous = registration;
+  for (const current of [null, null]) {
+    if (didKioskSessionEnd(previous, current, "FACE_REGISTRATION")) {
+      reloadCount += 1;
+    }
+    previous = current;
+  }
+  assert.equal(reloadCount, 1);
 });
 
 test("Pi restock exits cancel backend state before clearing local state", async () => {

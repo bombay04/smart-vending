@@ -27,6 +27,7 @@ export class EmployeeManagementError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code: string | null = null,
   ) {
     super(message);
     this.name = "EmployeeManagementError";
@@ -250,6 +251,7 @@ async function readEmployeeManagementError(
   response: Response,
 ): Promise<EmployeeManagementError> {
   let message = "Employee request failed. Please try again.";
+  let code: string | null = null;
   try {
     const responseData = (await response.json()) as unknown;
     if (
@@ -261,10 +263,19 @@ async function readEmployeeManagementError(
     ) {
       message = responseData.error;
     }
+    if (
+      typeof responseData === "object" &&
+      responseData !== null &&
+      "code" in responseData &&
+      typeof responseData.code === "string" &&
+      responseData.code.length > 0
+    ) {
+      code = responseData.code;
+    }
   } catch {
     // Keep the safe fallback message when the backend response is not JSON.
   }
-  return new EmployeeManagementError(response.status, message);
+  return new EmployeeManagementError(response.status, message, code);
 }
 
 export async function createEmployee(

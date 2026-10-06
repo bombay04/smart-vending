@@ -15,3 +15,9 @@ export function decideKioskSessionAction(input: {
   acceptedSessionIds: Set<number>;
   workflowCompleted: boolean;
 }): KioskSessionAction;
+
+export function didKioskSessionEnd(
+  previous: KioskSession | null,
+  current: KioskSession | null,
+  sessionType: KioskSession["type"],
+): boolean;
