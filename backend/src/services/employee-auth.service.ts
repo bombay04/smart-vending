@@ -11,6 +11,7 @@ interface EmployeeAuthenticationRecord {
 type FindEmployeeByCode = (employeeCode: string) => Promise<EmployeeAuthenticationRecord | null>;
 interface EmployeeRegistrationListRecord extends EmployeeAuthenticationRecord {
   faceRegistered: boolean;
+  offboardedAt?: Date | null;
   restockLogCount?: number;
   kioskSessions?: Array<{
     type: "RESTOCK_AUTH" | "FACE_REGISTRATION" | "EMPLOYEE_DRAFT_DELETE" | "EMPLOYEE_OFFBOARDING";
@@ -64,35 +65,38 @@ export async function authenticateEmployee(employeeCode: unknown) {
 export async function listEmployeesForFaceRegistrationWithLookup(listEmployees: ListEmployees) {
   const employees = await listEmployees();
   const now = new Date();
-  return employees.map((employee) => ({
-    id: employee.id,
-    employeeCode: employee.employeeCode,
-    name: employee.name,
-    isActive: employee.isActive,
-    faceRegistered: employee.faceRegistered,
-    canDeleteDraft:
-      !employee.faceRegistered &&
-      (employee.restockLogCount ?? 0) === 0 &&
-      (employee.kioskSessions ?? []).every(
-        (session) =>
-          (session.type === "FACE_REGISTRATION" &&
-            (session.status === "CANCELLED" || session.status === "EXPIRED")) ||
-          session.type === "EMPLOYEE_DRAFT_DELETE",
-      ),
-    activeCleanupType:
-      employee.kioskSessions?.find(
-        (session) =>
-          session.status === "ACTIVE" &&
-          session.expiresAt > now &&
-          (session.type === "EMPLOYEE_DRAFT_DELETE" || session.type === "EMPLOYEE_OFFBOARDING"),
-      )?.type ?? null,
-  }));
+  return employees
+    .filter((employee) => employee.offboardedAt == null)
+    .map((employee) => ({
+      id: employee.id,
+      employeeCode: employee.employeeCode,
+      name: employee.name,
+      isActive: employee.isActive,
+      faceRegistered: employee.faceRegistered,
+      canDeleteDraft:
+        !employee.faceRegistered &&
+        (employee.restockLogCount ?? 0) === 0 &&
+        (employee.kioskSessions ?? []).every(
+          (session) =>
+            (session.type === "FACE_REGISTRATION" &&
+              (session.status === "CANCELLED" || session.status === "EXPIRED")) ||
+            session.type === "EMPLOYEE_DRAFT_DELETE",
+        ),
+      activeCleanupType:
+        employee.kioskSessions?.find(
+          (session) =>
+            session.status === "ACTIVE" &&
+            session.expiresAt > now &&
+            (session.type === "EMPLOYEE_DRAFT_DELETE" || session.type === "EMPLOYEE_OFFBOARDING"),
+        )?.type ?? null,
+    }));
 }
 
 export async function listEmployeesForFaceRegistration() {
   return listEmployeesForFaceRegistrationWithLookup(() =>
     prisma.employee
       .findMany({
+        where: { offboardedAt: null },
         orderBy: { employeeCode: "asc" },
         select: {
           id: true,
@@ -100,6 +104,7 @@ export async function listEmployeesForFaceRegistration() {
           name: true,
           isActive: true,
           faceRegistered: true,
+          offboardedAt: true,
           _count: { select: { restockLogs: true } },
           kioskSessions: {
             select: { type: true, status: true, expiresAt: true },
@@ -113,6 +118,7 @@ export async function listEmployeesForFaceRegistration() {
           name: employee.name,
           isActive: employee.isActive,
           faceRegistered: employee.faceRegistered,
+          offboardedAt: employee.offboardedAt,
           restockLogCount: employee._count.restockLogs,
           kioskSessions: employee.kioskSessions,
         })),

@@ -32,6 +32,7 @@ export class KioskSessionRequestError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code: string | null = null,
   ) {
     super(message);
     this.name = "KioskSessionRequestError";
@@ -98,6 +99,7 @@ async function readSession(response: Response): Promise<KioskSession> {
   const payload = (await response.json()) as {
     session?: unknown;
     error?: unknown;
+    code?: unknown;
   };
   if (!response.ok || !isKioskSession(payload.session)) {
     throw new KioskSessionRequestError(
@@ -105,6 +107,7 @@ async function readSession(response: Response): Promise<KioskSession> {
       typeof payload.error === "string"
         ? payload.error
         : "Kiosk session request failed.",
+      typeof payload.code === "string" ? payload.code : null,
     );
   }
   return payload.session;

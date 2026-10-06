@@ -55,6 +55,30 @@ test("busy kiosk feedback blocks only session creation and can close or retry", 
   assert.match(kioskApi, /response\.status/);
 });
 
+test("terminal lifecycle conflicts refresh stale admin rows without showing success", async () => {
+  const [admin, employeeApi, kioskApi] = await Promise.all([
+    source("src/components/AdminPortal.tsx"),
+    source("src/api/employee-auth.ts"),
+    source("src/api/kiosk-session.ts"),
+  ]);
+
+  assert.match(admin, /const EMPLOYEE_OFFBOARDED_CODE = "EMPLOYEE_OFFBOARDED"/);
+  assert.match(
+    admin,
+    /isEmployeeOffboardedError[\s\S]*error\.status === 409[\s\S]*error\.code === EMPLOYEE_OFFBOARDED_CODE/,
+  );
+  assert.match(
+    admin,
+    /handleActiveChange[\s\S]*isEmployeeOffboardedError\(error\)[\s\S]*await loadEmployees\(\)/,
+  );
+  assert.match(
+    admin,
+    /handleStartFaceRegistration[\s\S]*isEmployeeOffboardedError\(error\)[\s\S]*await loadEmployees\(\)/,
+  );
+  assert.match(employeeApi, /readonly code: string \| null = null/);
+  assert.match(kioskApi, /typeof payload\.code === "string" \? payload\.code : null/);
+});
+
 test("authoritative FACE_REGISTRATION state drives the accessible active modal", async () => {
   const [admin, css] = await Promise.all([
     source("src/components/AdminPortal.tsx"),

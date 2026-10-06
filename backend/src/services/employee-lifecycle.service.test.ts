@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { HttpError } from "../utils/http-error";
 import {
+  buildOffboardFinalizationData,
+  buildOffboardStartData,
   draftDeleteIneligibility,
   parseDraftDeleteResult,
   requireEmptyLifecycleBody,
@@ -19,6 +21,7 @@ function candidate(overrides: Partial<DraftDeleteCandidate> = {}): DraftDeleteCa
     name: "Draft Employee",
     isActive: true,
     faceRegistered: false,
+    offboardedAt: null,
     restockLogCount: 0,
     sessions: [],
     ...overrides,
@@ -35,6 +38,19 @@ function session(
 
 test("pristine unused employee can start Pi-verified draft deletion", () => {
   assert.equal(draftDeleteIneligibility(candidate(), NOW), null);
+});
+
+test("offboard start revokes access without marking terminal state until cleanup succeeds", () => {
+  const startData = buildOffboardStartData();
+  assert.deepEqual(startData, { isActive: false });
+  assert.equal("offboardedAt" in startData, false);
+
+  const finalized = buildOffboardFinalizationData(NOW);
+  assert.deepEqual(finalized, {
+    isActive: false,
+    faceRegistered: false,
+    offboardedAt: NOW,
+  });
 });
 
 test("restock and completed registration history permanently block draft deletion", () => {
@@ -109,8 +125,8 @@ test("cleanup request parsers accept only narrow metadata bodies", () => {
 
 test("lifecycle persistence keeps history, reconciles template presence, and deletes only disposable rows", async () => {
   const source = await readFile(resolve("src/services/employee-lifecycle.service.ts"), "utf8");
-  assert.match(source, /data: \{ isActive: false \}/);
-  assert.match(source, /data: \{ isActive: false, faceRegistered: false \}/);
+  assert.match(source, /data: buildOffboardStartData\(\)/);
+  assert.match(source, /data: buildOffboardFinalizationData\(now\)/);
   assert.match(source, /data: \{ isActive: false, faceRegistered: true \}/);
   assert.match(source, /type: "FACE_REGISTRATION", status: \{ in: \["CANCELLED", "EXPIRED"\] \}/);
   assert.match(source, /transaction\.kioskSession\.deleteMany[\s\S]*transaction\.employee\.delete/);

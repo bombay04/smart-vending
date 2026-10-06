@@ -1,6 +1,7 @@
 import type { KioskSessionStatus, KioskSessionType, Prisma } from "../../generated/prisma-client";
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../utils/http-error";
+import { assertEmployeeNotOffboarded } from "./employee-lifecycle-state";
 
 export const PILOT_KIOSK_MACHINE_ID = process.env.KIOSK_MACHINE_ID?.trim() || "PILOT_KIOSK";
 export const KIOSK_SESSION_TTL_MS = 5 * 60 * 1000;
@@ -32,7 +33,9 @@ export interface KioskSessionStore {
     now: Date,
     expiresAt: Date,
   ): Promise<KioskSessionRecord>;
-  findEmployee(employeeId: number): Promise<(KioskSessionEmployee & { isActive: boolean }) | null>;
+  findEmployee(
+    employeeId: number,
+  ): Promise<(KioskSessionEmployee & { isActive: boolean; offboardedAt?: Date | null }) | null>;
   transition(
     sessionId: number,
     nextStatus: "COMPLETED" | "CANCELLED",
@@ -101,7 +104,7 @@ const prismaKioskSessionStore: KioskSessionStore = {
   findEmployee(employeeId) {
     return prisma.employee.findUnique({
       where: { id: employeeId },
-      select: { id: true, employeeCode: true, name: true, isActive: true },
+      select: { id: true, employeeCode: true, name: true, isActive: true, offboardedAt: true },
     });
   },
 
@@ -190,6 +193,7 @@ export async function createFaceRegistrationSessionWithStore(
   const employeeId = positiveInteger(employeeIdValue, "employeeId");
   const employee = await store.findEmployee(employeeId);
   if (!employee) throw new HttpError("Employee not found.", 404);
+  assertEmployeeNotOffboarded(employee);
   if (!employee.isActive) throw new HttpError("Employee is inactive.", 409);
   const expiresAt = new Date(now.getTime() + KIOSK_SESSION_TTL_MS);
   return safeSession(

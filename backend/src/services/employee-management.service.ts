@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../utils/http-error";
+import { assertEmployeeNotOffboarded } from "./employee-lifecycle-state";
 import { PILOT_KIOSK_MACHINE_ID } from "./kiosk-session.service";
 
 const EMPLOYEE_CODE_PATTERN = /^EMP(\d+)$/;
@@ -37,13 +38,16 @@ export interface EmployeeUpdateData {
 }
 
 interface EmployeeUpdateStore {
-  findEmployee(employeeId: number): Promise<EmployeeManagementRecord | null>;
+  findEmployee(
+    employeeId: number,
+  ): Promise<(EmployeeManagementRecord & { offboardedAt?: Date | null }) | null>;
   countActiveFaceRegistrationSessions(employeeId: number, now: Date): Promise<number>;
   countActiveCleanupSessions?(employeeId: number, now: Date): Promise<number>;
   updateEmployee(employeeId: number, data: EmployeeUpdateData): Promise<EmployeeManagementRecord>;
 }
 
 interface EmployeeDeleteCandidate extends EmployeeManagementRecord {
+  offboardedAt: Date | null;
   restockLogCount: number;
   kioskSessionCount: number;
 }
@@ -226,6 +230,7 @@ export async function createEmployee(name: unknown): Promise<EmployeeManagementR
     prisma.$transaction(
       async (transaction) => {
         const existingEmployees = await transaction.employee.findMany({
+          where: { offboardedAt: null },
           select: { name: true },
         });
         assertUniqueEmployeeName(
@@ -268,6 +273,7 @@ export async function updateEmployeeWithStore(
   const data = parseUpdateEmployeeRequest(body);
   const employee = await store.findEmployee(employeeId);
   if (!employee) throw new HttpError("Employee not found.", 404);
+  assertEmployeeNotOffboarded(employee);
 
   if (employee.isActive && data.isActive === false) {
     const activeRegistrationSessions = await store.countActiveFaceRegistrationSessions(
@@ -324,6 +330,7 @@ export async function updateEmployee(
                 name: true,
                 isActive: true,
                 faceRegistered: true,
+                offboardedAt: true,
               },
             }),
           countActiveFaceRegistrationSessions: (employeeId, now) =>
@@ -369,6 +376,7 @@ export async function deleteEmployeeWithStore(
   const employeeId = parseEmployeeId(employeeIdValue);
   const employee = await store.findEmployee(employeeId);
   if (!employee) throw new HttpError("Employee not found.", 404);
+  assertEmployeeNotOffboarded(employee);
   if (employee.faceRegistered || employee.restockLogCount > 0 || employee.kioskSessionCount > 0) {
     throw new HttpError(UNSAFE_DELETE_MESSAGE, 409);
   }
@@ -394,6 +402,7 @@ export async function deleteEmployee(employeeIdValue: unknown): Promise<void> {
                 name: true,
                 isActive: true,
                 faceRegistered: true,
+                offboardedAt: true,
                 _count: { select: { restockLogs: true, kioskSessions: true } },
               },
             });
@@ -404,6 +413,7 @@ export async function deleteEmployee(employeeIdValue: unknown): Promise<void> {
               name: employee.name,
               isActive: employee.isActive,
               faceRegistered: employee.faceRegistered,
+              offboardedAt: employee.offboardedAt,
               restockLogCount: employee._count.restockLogs,
               kioskSessionCount: employee._count.kioskSessions,
             };
@@ -422,13 +432,17 @@ export async function deleteEmployee(employeeIdValue: unknown): Promise<void> {
 
 export async function completeFaceRegistrationWithUpdate(
   requestBody: unknown,
-  completeAttempt: (sessionId: number) => Promise<EmployeeManagementRecord | null>,
+  completeAttempt: (
+    sessionId: number,
+  ) => Promise<(EmployeeManagementRecord & { offboardedAt: Date | null }) | null>,
 ): Promise<EmployeeManagementRecord> {
   const sessionId = parseFaceRegistrationCompleteRequest(requestBody);
   const employee = await completeAttempt(sessionId);
-  if (employee === null || !employee.isActive) {
+  if (employee === null) {
     throw new HttpError("Employee is unknown or inactive.", 401);
   }
+  assertEmployeeNotOffboarded(employee);
+  if (!employee.isActive) throw new HttpError("Employee is unknown or inactive.", 401);
   return toSafeEmployee({ ...employee, faceRegistered: true });
 }
 
@@ -456,10 +470,17 @@ export async function completeFaceRegistration(
         throw new HttpError("A valid active face-registration session is required.", 403);
       }
       const updateResult = await transaction.employee.updateMany({
-        where: { id: session.employeeId, isActive: true },
+        where: { id: session.employeeId, isActive: true, offboardedAt: null },
         data: { faceRegistered: true },
       });
-      if (updateResult.count !== 1) return null;
+      if (updateResult.count !== 1) {
+        const employee = await transaction.employee.findUnique({
+          where: { id: session.employeeId },
+          select: { offboardedAt: true },
+        });
+        if (employee) assertEmployeeNotOffboarded(employee);
+        return null;
+      }
       await transaction.kioskSession.update({
         where: { id: session.id },
         data: { status: "COMPLETED", completedAt: now },
@@ -472,6 +493,7 @@ export async function completeFaceRegistration(
           name: true,
           isActive: true,
           faceRegistered: true,
+          offboardedAt: true,
         },
       });
     }),

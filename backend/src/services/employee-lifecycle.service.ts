@@ -1,6 +1,7 @@
 import type { KioskSessionStatus, KioskSessionType, Prisma } from "../../generated/prisma-client";
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../utils/http-error";
+import { assertEmployeeNotOffboarded } from "./employee-lifecycle-state";
 import {
   KIOSK_SESSION_TTL_MS,
   PILOT_KIOSK_MACHINE_ID,
@@ -15,6 +16,11 @@ import {
 const DRAFT_DELETE_CONFLICT =
   "This employee is not an unused draft. Preserve the employee and use Deactivate or Offboard instead.";
 
+export const buildOffboardStartData = () => ({ isActive: false }) as const;
+
+export const buildOffboardFinalizationData = (offboardedAt: Date) =>
+  ({ isActive: false, faceRegistered: false, offboardedAt }) as const;
+
 export interface DraftDeleteSessionSummary {
   id: number;
   type: KioskSessionType;
@@ -23,6 +29,7 @@ export interface DraftDeleteSessionSummary {
 }
 
 export interface DraftDeleteCandidate extends EmployeeManagementRecord {
+  offboardedAt: Date | null;
   restockLogCount: number;
   sessions: DraftDeleteSessionSummary[];
 }
@@ -80,6 +87,7 @@ const employeeSelect = {
   name: true,
   isActive: true,
   faceRegistered: true,
+  offboardedAt: true,
 } as const;
 
 const lifecycleSessionSelect = {
@@ -117,6 +125,7 @@ async function loadDraftCandidate(transaction: Prisma.TransactionClient, employe
     name: employee.name,
     isActive: employee.isActive,
     faceRegistered: employee.faceRegistered,
+    offboardedAt: employee.offboardedAt,
     restockLogCount: employee._count.restockLogs,
     sessions: employee.kioskSessions,
   } satisfies DraftDeleteCandidate;
@@ -156,6 +165,7 @@ async function createEmployeeLifecycleSession(
         if (type === "EMPLOYEE_DRAFT_DELETE") {
           const employee = await loadDraftCandidate(transaction, employeeId);
           if (!employee) throw new HttpError("Employee not found.", 404);
+          assertEmployeeNotOffboarded(employee);
           const reason = draftDeleteIneligibility(employee, now);
           if (reason) throw new HttpError(reason, 409);
         } else {
@@ -164,6 +174,7 @@ async function createEmployeeLifecycleSession(
             select: employeeSelect,
           });
           if (!employee) throw new HttpError("Employee not found.", 404);
+          assertEmployeeNotOffboarded(employee);
           const activeEmployeeWorkflow = await transaction.kioskSession.count({
             where: { employeeId, status: "ACTIVE", expiresAt: { gt: now } },
           });
@@ -186,7 +197,7 @@ async function createEmployeeLifecycleSession(
         if (type === "EMPLOYEE_OFFBOARDING") {
           await transaction.employee.update({
             where: { id: employeeId },
-            data: { isActive: false },
+            data: buildOffboardStartData(),
           });
         }
         const session = await transaction.kioskSession.create({
@@ -266,7 +277,7 @@ export async function completeOffboarding(sessionIdValue: unknown) {
         }
         const employee = await transaction.employee.update({
           where: { id: session.employeeId! },
-          data: { isActive: false, faceRegistered: false },
+          data: buildOffboardFinalizationData(now),
           select: employeeSelect,
         });
         const completed = await transaction.kioskSession.update({
@@ -303,6 +314,12 @@ export async function finalizeDraftDelete(sessionIdValue: unknown, body: unknown
           throw new HttpError(`Kiosk session is already ${session.status.toLowerCase()}.`, 409);
         }
         const employeeId = session.employeeId!;
+        const lifecycleEmployee = await transaction.employee.findUnique({
+          where: { id: employeeId },
+          select: { offboardedAt: true },
+        });
+        if (!lifecycleEmployee) throw new HttpError("Employee not found.", 404);
+        assertEmployeeNotOffboarded(lifecycleEmployee);
         if (templateExists) {
           const employee = await transaction.employee.update({
             where: { id: employeeId },
@@ -318,6 +335,7 @@ export async function finalizeDraftDelete(sessionIdValue: unknown, body: unknown
 
         const candidate = await loadDraftCandidate(transaction, employeeId);
         if (!candidate) throw new HttpError("Employee not found.", 404);
+        assertEmployeeNotOffboarded(candidate);
         const reason = draftDeleteIneligibility(candidate, now, session.id);
         if (reason) {
           await transaction.kioskSession.update({
