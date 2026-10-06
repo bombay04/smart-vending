@@ -95,6 +95,7 @@ model Employee {
   faceEmbedding  Json?
   faceRegistered Boolean        @default(false)
   isActive       Boolean        @default(true)
+  offboardedAt   DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   restockLogs    RestockLog[]

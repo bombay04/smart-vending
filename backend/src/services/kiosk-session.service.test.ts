@@ -16,8 +16,36 @@ const NOW = new Date("2026-09-28T03:00:00.000Z");
 class MemorySessionStore implements KioskSessionStore {
   sessions: KioskSessionRecord[] = [];
   employees = new Map([
-    [1, { id: 1, employeeCode: "EMP001", name: "Active Employee", isActive: true }],
-    [2, { id: 2, employeeCode: "EMP002", name: "Inactive Employee", isActive: false }],
+    [
+      1,
+      {
+        id: 1,
+        employeeCode: "EMP001",
+        name: "Active Employee",
+        isActive: true,
+        offboardedAt: null,
+      },
+    ],
+    [
+      2,
+      {
+        id: 2,
+        employeeCode: "EMP002",
+        name: "Inactive Employee",
+        isActive: false,
+        offboardedAt: null,
+      },
+    ],
+    [
+      3,
+      {
+        id: 3,
+        employeeCode: "EMP003",
+        name: "Former Employee",
+        isActive: false,
+        offboardedAt: new Date("2026-10-06T03:00:00.000Z"),
+      },
+    ],
   ]);
   nextId = 1;
 
@@ -105,6 +133,18 @@ test("creates FACE_REGISTRATION only for an active employee and binds safe ident
     createFaceRegistrationSessionWithStore(2, new MemorySessionStore(), NOW),
     (error: unknown) => error instanceof HttpError && error.statusCode === 409,
   );
+});
+
+test("offboarded employee cannot create a face-registration session", async () => {
+  const store = new MemorySessionStore();
+  await assert.rejects(
+    createFaceRegistrationSessionWithStore(3, store, NOW),
+    (error: unknown) =>
+      error instanceof HttpError &&
+      error.statusCode === 409 &&
+      error.code === "EMPLOYEE_OFFBOARDED",
+  );
+  assert.equal(store.sessions.length, 0);
 });
 
 test("only one non-expired ACTIVE staff session controls the kiosk", async () => {

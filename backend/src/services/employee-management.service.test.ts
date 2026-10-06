@@ -13,6 +13,7 @@ import {
   deleteEmployeeWithStore,
   formatEmployeeCode,
   isEmployeeNameCharacterValid,
+  nextEmployeeCode,
   parseCreateEmployeeRequest,
   parseFaceRegistrationCompleteRequest,
   parseUpdateEmployeeRequest,
@@ -21,6 +22,7 @@ import {
   updateEmployeeWithStore,
 } from "./employee-management.service";
 import { errorMiddleware } from "../middlewares/error.middleware";
+import { EMPLOYEE_OFFBOARDED_CODE, isCurrentEmployee } from "./employee-lifecycle-state";
 
 const newEmployee = {
   id: 2,
@@ -183,6 +185,28 @@ test("creation checks character validity and duplicates before consuming a seque
   assert.ok(
     createFunction.indexOf("assertUniqueEmployeeName(") < createFunction.indexOf("nextval("),
   );
+  assert.match(
+    createFunction,
+    /findMany\(\{\s*where: \{ offboardedAt: null \},\s*select: \{ name: true \}/,
+  );
+});
+
+test("offboarded names do not block a returning employee from receiving a new code", () => {
+  const currentEmployeeNames = [
+    { name: "Jimmy", offboardedAt: null },
+    { name: "Former Jimmy", offboardedAt: new Date("2026-10-06T03:00:00.000Z") },
+  ]
+    .filter(isCurrentEmployee)
+    .map((employee) => employee.name);
+  assert.throws(() => assertUniqueEmployeeName("jimmy", currentEmployeeNames), HttpError);
+
+  const onlyHistoricalNames = [
+    { name: "Jimmy", offboardedAt: new Date("2026-10-06T03:00:00.000Z") },
+  ]
+    .filter(isCurrentEmployee)
+    .map((employee) => employee.name);
+  assert.doesNotThrow(() => assertUniqueEmployeeName("Jimmy", onlyHistoricalNames));
+  assert.equal(nextEmployeeCode(["EMP010", "EMP050"]), "EMP051");
 });
 
 test("employee codes format sequential values with at least three digits", () => {
@@ -341,6 +365,37 @@ test("active biometric cleanup blocks reactivation", async () => {
   assert.equal(updated, false);
 });
 
+test("terminal offboarded employee rejects stale reactivation and remains unchanged", async () => {
+  const offboardedAt = new Date("2026-10-06T03:00:00.000Z");
+  const employee = { ...newEmployee, isActive: false, offboardedAt };
+  let updated = false;
+  await assert.rejects(
+    updateEmployeeWithStore(
+      2,
+      { isActive: true },
+      {
+        async findEmployee() {
+          return employee;
+        },
+        async countActiveFaceRegistrationSessions() {
+          return 0;
+        },
+        async updateEmployee() {
+          updated = true;
+          return newEmployee;
+        },
+      },
+    ),
+    (error: unknown) =>
+      error instanceof HttpError &&
+      error.statusCode === 409 &&
+      error.code === EMPLOYEE_OFFBOARDED_CODE,
+  );
+  assert.equal(updated, false);
+  assert.equal(employee.isActive, false);
+  assert.equal(employee.offboardedAt, offboardedAt);
+});
+
 test("employee update translates Prisma P2034 to a safe 409 without retrying", async () => {
   let attempts = 0;
   await assert.rejects(
@@ -360,12 +415,14 @@ test("employee update translates Prisma P2034 to a safe 409 without retrying", a
 function deleteCandidate(
   overrides: Partial<{
     faceRegistered: boolean;
+    offboardedAt: Date | null;
     restockLogCount: number;
     kioskSessionCount: number;
   }> = {},
 ) {
   return {
     ...newEmployee,
+    offboardedAt: null,
     restockLogCount: 0,
     kioskSessionCount: 0,
     ...overrides,
@@ -397,6 +454,26 @@ test("employee delete returns 404 for an unknown employee", async () => {
     }),
     (error: unknown) => error instanceof HttpError && error.statusCode === 404,
   );
+});
+
+test("offboarded historical employee is never delete-draft eligible", async () => {
+  const employee = deleteCandidate({ offboardedAt: new Date("2026-10-06T03:00:00.000Z") });
+  let deleted = false;
+  await assert.rejects(
+    deleteEmployeeWithStore(2, {
+      async findEmployee() {
+        return employee;
+      },
+      async deleteEmployee() {
+        deleted = true;
+      },
+    }),
+    (error: unknown) =>
+      error instanceof HttpError &&
+      error.statusCode === 409 &&
+      error.code === EMPLOYEE_OFFBOARDED_CODE,
+  );
+  assert.equal(deleted, false);
 });
 
 for (const scenario of [
@@ -447,7 +524,7 @@ test("registration completion marks an active employee using safe metadata", asy
     { sessionId: 12 },
     async (sessionId) => {
       lookedUpCode = String(sessionId);
-      return newEmployee;
+      return { ...newEmployee, offboardedAt: null };
     },
   );
   assert.equal(lookedUpCode, "12");
@@ -464,7 +541,22 @@ test("registration completion rejects unknown and inactive employees", async () 
     completeFaceRegistrationWithUpdate({ sessionId: 12 }, async () => ({
       ...newEmployee,
       isActive: false,
+      offboardedAt: null,
     })),
     (error: unknown) => error instanceof HttpError && error.statusCode === 401,
+  );
+});
+
+test("registration completion rejects an offboarded employee with the lifecycle code", async () => {
+  await assert.rejects(
+    completeFaceRegistrationWithUpdate({ sessionId: 12 }, async () => ({
+      ...newEmployee,
+      isActive: false,
+      offboardedAt: new Date("2026-10-06T03:00:00.000Z"),
+    })),
+    (error: unknown) =>
+      error instanceof HttpError &&
+      error.statusCode === 409 &&
+      error.code === EMPLOYEE_OFFBOARDED_CODE,
   );
 });

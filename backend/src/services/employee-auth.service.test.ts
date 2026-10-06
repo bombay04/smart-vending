@@ -81,6 +81,14 @@ test("registration employee list returns active and inactive safe metadata", asy
       faceRegistered: false,
       faceEmbedding: [0.3, 0.4],
     },
+    {
+      id: 3,
+      name: "Former Employee",
+      employeeCode: "EMP003",
+      isActive: false,
+      faceRegistered: false,
+      offboardedAt: new Date("2026-10-06T03:00:00.000Z"),
+    },
   ]);
 
   assert.deepEqual(employees, [

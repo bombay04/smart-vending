@@ -38,6 +38,7 @@ const CLEANUP_SUCCESS_MODAL_MS = 3000;
 const CLEANUP_RESULT_MODAL_MS = 5000;
 const EMPLOYEE_NAME_INVALID_CODE = "EMPLOYEE_NAME_INVALID";
 const EMPLOYEE_NAME_CONFLICT_CODE = "EMPLOYEE_NAME_CONFLICT";
+const EMPLOYEE_OFFBOARDED_CODE = "EMPLOYEE_OFFBOARDED";
 const INVALID_EMPLOYEE_NAME_MESSAGE = "ชื่อพนักงานมีอักขระที่ไม่รองรับ";
 const DUPLICATE_EMPLOYEE_NAME_MESSAGE = "มีชื่อพนักงานนี้อยู่ในระบบแล้ว";
 
@@ -331,6 +332,12 @@ function AdminPortal() {
     return error instanceof EmployeeManagementError ? error.message : fallback;
   }
 
+  const isEmployeeOffboardedError = (error: unknown) =>
+    ((error instanceof EmployeeManagementError ||
+      error instanceof KioskSessionRequestError) &&
+      error.status === 409 &&
+      error.code === EMPLOYEE_OFFBOARDED_CODE);
+
   function replaceEmployee(updatedEmployee: RegistrationEmployee) {
     setEmployees((current) =>
       sortEmployees(
@@ -372,13 +379,18 @@ function AdminPortal() {
       });
       cancelEdit();
     } catch (error) {
-      setRowError(
-        employee.id,
-        mutationErrorMessage(
-          error,
-          "Employee name update failed. Please try again.",
-        ),
-      );
+      if (isEmployeeOffboardedError(error)) {
+        cancelEdit();
+        await loadEmployees();
+      } else {
+        setRowError(
+          employee.id,
+          mutationErrorMessage(
+            error,
+            "Employee name update failed. Please try again.",
+          ),
+        );
+      }
     } finally {
       setEmployeeBusy(employee.id, false);
     }
@@ -398,13 +410,17 @@ function AdminPortal() {
         activeCleanupType: employee.activeCleanupType,
       });
     } catch (error) {
-      setRowError(
-        employee.id,
-        mutationErrorMessage(
-          error,
-          "Employee status update failed. Please try again.",
-        ),
-      );
+      if (isEmployeeOffboardedError(error)) {
+        await loadEmployees();
+      } else {
+        setRowError(
+          employee.id,
+          mutationErrorMessage(
+            error,
+            "Employee status update failed. Please try again.",
+          ),
+        );
+      }
     } finally {
       setEmployeeBusy(employee.id, false);
     }
@@ -440,15 +456,21 @@ function AdminPortal() {
       setDeleteConfirmationId(null);
       setOffboardConfirmationId(null);
     } catch (error) {
-      setRowError(
-        employee.id,
-        mutationErrorMessage(
-          error,
-          action === "EMPLOYEE_DRAFT_DELETE"
-            ? "Draft-delete verification could not start."
-            : "Offboarding could not start.",
-        ),
-      );
+      if (isEmployeeOffboardedError(error)) {
+        setDeleteConfirmationId(null);
+        setOffboardConfirmationId(null);
+        await loadEmployees();
+      } else {
+        setRowError(
+          employee.id,
+          mutationErrorMessage(
+            error,
+            action === "EMPLOYEE_DRAFT_DELETE"
+              ? "Draft-delete verification could not start."
+              : "Offboarding could not start.",
+          ),
+        );
+      }
     } finally {
       setEmployeeBusy(employee.id, false);
     }
@@ -465,7 +487,9 @@ function AdminPortal() {
       previousSessionRef.current = registrationSession;
       setSession(registrationSession);
     } catch (error) {
-      if (
+      if (isEmployeeOffboardedError(error)) {
+        await loadEmployees();
+      } else if (
         error instanceof KioskSessionRequestError &&
         error.status === 409 &&
         error.message === "Another staff session is already active for this kiosk."
