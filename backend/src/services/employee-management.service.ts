@@ -5,8 +5,11 @@ import { PILOT_KIOSK_MACHINE_ID } from "./kiosk-session.service";
 const EMPLOYEE_CODE_PATTERN = /^EMP(\d+)$/;
 const MAX_EMPLOYEE_NAME_LENGTH = 120;
 const MAX_CREATE_ATTEMPTS = 3;
+export const EMPLOYEE_NAME_INVALID_CODE = "EMPLOYEE_NAME_INVALID";
 export const EMPLOYEE_NAME_CONFLICT_CODE = "EMPLOYEE_NAME_CONFLICT";
+const EMPLOYEE_NAME_INVALID_MESSAGE = "Employee name contains unsupported characters.";
 const EMPLOYEE_NAME_CONFLICT_MESSAGE = "An employee with this name already exists.";
+const EMPLOYEE_NAME_CHARACTERS = /^[\p{L}\p{M}\p{N} '-]+$/u;
 const UNSAFE_DELETE_MESSAGE =
   "This employee has enrollment or usage history and cannot be deleted. Deactivate the employee instead.";
 
@@ -73,6 +76,17 @@ export function normalizeEmployeeNameForComparison(name: string): string {
   return name.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
 }
 
+export function isEmployeeNameCharacterValid(name: string): boolean {
+  const normalizedName = name.normalize("NFKC");
+  return normalizedName.trim().length > 0 && EMPLOYEE_NAME_CHARACTERS.test(normalizedName);
+}
+
+export function assertValidEmployeeNameCharacters(name: string): void {
+  if (!isEmployeeNameCharacterValid(name)) {
+    throw new HttpError(EMPLOYEE_NAME_INVALID_MESSAGE, 400, EMPLOYEE_NAME_INVALID_CODE);
+  }
+}
+
 export function assertUniqueEmployeeName(candidateName: string, existingNames: string[]): void {
   const comparisonName = normalizeEmployeeNameForComparison(candidateName);
   if (
@@ -122,7 +136,9 @@ export function parseCreateEmployeeRequest(body: unknown): string {
   ) {
     throw new HttpError("Request body must contain only name.", 400);
   }
-  return normalizeEmployeeName((body as Record<string, unknown>).name);
+  const normalizedName = normalizeEmployeeName((body as Record<string, unknown>).name);
+  assertValidEmployeeNameCharacters(normalizedName);
+  return normalizedName;
 }
 
 export function parseEmployeeId(employeeId: unknown): number {
@@ -194,6 +210,7 @@ export async function createEmployeeWithRetry(
   retryable: (error: unknown) => boolean = isRetryableCreateError,
 ): Promise<EmployeeManagementRecord> {
   const normalizedName = normalizeEmployeeName(name);
+  assertValidEmployeeNameCharacters(normalizedName);
   for (let attempt = 1; attempt <= MAX_CREATE_ATTEMPTS; attempt += 1) {
     try {
       return toSafeEmployee(await createAttempt(normalizedName));

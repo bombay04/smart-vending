@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   isDuplicateEmployeeName,
+  isEmployeeNameCharacterValid,
   normalizeEmployeeNameForComparison,
 } from "../src/employee-name.mjs";
 import { canCancelFaceRegistration } from "../src/face-registration-session-cleanup.mjs";
@@ -278,9 +279,50 @@ test("Add Employee detects normalized duplicates and renders inline validation",
   assert.equal(isDuplicateEmployeeName("James", employees), false);
   assert.match(admin, /มีชื่อพนักงานนี้อยู่ในระบบแล้ว/);
   assert.match(admin, /className="staff-inline-error"/);
-  assert.match(admin, /disabled=\{isCreating \|\| !name\.trim\(\) \|\| hasDuplicateName\}/);
+  assert.match(admin, /employeeNameError !== null/);
   assert.match(admin, /onChange=\{\(event\) => handleNameChange\(event\.target\.value\)\}/);
   assert.match(admin, /setConflictingName\(null\)/);
+});
+
+test("Add Employee validates supported Unicode name characters while typing", async () => {
+  const [admin, css] = await Promise.all([
+    source("src/components/AdminPortal.tsx"),
+    source("src/App.css"),
+  ]);
+
+  for (const name of [
+    "Jimmy",
+    "สมชาย ใจดี",
+    "Task50Face1",
+    "Test3",
+    "Anne-Marie",
+    "O'Neil",
+  ]) {
+    assert.equal(isEmployeeNameCharacterValid(name), true);
+  }
+  for (const name of ["*Jimmy", "Jimmy@", "#abc", "abc_", "Jimmy!", "😀Jimmy"]) {
+    assert.equal(isEmployeeNameCharacterValid(name), false);
+  }
+
+  assert.match(admin, /ชื่อพนักงานมีอักขระที่ไม่รองรับ/);
+  assert.match(
+    admin,
+    /const employeeNameError = hasInvalidCharacters[\s\S]*\? INVALID_EMPLOYEE_NAME_MESSAGE[\s\S]*: hasDuplicateName[\s\S]*\? DUPLICATE_EMPLOYEE_NAME_MESSAGE/,
+  );
+  assert.match(admin, /aria-invalid=\{employeeNameError !== null\}/);
+  assert.match(admin, /setInvalidCharacterName\(null\)/);
+  assert.match(
+    admin,
+    /disabled=\{[\s\S]*isCreating \|\| !name\.trim\(\) \|\| employeeNameError !== null[\s\S]*\}/,
+  );
+  assert.match(
+    css,
+    /@media \(min-width: 901px\) \{[\s\S]*\.staff-add-employee \.staff-add-row \{[\s\S]*align-items: flex-start;/,
+  );
+  assert.match(
+    css,
+    /\.staff-portal-header,[\s\S]*\.staff-add-row,[\s\S]*align-items: center;/,
+  );
 });
 
 test("backend duplicate conflict maps to inline validation without clearing input", async () => {
@@ -303,6 +345,26 @@ test("backend duplicate conflict maps to inline validation without clearing inpu
   assert.doesNotMatch(conflictHandler, /setName\(""\)/);
   assert.match(employeeApi, /responseData\.code/);
   assert.match(employeeApi, /new EmployeeManagementError\(response\.status, message, code\)/);
+});
+
+test("backend invalid-name conflict maps to inline validation without clearing input", async () => {
+  const admin = await source("src/components/AdminPortal.tsx");
+  const createHandler = admin.match(
+    /async function handleCreate[\s\S]*?\r?\n  }\r?\n\r?\n  function setEmployeeBusy/,
+  )?.[0];
+  const conflictHandler = createHandler?.match(
+    /} catch \(error\) \{[\s\S]*?\r?\n    } finally/,
+  )?.[0];
+
+  assert.ok(createHandler);
+  assert.ok(conflictHandler);
+  assert.match(createHandler, /error\.status === 400/);
+  assert.match(createHandler, /error\.code === EMPLOYEE_NAME_INVALID_CODE/);
+  assert.match(
+    createHandler,
+    /setInvalidCharacterName\(normalizeEmployeeNameForComparison\(name\)\)/,
+  );
+  assert.doesNotMatch(conflictHandler, /setName\(""\)/);
 });
 
 test("ended face-registration polling reloads the employee directory once per transition", async () => {

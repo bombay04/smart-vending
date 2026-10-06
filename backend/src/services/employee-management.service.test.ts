@@ -4,12 +4,15 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { HttpError } from "../utils/http-error";
 import {
+  assertValidEmployeeNameCharacters,
   assertUniqueEmployeeName,
   completeFaceRegistrationWithUpdate,
   createEmployeeWithRetry,
   EMPLOYEE_NAME_CONFLICT_CODE,
+  EMPLOYEE_NAME_INVALID_CODE,
   deleteEmployeeWithStore,
   formatEmployeeCode,
+  isEmployeeNameCharacterValid,
   parseCreateEmployeeRequest,
   parseFaceRegistrationCompleteRequest,
   parseUpdateEmployeeRequest,
@@ -41,6 +44,45 @@ test("employee creation accepts name only and starts without biometric metadata"
 test("employee-name comparison uses NFKC, collapsed whitespace, and case folding", () => {
   assert.equal(normalizeEmployeeNameForComparison("  Jimmy   Smith  "), "jimmy smith");
   assert.equal(normalizeEmployeeNameForComparison("Ｊｉｍｍｙ"), "jimmy");
+});
+
+test("employee creation accepts Unicode letters, marks, numbers, spaces, hyphens, and apostrophes", async () => {
+  for (const name of ["Jimmy", "สมชาย ใจดี", "Task50Face1", "Test3", "Anne-Marie", "O'Neil"]) {
+    assert.equal(isEmployeeNameCharacterValid(name), true);
+    assert.equal(parseCreateEmployeeRequest({ name }), name);
+    const created = await createEmployeeWithRetry(name, async (validatedName) => ({
+      ...newEmployee,
+      name: validatedName,
+    }));
+    assert.equal(created.name, name);
+  }
+});
+
+test("employee creation rejects unsupported characters before calling create", async () => {
+  for (const name of ["*Jimmy", "Jimmy@", "#abc", "abc_", "Jimmy!", "😀Jimmy"]) {
+    assert.equal(isEmployeeNameCharacterValid(name), false);
+    assert.throws(
+      () => parseCreateEmployeeRequest({ name }),
+      (error: unknown) =>
+        error instanceof HttpError &&
+        error.statusCode === 400 &&
+        error.code === EMPLOYEE_NAME_INVALID_CODE,
+    );
+
+    let createCalls = 0;
+    await assert.rejects(
+      createEmployeeWithRetry(name, async () => {
+        createCalls += 1;
+        return newEmployee;
+      }),
+      (error: unknown) =>
+        error instanceof HttpError &&
+        error.statusCode === 400 &&
+        error.code === EMPLOYEE_NAME_INVALID_CODE &&
+        error.message === "Employee name contains unsupported characters.",
+    );
+    assert.equal(createCalls, 0);
+  }
 });
 
 test("employee creation rejects normalized duplicate names with a stable conflict", () => {
@@ -93,6 +135,54 @@ test("employee-name conflict response exposes HTTP 409 and its machine-readable 
     error: "An employee with this name already exists.",
     code: EMPLOYEE_NAME_CONFLICT_CODE,
   });
+});
+
+test("employee-name character error response exposes HTTP 400 and its machine-readable code", () => {
+  let invalid: unknown;
+  try {
+    assertValidEmployeeNameCharacters("*Jimmy");
+  } catch (error) {
+    invalid = error;
+  }
+  let statusCode: number | undefined;
+  let body: unknown;
+  const response = {
+    status(status: number) {
+      statusCode = status;
+      return this;
+    },
+    json(payload: unknown) {
+      body = payload;
+      return this;
+    },
+  };
+
+  errorMiddleware(invalid, {} as never, response as never, (() => undefined) as never);
+
+  assert.equal(statusCode, 400);
+  assert.deepEqual(body, {
+    error: "Employee name contains unsupported characters.",
+    code: EMPLOYEE_NAME_INVALID_CODE,
+  });
+});
+
+test("creation checks character validity and duplicates before consuming a sequence value", async () => {
+  const service = await readFile(resolve("src/services/employee-management.service.ts"), "utf8");
+  const retryFunction = service.slice(
+    service.indexOf("export async function createEmployeeWithRetry"),
+    service.indexOf("export async function createEmployee(name"),
+  );
+  const createFunction = service.slice(
+    service.indexOf("export async function createEmployee(name"),
+  );
+
+  assert.ok(
+    retryFunction.indexOf("assertValidEmployeeNameCharacters(normalizedName)") <
+      retryFunction.indexOf("createAttempt(normalizedName)"),
+  );
+  assert.ok(
+    createFunction.indexOf("assertUniqueEmployeeName(") < createFunction.indexOf("nextval("),
+  );
 });
 
 test("employee codes format sequential values with at least three digits", () => {
