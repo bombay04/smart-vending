@@ -213,7 +213,7 @@ function EmployeeFaceRegistration({
           {CONTENT[state].title && <h2>{CONTENT[state].title}</h2>}
           {CONTENT[state].instruction && <p>{CONTENT[state].instruction}</p>}
           <p className="employee-registration-identity">
-            กรุณา {employee.employeeCode} {employee.name}
+            {employee.employeeCode} {employee.name}
           </p>
           {cancelError && (
             <p className="employee-registration-error" role="alert">
