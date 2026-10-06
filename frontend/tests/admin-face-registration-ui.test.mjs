@@ -199,16 +199,44 @@ test("Pi face setup keeps Back enabled during capture and reuses the scan indica
   assert.match(registration, /READY: \{ instruction: "กรุณามองตรงไปที่กล้อง" \}/);
   assert.match(
     registration,
-    /\{employee\.employeeCode\} \{employee\.name\}/,
+    /กรุณา \{employee\.employeeCode\} \{employee\.name\}/,
   );
   assert.doesNotMatch(
     registration,
     /\{employee\.name\} - \{employee\.employeeCode\}/,
   );
   assert.match(registration, /title: "กำลังบันทึกใบหน้า"/);
+  assert.match(
+    registration,
+    /กรุณามองตรงไปที่กล้องและอยู่ในตำแหน่งเดิม ขณะระบบกำลังบันทึกใบหน้า/,
+  );
+  assert.match(
+    registration,
+    /พบข้อมูลใบหน้าที่บันทึกไว้แล้ว กรุณาซิงค์สถานะโดยไม่ต้องสแกนใหม่/,
+  );
+  assert.match(registration, /"ซิงค์สถานะการลงทะเบียน"/);
+  assert.match(
+    registration,
+    /กรุณาจัดใบหน้าให้อยู่ในตำแหน่งที่กล้องมองเห็น ปรับแสงให้เหมาะสม แล้วลองอีกครั้ง/,
+  );
+  assert.match(registration, /"ลองสแกนอีกครั้ง"/);
   assert.match(registration, /title: "ลงทะเบียนสำเร็จ"/);
   assert.match(registration, /"เริ่มสแกนใบหน้า"/);
   assert.match(registration, /"กลับสู่หน้าหลัก"/);
+  assert.doesNotMatch(
+    registration,
+    /A local template already exists\. Sync its status without capturing again\./,
+  );
+  assert.doesNotMatch(registration, /Sync Registration Status/);
+  assert.doesNotMatch(
+    registration,
+    /Move into view, improve lighting, and try again\./,
+  );
+  assert.doesNotMatch(registration, /Try Capture Again/);
+  assert.doesNotMatch(
+    registration,
+    /Keep one face centered while five stabilized captures are collected\./,
+  );
   assert.match(registration, /activeRequestRef\.current\?\.abort\(\)/);
   assert.match(registration, /await onCancel\(\)/);
   assert.match(registration, /disabled=\{isCancelling\}/);

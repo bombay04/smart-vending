@@ -27,49 +27,48 @@ const CONTENT: Record<
 > = {
   CHECKING: {
     title: "กำลังตรวจสอบการลงทะเบียน",
-    instruction: "Checking this Pi for an existing local template...",
+    instruction: "กำลังตรวจสอบข้อมูลใบหน้าที่บันทึกไว้ในเครื่อง...",
   },
   READY: { instruction: "กรุณามองตรงไปที่กล้อง" },
   CAPTURING: {
     title: "กำลังบันทึกใบหน้า",
     instruction:
-      "Keep one face centered while five stabilized captures are collected.",
+      "กรุณามองตรงไปที่กล้องและอยู่ในตำแหน่งเดิม ขณะระบบกำลังบันทึกใบหน้า",
   },
   SYNC_REQUIRED: {
     title: "ต้องซิงค์สถานะ",
     instruction:
-      "A local template already exists. Sync its status without capturing again.",
+      "พบข้อมูลใบหน้าที่บันทึกไว้แล้ว กรุณาซิงค์สถานะโดยไม่ต้องสแกนใหม่",
   },
   SYNCING: {
     title: "กำลังซิงค์สถานะ",
-    instruction:
-      "The local template remains safe while backend metadata and the session are completed...",
+    instruction: "กำลังซิงค์สถานะการลงทะเบียน กรุณารอสักครู่...",
   },
   SYNC_ERROR: {
     title: "ซิงค์สถานะไม่สำเร็จ",
     instruction:
-      "The template is saved locally. Retry sync without recapturing.",
+      "บันทึกข้อมูลใบหน้าแล้ว กรุณาลองซิงค์สถานะอีกครั้งโดยไม่ต้องสแกนใหม่",
   },
   SUCCESS: {
     title: "ลงทะเบียนสำเร็จ",
-    instruction:
-      "The local template was saved and the authorized session is complete.",
+    instruction: "บันทึกข้อมูลใบหน้าและลงทะเบียนเรียบร้อยแล้ว",
   },
   NO_FACE: {
     title: "ไม่พบใบหน้า",
-    instruction: "Move into view, improve lighting, and try again.",
+    instruction:
+      "กรุณาจัดใบหน้าให้อยู่ในตำแหน่งที่กล้องมองเห็น ปรับแสงให้เหมาะสม แล้วลองอีกครั้ง",
   },
   MULTIPLE_FACES: {
     title: "ตรวจพบหลายใบหน้า",
-    instruction: "Only the authorized employee may remain in camera view.",
+    instruction: "กรุณาให้พนักงานที่ลงทะเบียนอยู่หน้ากล้องเพียงคนเดียว",
   },
   BUSY: {
     title: "กล้องกำลังถูกใช้งาน",
-    instruction: "Another scan is using the camera. Try again shortly.",
+    instruction: "มีการใช้งานกล้องอยู่ กรุณาลองอีกครั้งในอีกสักครู่",
   },
   PI_UNAVAILABLE: {
     title: "ไม่สามารถเชื่อมต่อบริการ Pi ได้",
-    instruction: "Check the local face service and try again.",
+    instruction: "กรุณาตรวจสอบบริการสแกนใบหน้าบนเครื่อง แล้วลองอีกครั้ง",
   },
 };
 
@@ -173,7 +172,7 @@ function EmployeeFaceRegistration({
       await onCancel();
     } catch {
       setCancelError(
-        "Unable to end face registration. Check the connection and try again.",
+        "ไม่สามารถยกเลิกการลงทะเบียนใบหน้าได้ กรุณาตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง",
       );
     } finally {
       setIsCancelling(false);
@@ -213,7 +212,7 @@ function EmployeeFaceRegistration({
           {CONTENT[state].title && <h2>{CONTENT[state].title}</h2>}
           {CONTENT[state].instruction && <p>{CONTENT[state].instruction}</p>}
           <p className="employee-registration-identity">
-            {employee.employeeCode} {employee.name}
+            กรุณา {employee.employeeCode} {employee.name}
           </p>
           {cancelError && (
             <p className="employee-registration-error" role="alert">
@@ -228,7 +227,7 @@ function EmployeeFaceRegistration({
               type="button"
               onClick={() => void capture()}
             >
-              {retryCapture ? "Try Capture Again" : "เริ่มสแกนใบหน้า"}
+              {retryCapture ? "ลองสแกนอีกครั้ง" : "เริ่มสแกนใบหน้า"}
             </button>
           )}
           {(state === "SYNC_REQUIRED" || state === "SYNC_ERROR") && (
@@ -238,8 +237,8 @@ function EmployeeFaceRegistration({
               onClick={() => void syncCompletion()}
             >
               {state === "SYNC_ERROR"
-                ? "Retry Status Sync"
-                : "Sync Registration Status"}
+                ? "ลองซิงค์สถานะอีกครั้ง"
+                : "ซิงค์สถานะการลงทะเบียน"}
             </button>
           )}
         </div>
@@ -249,7 +248,7 @@ function EmployeeFaceRegistration({
           disabled={isCancelling}
           onClick={() => void handleCancel()}
         >
-          {isCancelling ? "Returning to Customer Mode..." : "กลับสู่หน้าหลัก"}
+          {isCancelling ? "กำลังกลับสู่หน้าหลัก..." : "กลับสู่หน้าหลัก"}
         </button>
       </section>
     </main>

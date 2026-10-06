@@ -152,7 +152,7 @@ test("local face setup uses the session-bound employee and metadata-only sync re
   assert.match(registration, /authorizedSession\?\.id !== session\.id/);
   assert.match(registration, /retryCapture/);
   assert.match(registration, /SYNC_ERROR/);
-  assert.match(registration, /Retry Status Sync/);
+  assert.match(registration, /ลองซิงค์สถานะอีกครั้ง/);
   assert.doesNotMatch(registration, /type="text"/);
 });
 
