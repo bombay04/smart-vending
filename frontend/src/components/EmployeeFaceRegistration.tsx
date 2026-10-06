@@ -29,7 +29,7 @@ const CONTENT: Record<
     title: "กำลังตรวจสอบการลงทะเบียน",
     instruction: "Checking this Pi for an existing local template...",
   },
-  READY: {},
+  READY: { instruction: "กรุณามองตรงไปที่กล้อง" },
   CAPTURING: {
     title: "กำลังบันทึกใบหน้า",
     instruction:
@@ -213,7 +213,7 @@ function EmployeeFaceRegistration({
           {CONTENT[state].title && <h2>{CONTENT[state].title}</h2>}
           {CONTENT[state].instruction && <p>{CONTENT[state].instruction}</p>}
           <p className="employee-registration-identity">
-            {employee.name} - {employee.employeeCode}
+            กรุณา {employee.employeeCode} {employee.name}
           </p>
           {cancelError && (
             <p className="employee-registration-error" role="alert">

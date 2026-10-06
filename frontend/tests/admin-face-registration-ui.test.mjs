@@ -38,6 +38,11 @@ test("busy kiosk feedback blocks only session creation and can close or retry", 
   assert.match(admin, /error\.status === 409/);
   assert.match(admin, /Another staff session is already active for this kiosk/);
   assert.match(admin, /เครื่องกำลังถูกใช้งาน/);
+  assert.match(admin, /ไม่สามารถเริ่มลงทะเบียนใบหน้าได้ในขณะนี้/);
+  assert.doesNotMatch(
+    admin,
+    /กรุณารอให้ขั้นตอนปัจจุบันเสร็จสิ้นแล้วลองอีกครั้ง/,
+  );
   assert.match(admin, /onClick=\{dismissTimedModal\}/);
   assert.match(admin, />\s*ตกลง\s*</);
   assert.match(kioskApi, /class KioskSessionRequestError extends Error/);
@@ -186,6 +191,15 @@ test("Pi face setup keeps Back enabled during capture and reuses the scan indica
   assert.doesNotMatch(
     registration,
     /Ask the named employee to face the camera alone, then start registration\./,
+  );
+  assert.match(registration, /READY: \{ instruction: "กรุณามองตรงไปที่กล้อง" \}/);
+  assert.match(
+    registration,
+    /กรุณา \{employee\.employeeCode\} \{employee\.name\}/,
+  );
+  assert.doesNotMatch(
+    registration,
+    /\{employee\.name\} - \{employee\.employeeCode\}/,
   );
   assert.match(registration, /title: "กำลังบันทึกใบหน้า"/);
   assert.match(registration, /title: "ลงทะเบียนสำเร็จ"/);

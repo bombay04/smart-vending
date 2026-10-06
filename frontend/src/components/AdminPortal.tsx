@@ -801,8 +801,6 @@ function AdminPortal() {
             <h2 id="kiosk-busy-modal-title">เครื่องกำลังถูกใช้งาน</h2>
             <p id="kiosk-busy-modal-description">
               ไม่สามารถเริ่มลงทะเบียนใบหน้าได้ในขณะนี้
-              <br />
-              กรุณารอให้ขั้นตอนปัจจุบันเสร็จสิ้นแล้วลองอีกครั้ง
             </p>
             <button type="button" onClick={dismissTimedModal}>
               ตกลง
