@@ -21,6 +21,7 @@ if __package__:
     from .face.errors import (
         AlreadyRegisteredError,
         CameraError,
+        DuplicateFaceError,
         FaceEngineError,
         MultipleFacesError,
         NoFaceError,
@@ -42,6 +43,7 @@ else:
     from face.errors import (
         AlreadyRegisteredError,
         CameraError,
+        DuplicateFaceError,
         FaceEngineError,
         MultipleFacesError,
         NoFaceError,
@@ -610,6 +612,20 @@ def register_face() -> tuple[Response, int] | Response:
     try:
         try:
             get_face_engine().register(employee_code)
+        except DuplicateFaceError as error:
+            logger.info(
+                "Face registration outcome: FACE_ALREADY_REGISTERED "
+                "conflictingEmployeeCode=%s",
+                error.conflicting_employee_code,
+            )
+            return (
+                jsonify(
+                    error="This face is already registered to another employee.",
+                    code="FACE_ALREADY_REGISTERED",
+                    conflictingEmployeeCode=error.conflicting_employee_code,
+                ),
+                409,
+            )
         except AlreadyRegisteredError:
             logger.info("Face registration outcome: ALREADY_REGISTERED")
             return jsonify(status="ALREADY_REGISTERED"), 409

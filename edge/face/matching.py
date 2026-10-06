@@ -5,8 +5,12 @@ from __future__ import annotations
 import math
 import statistics
 from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 from .config import MAX_SFACE_L2_DISTANCE
+
+if TYPE_CHECKING:
+    from .models import FaceTemplate
 
 
 DistanceFunction = Callable[[tuple[float, ...], tuple[float, ...]], float]
@@ -69,3 +73,36 @@ def all_live_samples_match(distances: Sequence[float], threshold: float) -> bool
     if not distances:
         raise ValueError("At least one live-sample distance is required.")
     return all(is_match(distance, threshold) for distance in distances)
+
+
+def find_duplicate_employee_code(
+    candidate_embeddings: Sequence[tuple[float, ...]],
+    templates: Sequence[FaceTemplate],
+    distance_function: DistanceFunction,
+    threshold: float,
+    *,
+    current_employee_code: str,
+) -> str | None:
+    """Return the closest other employee passing the recognition consensus."""
+
+    if not candidate_embeddings:
+        raise ValueError("At least one candidate embedding is required.")
+    validate_l2_threshold(threshold)
+    passing_candidates: list[tuple[float, str]] = []
+    for template in templates:
+        if template.employee_code == current_employee_code:
+            continue
+        sample_distances = tuple(
+            median_enrollment_distance(
+                candidate_embedding,
+                template.embeddings,
+                distance_function,
+            )
+            for candidate_embedding in candidate_embeddings
+        )
+        if all_live_samples_match(sample_distances, threshold):
+            passing_candidates.append((max(sample_distances), template.employee_code))
+
+    if not passing_candidates:
+        return None
+    return min(passing_candidates, key=lambda candidate: candidate[0])[1]

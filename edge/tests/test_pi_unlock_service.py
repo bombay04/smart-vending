@@ -10,6 +10,8 @@ from unittest.mock import patch
 from edge.face.errors import (
     AlreadyRegisteredError,
     CameraError,
+    CorruptTemplateError,
+    DuplicateFaceError,
     ModelError,
     MultipleFacesError,
     NoFaceError,
@@ -680,6 +682,40 @@ class PiUnlockServiceTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.get_json(), {"status": "ALREADY_REGISTERED"})
+
+    def test_duplicate_face_returns_structured_conflict_without_biometric_data(self) -> None:
+        engine = StubFaceEngine(
+            result=recognition_result(matched=True),
+            registration_error=DuplicateFaceError("EMP037"),
+        )
+        pi_unlock_service.face_engine = engine
+
+        response = self.post_face_registration("EMP051")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.get_json(),
+            {
+                "error": "This face is already registered to another employee.",
+                "code": "FACE_ALREADY_REGISTERED",
+                "conflictingEmployeeCode": "EMP037",
+            },
+        )
+        serialized = response.get_data(as_text=True).lower()
+        for forbidden in ("embedding", "distance", "threshold", "template", "image"):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_duplicate_scan_infrastructure_failure_is_not_reported_as_conflict(self) -> None:
+        pi_unlock_service.face_engine = StubFaceEngine(
+            result=recognition_result(matched=True),
+            registration_error=CorruptTemplateError("sensitive local path"),
+        )
+
+        response = self.post_face_registration("EMP051")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["status"], "UNAVAILABLE")
+        self.assertNotIn("FACE_ALREADY_REGISTERED", response.get_data(as_text=True))
 
     def test_registration_never_changes_authentication_failures_or_lockout(self) -> None:
         self.set_face_outcome(matched=False)

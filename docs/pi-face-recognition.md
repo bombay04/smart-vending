@@ -45,7 +45,9 @@ Only one usable frontal face may be visible:
 python -m edge.face.cli register --employee-code EMP001 --camera-index 0
 ```
 
-Registration collects five separately captured usable faces by default and saves five SFace embeddings. Each capture performs camera stabilization again; one frame is never copied five times. It does not save captured frames, detections, landmarks, or aligned crops. The old template is replaced only after every new sample succeeds and the complete schema-v3 template validates.
+Registration collects five separately captured usable faces by default and saves five SFace embeddings. Each capture performs camera stabilization again; one frame is never copied five times. It does not save captured frames, detections, landmarks, or aligned crops. A new template is saved only after every sample succeeds and the complete schema-v3 template validates; an existing employee template is never overwritten.
+
+Before a new template is saved, all five candidate embeddings are compared with every valid local template except the current employee's own template. The duplicate check deliberately reuses recognition's SFace L2 metric, median-across-enrollment aggregation, all-samples-must-pass consensus, and configured `FACE_SFACE_L2_THRESHOLD`; it does not introduce or tune a second threshold. A qualifying other employee aborts registration with `FACE_ALREADY_REGISTERED`. An empty inventory is allowed, while an unreadable, malformed, or incompatible template aborts registration as a template infrastructure error so enrollment cannot bypass an incomplete duplicate scan. Existing templates are never changed by this check.
 
 The count can be adjusted conservatively between 3 and 10 when needed:
 

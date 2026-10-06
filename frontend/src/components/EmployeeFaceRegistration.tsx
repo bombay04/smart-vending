@@ -19,6 +19,7 @@ type RegistrationState =
   | "SUCCESS"
   | "NO_FACE"
   | "MULTIPLE_FACES"
+  | "FACE_ALREADY_REGISTERED"
   | "BUSY"
   | "PI_UNAVAILABLE";
 
@@ -62,6 +63,11 @@ const CONTENT: Record<
   MULTIPLE_FACES: {
     title: "ตรวจพบหลายใบหน้า",
     instruction: "กรุณาให้พนักงานที่ลงทะเบียนอยู่หน้ากล้องเพียงคนเดียว",
+  },
+  FACE_ALREADY_REGISTERED: {
+    title: "ใบหน้านี้ถูกลงทะเบียนแล้ว",
+    instruction:
+      "ใบหน้านี้ถูกใช้งานกับพนักงานคนอื่นในระบบแล้ว",
   },
   BUSY: {
     title: "กล้องกำลังถูกใช้งาน",
