@@ -7,6 +7,7 @@ import {
 import { completeEmployeeFaceRegistration } from "../api/employee-auth";
 import type { KioskSession } from "../api/kiosk-session";
 import { fetchCurrentKioskSession } from "../api/kiosk-session";
+import { canCancelFaceRegistration } from "../face-registration-session-cleanup.mjs";
 
 type RegistrationState =
   | "CHECKING"
@@ -242,14 +243,16 @@ function EmployeeFaceRegistration({
             </button>
           )}
         </div>
-        <button
-          className="employee-registration-back"
-          type="button"
-          disabled={isCancelling}
-          onClick={() => void handleCancel()}
-        >
-          {isCancelling ? "กำลังกลับสู่หน้าหลัก..." : "กลับสู่หน้าหลัก"}
-        </button>
+        {canCancelFaceRegistration(state) && (
+          <button
+            className="employee-registration-back"
+            type="button"
+            disabled={isCancelling}
+            onClick={() => void handleCancel()}
+          >
+            {isCancelling ? "กำลังกลับสู่หน้าหลัก..." : "กลับสู่หน้าหลัก"}
+          </button>
+        )}
       </section>
     </main>
   );

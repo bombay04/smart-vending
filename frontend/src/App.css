@@ -771,6 +771,22 @@
   font: inherit;
 }
 
+.staff-add-name-field {
+  min-width: 0;
+  flex: 1;
+}
+
+.staff-add-name-field input {
+  width: 100%;
+}
+
+.staff-add-employee .staff-inline-error {
+  margin: 6px 0 0;
+  color: #b91c1c;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
 .staff-add-row button {
   min-height: 52px;
   padding: 0 22px;

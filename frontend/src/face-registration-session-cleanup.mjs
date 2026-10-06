@@ -6,3 +6,7 @@ export async function cancelFaceRegistrationSessionAndCleanup({
   await cancelSession(sessionId);
   clearLocalState();
 }
+
+export function canCancelFaceRegistration(state) {
+  return state !== "CAPTURING" && state !== "SYNCING";
+}

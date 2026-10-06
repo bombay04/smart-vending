@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import {
+  isDuplicateEmployeeName,
+  normalizeEmployeeNameForComparison,
+} from "../src/employee-name.mjs";
+import { canCancelFaceRegistration } from "../src/face-registration-session-cleanup.mjs";
 
 const source = (path) =>
   readFile(new URL(`../${path}`, import.meta.url), "utf8");
@@ -181,7 +186,7 @@ test("draft completion uses timed result modals while polling remains authoritat
   assert.doesNotMatch(admin, /lifecycleMessage/);
 });
 
-test("Pi face setup keeps Back enabled during capture and reuses the scan indicator", async () => {
+test("Pi face setup hides Back during capture and sync while preserving safe cancellation", async () => {
   const [registration, home] = await Promise.all([
     source("src/components/EmployeeFaceRegistration.tsx"),
     source("src/pages/HomePage.tsx"),
@@ -246,9 +251,66 @@ test("Pi face setup keeps Back enabled during capture and reuses the scan indica
   assert.match(registration, /activeRequestRef\.current\?\.abort\(\)/);
   assert.match(registration, /await onCancel\(\)/);
   assert.match(registration, /disabled=\{isCancelling\}/);
-  assert.doesNotMatch(registration, /disabled=\{busy\}[\s\S]*กลับสู่หน้าหลัก/);
+  assert.match(registration, /\{canCancelFaceRegistration\(state\) && \(/);
+  assert.equal(canCancelFaceRegistration("CAPTURING"), false);
+  assert.equal(canCancelFaceRegistration("SYNCING"), false);
+  for (const state of ["READY", "NO_FACE", "MULTIPLE_FACES", "SYNC_ERROR"]) {
+    assert.equal(canCancelFaceRegistration(state), true);
+  }
   assert.match(home, /cancelActiveFaceRegistrationSession/);
   assert.match(home, /cancelFaceRegistrationSessionAndCleanup/);
   assert.match(home, /onCancel=\{cancelActiveFaceRegistrationSession\}/);
   assert.match(home, /onSessionEnded=\{clearStaffWorkflowState\}/);
+});
+
+test("Add Employee detects normalized duplicates and renders inline validation", async () => {
+  const admin = await source("src/components/AdminPortal.tsx");
+  const employees = [{ name: "Jimmy" }];
+
+  assert.equal(normalizeEmployeeNameForComparison("  Jimmy   "), "jimmy");
+  assert.equal(isDuplicateEmployeeName("Jimmy", employees), true);
+  assert.equal(isDuplicateEmployeeName("jimmy", employees), true);
+  assert.equal(isDuplicateEmployeeName("  Jimmy   ", employees), true);
+  assert.equal(
+    isDuplicateEmployeeName("Jimmy   Smith", [{ name: "Jimmy Smith" }]),
+    true,
+  );
+  assert.equal(isDuplicateEmployeeName("James", employees), false);
+  assert.match(admin, /มีชื่อพนักงานนี้อยู่ในระบบแล้ว/);
+  assert.match(admin, /className="staff-inline-error"/);
+  assert.match(admin, /disabled=\{isCreating \|\| !name\.trim\(\) \|\| hasDuplicateName\}/);
+  assert.match(admin, /onChange=\{\(event\) => handleNameChange\(event\.target\.value\)\}/);
+  assert.match(admin, /setConflictingName\(null\)/);
+});
+
+test("backend duplicate conflict maps to inline validation without clearing input", async () => {
+  const [admin, employeeApi] = await Promise.all([
+    source("src/components/AdminPortal.tsx"),
+    source("src/api/employee-auth.ts"),
+  ]);
+  const createHandler = admin.match(
+    /async function handleCreate[\s\S]*?\r?\n  }\r?\n\r?\n  function setEmployeeBusy/,
+  )?.[0];
+  const conflictHandler = createHandler?.match(
+    /} catch \(error\) \{[\s\S]*?\r?\n    } finally/,
+  )?.[0];
+
+  assert.ok(createHandler);
+  assert.ok(conflictHandler);
+  assert.match(createHandler, /error\.status === 409/);
+  assert.match(createHandler, /error\.code === EMPLOYEE_NAME_CONFLICT_CODE/);
+  assert.match(createHandler, /setConflictingName\(normalizeEmployeeNameForComparison\(name\)\)/);
+  assert.doesNotMatch(conflictHandler, /setName\(""\)/);
+  assert.match(employeeApi, /responseData\.code/);
+  assert.match(employeeApi, /new EmployeeManagementError\(response\.status, message, code\)/);
+});
+
+test("ended face-registration polling reloads the employee directory once per transition", async () => {
+  const admin = await source("src/components/AdminPortal.tsx");
+
+  assert.match(
+    admin,
+    /didKioskSessionEnd\(previous, current, "FACE_REGISTRATION"\)[\s\S]*await loadEmployees\(\)/,
+  );
+  assert.match(admin, /previousSessionRef\.current = current/);
 });

@@ -29,3 +29,10 @@ export function decideKioskSessionAction({
   }
   return "STAY";
 }
+
+export function didKioskSessionEnd(previous, current, sessionType) {
+  return (
+    previous?.type === sessionType &&
+    (current === null || current.id !== previous.id)
+  );
+}

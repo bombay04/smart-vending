@@ -118,7 +118,7 @@ test("admin draft deletion and offboarding are confirmed session workflows", asy
   assert.match(employeeApi, /responseData\.error/);
   assert.match(
     employeeApi,
-    /new EmployeeManagementError\(response\.status, message\)/,
+    /new EmployeeManagementError\(response\.status, message, code\)/,
   );
 });
 

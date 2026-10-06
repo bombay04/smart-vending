@@ -21,6 +21,11 @@ import {
   type KioskSession,
 } from "../api/kiosk-session";
 import { getPortalSessionState } from "../portal-session-state.mjs";
+import {
+  isDuplicateEmployeeName,
+  normalizeEmployeeNameForComparison,
+} from "../employee-name.mjs";
+import { didKioskSessionEnd } from "../kiosk-session-flow.mjs";
 import type { RegistrationEmployee } from "../types/employee";
 
 const sortEmployees = (employees: RegistrationEmployee[]) =>
@@ -30,6 +35,8 @@ const EMPLOYEE_CREATED_MODAL_MS = 3000;
 const KIOSK_BUSY_MODAL_MS = 5000;
 const CLEANUP_SUCCESS_MODAL_MS = 3000;
 const CLEANUP_RESULT_MODAL_MS = 5000;
+const EMPLOYEE_NAME_CONFLICT_CODE = "EMPLOYEE_NAME_CONFLICT";
+const DUPLICATE_EMPLOYEE_NAME_MESSAGE = "มีชื่อพนักงานนี้อยู่ในระบบแล้ว";
 
 type TimedModal =
   | { type: "EMPLOYEE_CREATED" }
@@ -61,6 +68,7 @@ function AdminPortal() {
   const [name, setName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [conflictingName, setConflictingName] = useState<string | null>(null);
   const [timedModal, setTimedModal] = useState<TimedModal | null>(null);
   const [editingEmployeeId, setEditingEmployeeId] = useState<number | null>(
     null,
@@ -150,6 +158,11 @@ function AdminPortal() {
         if (!stopped) {
           const previous = previousSessionRef.current;
           if (
+            didKioskSessionEnd(previous, current, "FACE_REGISTRATION")
+          ) {
+            await loadEmployees();
+          }
+          if (
             current === null &&
             (previous?.type === "EMPLOYEE_DRAFT_DELETE" ||
               previous?.type === "EMPLOYEE_OFFBOARDING")
@@ -236,9 +249,22 @@ function AdminPortal() {
     return () => window.clearInterval(interval);
   }, []);
 
+  const normalizedInputName = normalizeEmployeeNameForComparison(name);
+  const hasDuplicateName =
+    isDuplicateEmployeeName(name, employees) ||
+    (normalizedInputName.length > 0 && conflictingName === normalizedInputName);
+
+  function handleNameChange(nextName: string) {
+    setName(nextName);
+    setCreateError(null);
+    if (normalizeEmployeeNameForComparison(nextName) !== conflictingName) {
+      setConflictingName(null);
+    }
+  }
+
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!name.trim() || isCreating) return;
+    if (!name.trim() || isCreating || hasDuplicateName) return;
     setIsCreating(true);
     setCreateError(null);
     try {
@@ -246,8 +272,16 @@ function AdminPortal() {
       setEmployees((current) => sortEmployees([...current, employee]));
       showTimedModal({ type: "EMPLOYEE_CREATED" }, EMPLOYEE_CREATED_MODAL_MS);
       setName("");
-    } catch {
-      setCreateError("Employee creation failed. Check the backend and try again.");
+    } catch (error) {
+      if (
+        error instanceof EmployeeManagementError &&
+        error.status === 409 &&
+        error.code === EMPLOYEE_NAME_CONFLICT_CODE
+      ) {
+        setConflictingName(normalizeEmployeeNameForComparison(name));
+      } else {
+        setCreateError("Employee creation failed. Check the backend and try again.");
+      }
     } finally {
       setIsCreating(false);
     }
@@ -473,15 +507,33 @@ function AdminPortal() {
           <form onSubmit={(event) => void handleCreate(event)}>
             <label htmlFor="admin-employee-name">กรอกชื่อพนักงาน</label>
             <div className="staff-add-row">
-              <input
-                id="admin-employee-name"
-                type="text"
-                maxLength={120}
-                value={name}
-                disabled={isCreating}
-                onChange={(event) => setName(event.target.value)}
-              />
-              <button type="submit" disabled={isCreating || !name.trim()}>
+              <div className="staff-add-name-field">
+                <input
+                  id="admin-employee-name"
+                  type="text"
+                  maxLength={120}
+                  value={name}
+                  disabled={isCreating}
+                  aria-invalid={hasDuplicateName}
+                  aria-describedby={
+                    hasDuplicateName ? "admin-employee-name-error" : undefined
+                  }
+                  onChange={(event) => handleNameChange(event.target.value)}
+                />
+                {hasDuplicateName && (
+                  <p
+                    id="admin-employee-name-error"
+                    className="staff-inline-error"
+                    role="alert"
+                  >
+                    {DUPLICATE_EMPLOYEE_NAME_MESSAGE}
+                  </p>
+                )}
+              </div>
+              <button
+                type="submit"
+                disabled={isCreating || !name.trim() || hasDuplicateName}
+              >
                 {isCreating ? "Adding..." : "+ เพิ่มพนักงาน"}
               </button>
             </div>

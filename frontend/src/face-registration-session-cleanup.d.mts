@@ -7,3 +7,5 @@ interface FaceRegistrationSessionCleanupDependencies {
 export function cancelFaceRegistrationSessionAndCleanup(
   dependencies: FaceRegistrationSessionCleanupDependencies,
 ): Promise<void>;
+
+export function canCancelFaceRegistration(state: string): boolean;

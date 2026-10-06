@@ -4,16 +4,20 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { HttpError } from "../utils/http-error";
 import {
+  assertUniqueEmployeeName,
   completeFaceRegistrationWithUpdate,
   createEmployeeWithRetry,
+  EMPLOYEE_NAME_CONFLICT_CODE,
   deleteEmployeeWithStore,
   formatEmployeeCode,
   parseCreateEmployeeRequest,
   parseFaceRegistrationCompleteRequest,
   parseUpdateEmployeeRequest,
+  normalizeEmployeeNameForComparison,
   updateEmployeeWithConflictHandling,
   updateEmployeeWithStore,
 } from "./employee-management.service";
+import { errorMiddleware } from "../middlewares/error.middleware";
 
 const newEmployee = {
   id: 2,
@@ -32,6 +36,63 @@ test("employee creation accepts name only and starts without biometric metadata"
   }));
   assert.deepEqual(created, newEmployee);
   assert.equal("faceEmbedding" in created, false);
+});
+
+test("employee-name comparison uses NFKC, collapsed whitespace, and case folding", () => {
+  assert.equal(normalizeEmployeeNameForComparison("  Jimmy   Smith  "), "jimmy smith");
+  assert.equal(normalizeEmployeeNameForComparison("Ｊｉｍｍｙ"), "jimmy");
+});
+
+test("employee creation rejects normalized duplicate names with a stable conflict", () => {
+  for (const duplicate of ["Jimmy", "jimmy", "  Jimmy  ", "Jimmy   "]) {
+    assert.throws(
+      () => assertUniqueEmployeeName(duplicate, ["Jimmy"]),
+      (error: unknown) =>
+        error instanceof HttpError &&
+        error.statusCode === 409 &&
+        error.code === EMPLOYEE_NAME_CONFLICT_CODE &&
+        /already exists/i.test(error.message),
+    );
+  }
+  assert.throws(
+    () => assertUniqueEmployeeName("Jimmy   Smith", ["Jimmy Smith"]),
+    (error: unknown) =>
+      error instanceof HttpError &&
+      error.statusCode === 409 &&
+      error.code === EMPLOYEE_NAME_CONFLICT_CODE,
+  );
+  assert.doesNotThrow(() => assertUniqueEmployeeName("James", ["Jimmy"]));
+});
+
+test("employee-name conflict response exposes HTTP 409 and its machine-readable code", () => {
+  const conflict = (() => {
+    try {
+      assertUniqueEmployeeName("jimmy", ["Jimmy"]);
+      throw new Error("Expected a duplicate-name conflict.");
+    } catch (error) {
+      return error;
+    }
+  })();
+  let statusCode: number | undefined;
+  let body: unknown;
+  const response = {
+    status(status: number) {
+      statusCode = status;
+      return this;
+    },
+    json(payload: unknown) {
+      body = payload;
+      return this;
+    },
+  };
+
+  errorMiddleware(conflict, {} as never, response as never, (() => undefined) as never);
+
+  assert.equal(statusCode, 409);
+  assert.deepEqual(body, {
+    error: "An employee with this name already exists.",
+    code: EMPLOYEE_NAME_CONFLICT_CODE,
+  });
 });
 
 test("employee codes format sequential values with at least three digits", () => {

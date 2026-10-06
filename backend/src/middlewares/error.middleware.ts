@@ -11,7 +11,10 @@ export function errorMiddleware(
   void next;
 
   if (error instanceof HttpError) {
-    response.status(error.statusCode).json({ error: error.message });
+    response.status(error.statusCode).json({
+      error: error.message,
+      ...(error.code === undefined ? {} : { code: error.code }),
+    });
     return;
   }
 
