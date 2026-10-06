@@ -195,7 +195,7 @@ test("Pi face setup keeps Back enabled during capture and reuses the scan indica
   assert.match(registration, /READY: \{ instruction: "กรุณามองตรงไปที่กล้อง" \}/);
   assert.match(
     registration,
-    /กรุณา \{employee\.employeeCode\} \{employee\.name\}/,
+    /\{employee\.employeeCode\} \{employee\.name\}/,
   );
   assert.doesNotMatch(
     registration,
