@@ -2,14 +2,22 @@ from __future__ import annotations
 
 import unittest
 
-from edge.face.config import DEFAULT_SFACE_L2_DISTANCE_THRESHOLD
+from edge.face.config import (
+    DEFAULT_SFACE_L2_DISTANCE_THRESHOLD,
+    SFACE_ALGORITHM,
+    SFACE_MODEL_FILENAME,
+    SFACE_SIMILARITY_METRIC,
+    YUNET_MODEL_FILENAME,
+)
 from edge.face.matching import (
     all_live_samples_match,
+    find_duplicate_employee_code,
     is_match,
     median_distance,
     median_enrollment_distance,
     validate_l2_threshold,
 )
+from edge.face.models import FaceTemplate
 
 
 def embedding(value: float) -> tuple[float, ...]:
@@ -20,6 +28,17 @@ def synthetic_distance(
     first: tuple[float, ...], second: tuple[float, ...]
 ) -> float:
     return abs(first[0] - second[0])
+
+
+def template(employee_code: str, values: tuple[float, ...]) -> FaceTemplate:
+    return FaceTemplate(
+        employee_code=employee_code,
+        algorithm=SFACE_ALGORITHM,
+        similarity_metric=SFACE_SIMILARITY_METRIC,
+        detector_model=YUNET_MODEL_FILENAME,
+        embedding_model=SFACE_MODEL_FILENAME,
+        embeddings=tuple(embedding(value) for value in values),
+    )
 
 
 class MatchingTests(unittest.TestCase):
@@ -50,6 +69,70 @@ class MatchingTests(unittest.TestCase):
     def test_live_consensus_requires_every_sample_to_pass(self) -> None:
         self.assertTrue(all_live_samples_match([0.8, 1.128, 0.9], 1.128))
         self.assertFalse(all_live_samples_match([0.8, 1.129, 0.9], 1.128))
+
+    def test_duplicate_comparison_uses_existing_consensus_and_threshold(self) -> None:
+        existing = template("EMP001", (0.0, 0.1, 0.2))
+        matching_candidate = tuple(embedding(value) for value in (0.1, 0.2, 0.3))
+        one_failing_sample = tuple(embedding(value) for value in (0.1, 0.2, 0.8))
+
+        self.assertEqual(
+            find_duplicate_employee_code(
+                matching_candidate,
+                [existing],
+                synthetic_distance,
+                0.5,
+                current_employee_code="EMP999",
+            ),
+            "EMP001",
+        )
+        self.assertIsNone(
+            find_duplicate_employee_code(
+                one_failing_sample,
+                [existing],
+                synthetic_distance,
+                0.5,
+                current_employee_code="EMP999",
+            )
+        )
+
+    def test_duplicate_comparison_allows_empty_inventory_and_ignores_self(self) -> None:
+        candidate = tuple(embedding(value) for value in (0.1, 0.2, 0.3))
+        self.assertIsNone(
+            find_duplicate_employee_code(
+                candidate,
+                [],
+                synthetic_distance,
+                0.5,
+                current_employee_code="EMP001",
+            )
+        )
+        self.assertIsNone(
+            find_duplicate_employee_code(
+                candidate,
+                [template("EMP001", (0.1, 0.2, 0.3))],
+                synthetic_distance,
+                0.5,
+                current_employee_code="EMP001",
+            )
+        )
+
+    def test_duplicate_comparison_selects_closest_qualifying_employee(self) -> None:
+        candidate = tuple(embedding(value) for value in (0.1, 0.2, 0.3))
+        templates = [
+            template("EMP002", (0.4, 0.5, 0.6)),
+            template("EMP001", (0.1, 0.2, 0.3)),
+            template("EMP003", (1.2, 1.3, 1.4)),
+        ]
+        self.assertEqual(
+            find_duplicate_employee_code(
+                candidate,
+                templates,
+                synthetic_distance,
+                0.5,
+                current_employee_code="EMP999",
+            ),
+            "EMP001",
+        )
 
 
 if __name__ == "__main__":

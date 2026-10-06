@@ -138,9 +138,10 @@ test("inactive employees are not offered face registration", async () => {
 });
 
 test("local face setup uses the session-bound employee and metadata-only sync recovery", async () => {
-  const registration = await source(
-    "src/components/EmployeeFaceRegistration.tsx",
-  );
+  const [registration, registrationApi] = await Promise.all([
+    source("src/components/EmployeeFaceRegistration.tsx"),
+    source("src/api/face-registration.ts"),
+  ]);
 
   assert.doesNotMatch(registration, /Select an employee/);
   assert.match(registration, /registerEmployeeFace\(employee\.employeeCode/);
@@ -152,6 +153,29 @@ test("local face setup uses the session-bound employee and metadata-only sync re
   assert.match(registration, /authorizedSession\?\.id !== session\.id/);
   assert.match(registration, /retryCapture/);
   assert.match(registration, /SYNC_ERROR/);
+  assert.match(registrationApi, /responseData\.code === "FACE_ALREADY_REGISTERED"/);
+  assert.match(
+    registrationApi,
+    /throw new FaceRegistrationError\("FACE_ALREADY_REGISTERED"\)/,
+  );
+  assert.match(registration, /FACE_ALREADY_REGISTERED/);
+  assert.match(registration, /ใบหน้านี้ถูกลงทะเบียนแล้ว/);
+  assert.match(
+    registration,
+    /ใบหน้านี้ถูกใช้งานกับพนักงานคนอื่นในระบบแล้ว/,
+  );
+  const captureHandler = registration.match(
+    /async function capture\(\)[\s\S]*?\r?\n  }\r?\n\r?\n  async function handleCancel/,
+  )?.[0];
+  assert.ok(captureHandler);
+  assert.match(
+    captureHandler,
+    /await registerEmployeeFace[\s\S]*await syncCompletion/,
+  );
+  assert.match(
+    captureHandler,
+    /catch \(error: unknown\)[\s\S]*error instanceof FaceRegistrationError[\s\S]*setState/,
+  );
   assert.match(registration, /ลองซิงค์สถานะอีกครั้ง/);
   assert.doesNotMatch(registration, /type="text"/);
 });

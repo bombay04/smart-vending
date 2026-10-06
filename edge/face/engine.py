@@ -31,9 +31,16 @@ from .diagnostics import (
     LiveSampleDistanceDiagnostics,
     SampleCollectionDiagnostics,
 )
-from .errors import AlreadyRegisteredError, MultipleFacesError, NoFaceError
+from .errors import (
+    AlreadyRegisteredError,
+    DuplicateFaceError,
+    MultipleFacesError,
+    NoFaceError,
+    TemplateNotFoundError,
+)
 from .matching import (
     all_live_samples_match,
+    find_duplicate_employee_code,
     is_match,
     median_enrollment_distance,
     validate_l2_threshold,
@@ -112,6 +119,19 @@ class FaceEngine:
             embedding_model=SFACE_MODEL_FILENAME,
             embeddings=embeddings,
         )
+        try:
+            existing_templates = self.template_store.load_all()
+        except TemplateNotFoundError:
+            existing_templates = []
+        conflicting_employee_code = find_duplicate_employee_code(
+            template.embeddings,
+            existing_templates,
+            self.embedder.distance,
+            self.threshold,
+            current_employee_code=employee_code,
+        )
+        if conflicting_employee_code is not None:
+            raise DuplicateFaceError(conflicting_employee_code)
         self.template_store.save(template)
         return template
 

@@ -1,7 +1,12 @@
 import { PI_UNLOCK_BASE_URL } from "../config/api";
 
 export type FaceRegistrationFailureStatus =
-  "NO_FACE" | "MULTIPLE_FACES" | "ALREADY_REGISTERED" | "BUSY" | "UNAVAILABLE";
+  | "NO_FACE"
+  | "MULTIPLE_FACES"
+  | "ALREADY_REGISTERED"
+  | "FACE_ALREADY_REGISTERED"
+  | "BUSY"
+  | "UNAVAILABLE";
 
 export interface FaceRegistrationSuccess {
   status: "REGISTERED";
@@ -54,6 +59,12 @@ export async function registerEmployeeFace(
   }
 
   if (isRecord(responseData)) {
+    if (
+      response.status === 409 &&
+      responseData.code === "FACE_ALREADY_REGISTERED"
+    ) {
+      throw new FaceRegistrationError("FACE_ALREADY_REGISTERED");
+    }
     if (
       response.status === 422 &&
       (responseData.status === "NO_FACE" ||

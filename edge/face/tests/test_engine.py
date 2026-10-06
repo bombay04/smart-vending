@@ -15,7 +15,14 @@ from edge.face.config import (
 )
 from edge.face.diagnostics import ConsensusDecisionDiagnostics
 from edge.face.engine import FaceEngine, validate_sample_count
-from edge.face.errors import AlreadyRegisteredError, CameraError, NoFaceError
+from edge.face.errors import (
+    AlreadyRegisteredError,
+    CameraError,
+    CorruptTemplateError,
+    DuplicateFaceError,
+    NoFaceError,
+    TemplateNotFoundError,
+)
 from edge.face.models import FaceTemplate
 from edge.face.storage import TemplateStore
 
@@ -44,15 +51,30 @@ class FakeTemplateStore:
 
 
 class RecordingTemplateStore:
-    def __init__(self, *, exists: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        exists: bool = False,
+        templates: list[FaceTemplate] | None = None,
+        load_error: Exception | None = None,
+    ) -> None:
         self.saved: FaceTemplate | None = None
         self.template_exists = exists
+        self.templates = templates
+        self.load_error = load_error
 
     def exists(self, _employee_code: str) -> bool:
         return self.template_exists
 
     def save(self, face_template: FaceTemplate) -> None:
         self.saved = face_template
+
+    def load_all(self) -> list[FaceTemplate]:
+        if self.load_error is not None:
+            raise self.load_error
+        if self.templates is None:
+            raise TemplateNotFoundError("No face templates are registered.")
+        return self.templates
 
 
 class PassthroughDetector:
@@ -280,6 +302,69 @@ class EngineConfigurationTests(unittest.TestCase):
                 engine.register("EMP001")
         self.assertEqual(camera.capture_calls, 3)
         self.assertEqual(camera.exit_calls, 1)
+        self.assertIsNone(store.saved)
+
+    def test_duplicate_registration_is_rejected_before_template_save(self) -> None:
+        existing = template("EMP001", (0.1, 0.2, 0.3))
+        store = RecordingTemplateStore(templates=[existing])
+        candidate = tuple(embedding(value) for value in (0.1, 0.2, 0.3))
+        engine = FaceEngine(
+            sface_l2_threshold=0.5,
+            enrollment_sample_count=3,
+            template_store=store,  # type: ignore[arg-type]
+            detector=PassthroughDetector(),  # type: ignore[arg-type]
+            embedder=FakeEmbedder(candidate),  # type: ignore[arg-type]
+        )
+
+        with patch(
+            "edge.face.engine.CameraCaptureSession",
+            return_value=FakeCameraSession(["a", "b", "c"]),
+        ):
+            with self.assertRaises(DuplicateFaceError) as raised:
+                engine.register("EMP002")
+
+        self.assertEqual(raised.exception.conflicting_employee_code, "EMP001")
+        self.assertIsNone(store.saved)
+
+    def test_unique_registration_still_saves_after_complete_duplicate_scan(self) -> None:
+        existing = template("EMP001", (1.0, 1.1, 1.2))
+        store = RecordingTemplateStore(templates=[existing])
+        candidate = tuple(embedding(value) for value in (0.1, 0.2, 0.3))
+        engine = FaceEngine(
+            sface_l2_threshold=0.5,
+            enrollment_sample_count=3,
+            template_store=store,  # type: ignore[arg-type]
+            detector=PassthroughDetector(),  # type: ignore[arg-type]
+            embedder=FakeEmbedder(candidate),  # type: ignore[arg-type]
+        )
+
+        with patch(
+            "edge.face.engine.CameraCaptureSession",
+            return_value=FakeCameraSession(["a", "b", "c"]),
+        ):
+            registered = engine.register("EMP002")
+
+        self.assertIs(store.saved, registered)
+
+    def test_duplicate_scan_failure_never_saves_candidate(self) -> None:
+        store = RecordingTemplateStore(
+            load_error=CorruptTemplateError("Invalid face template: EMP001.json")
+        )
+        candidate = tuple(embedding(value) for value in (0.1, 0.2, 0.3))
+        engine = FaceEngine(
+            enrollment_sample_count=3,
+            template_store=store,  # type: ignore[arg-type]
+            detector=PassthroughDetector(),  # type: ignore[arg-type]
+            embedder=FakeEmbedder(candidate),  # type: ignore[arg-type]
+        )
+
+        with patch(
+            "edge.face.engine.CameraCaptureSession",
+            return_value=FakeCameraSession(["a", "b", "c"]),
+        ):
+            with self.assertRaises(CorruptTemplateError):
+                engine.register("EMP002")
+
         self.assertIsNone(store.saved)
 
     def test_recognition_collects_all_live_samples_in_one_camera_session(self) -> None:

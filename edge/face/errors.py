@@ -49,6 +49,14 @@ class AlreadyRegisteredError(TemplateStorageError):
     code = "ALREADY_REGISTERED"
 
 
+class DuplicateFaceError(FaceEngineError):
+    code = "FACE_ALREADY_REGISTERED"
+
+    def __init__(self, conflicting_employee_code: str) -> None:
+        super().__init__("This face is already registered to another employee.")
+        self.conflicting_employee_code = conflicting_employee_code
+
+
 class TemplateNotFoundError(TemplateStorageError):
     pass
 
