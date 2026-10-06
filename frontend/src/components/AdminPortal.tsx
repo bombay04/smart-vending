@@ -459,7 +459,7 @@ function AdminPortal() {
       <div className="staff-portal-container">
         <header className="staff-portal-header">
           <div>
-            <h1>Employee Management</h1>
+            <h1>ระบบจัดการพนักงาน</h1>
           </div>
         </header>
 
@@ -468,10 +468,10 @@ function AdminPortal() {
           aria-labelledby="add-employee-title"
         >
           <div>
-            <h2 id="add-employee-title">Add Employee</h2>
+            <h2 id="add-employee-title">เพิ่มพนักงาน</h2>
           </div>
           <form onSubmit={(event) => void handleCreate(event)}>
-            <label htmlFor="admin-employee-name">Employee name</label>
+            <label htmlFor="admin-employee-name">กรอกชื่อพนักงาน</label>
             <div className="staff-add-row">
               <input
                 id="admin-employee-name"
@@ -482,7 +482,7 @@ function AdminPortal() {
                 onChange={(event) => setName(event.target.value)}
               />
               <button type="submit" disabled={isCreating || !name.trim()}>
-                {isCreating ? "Adding..." : "+ Add Employee"}
+                {isCreating ? "Adding..." : "+ เพิ่มพนักงาน"}
               </button>
             </div>
           </form>
@@ -499,15 +499,8 @@ function AdminPortal() {
         >
           <div className="staff-section-heading">
             <div>
-              <h2 id="employee-list-title">Employee directory</h2>
+              <h2 id="employee-list-title">รายชื่อพนักงาน</h2>
             </div>
-            <button
-              type="button"
-              disabled={isLoading}
-              onClick={() => void loadEmployees()}
-            >
-              Refresh
-            </button>
           </div>
           {isLoading && <p className="staff-message">Loading employees...</p>}
           {loadError && (
@@ -531,11 +524,11 @@ function AdminPortal() {
                 className="staff-employee-row staff-employee-row--header"
                 role="row"
               >
-                <span>ID</span>
-                <span>Name</span>
-                <span>Status</span>
-                <span>Face Status</span>
-                <span>Actions</span>
+                <span>รหัสพนักงาน</span>
+                <span>ชื่อ-นามสกุล</span>
+                <span>สถานะ</span>
+                <span>สถานะใบหน้า</span>
+                <span>การดำเนินการ</span>
               </div>
               {employees.map((employee) => (
                 <div
@@ -547,7 +540,7 @@ function AdminPortal() {
                   <span>
                     {editingEmployeeId === employee.id ? (
                       <label className="admin-edit-name">
-                        <span className="sr-only">Employee name</span>
+                        <span className="sr-only">กรอกชื่อพนักงาน</span>
                         <input
                           type="text"
                           maxLength={120}
@@ -565,7 +558,7 @@ function AdminPortal() {
                       employee.isActive ? "staff-active" : "staff-inactive"
                     }
                   >
-                    {employee.isActive ? "Active" : "Inactive"}
+                    {employee.isActive ? "ใช้งานอยู่" : "ปิดใช้งาน"}
                   </span>
                   <span
                     className={
@@ -575,8 +568,8 @@ function AdminPortal() {
                     }
                   >
                     {employee.faceRegistered
-                      ? "Registered"
-                      : "Face Setup Required"}
+                      ? "ลงทะเบียนแล้ว"
+                      : "ต้องลงทะเบียนใบหน้า"}
                   </span>
                   <div className="admin-employee-action-cell">
                     {editingEmployeeId === employee.id ? (
@@ -616,24 +609,19 @@ function AdminPortal() {
                           >
                             {busyEmployeeIds.has(employee.id)
                               ? "Deleting..."
-                              : "Confirm Delete Draft"}
+                              : "ยืนยันการลบแบบร่าง"}
                           </button>
                           <button
                             type="button"
                             disabled={busyEmployeeIds.has(employee.id)}
                             onClick={() => setDeleteConfirmationId(null)}
                           >
-                            Cancel
+                            ยกเลิก
                           </button>
                         </div>
                       </div>
                     ) : offboardConfirmationId === employee.id ? (
                       <div className="admin-delete-confirmation">
-                        <strong>Offboard {employee.employeeCode}?</strong>
-                        <span>
-                          Disable access and remove this employee&apos;s face
-                          template from the kiosk. History is retained.
-                        </span>
                         <div className="admin-employee-actions">
                           <button
                             className="admin-delete-action"
@@ -648,14 +636,14 @@ function AdminPortal() {
                           >
                             {busyEmployeeIds.has(employee.id)
                               ? "Starting..."
-                              : "Confirm Offboard"}
+                              : "ยืนยันการนำออก"}
                           </button>
                           <button
                             type="button"
                             disabled={busyEmployeeIds.has(employee.id)}
                             onClick={() => setOffboardConfirmationId(null)}
                           >
-                            Cancel
+                            ยกเลิก
                           </button>
                         </div>
                       </div>
@@ -675,7 +663,7 @@ function AdminPortal() {
                           }
                           onClick={() => beginEdit(employee)}
                         >
-                          Edit
+                          แก้ไข
                         </button>
                         {!employee.canDeleteDraft && (
                           <>
@@ -691,8 +679,8 @@ function AdminPortal() {
                               {busyEmployeeIds.has(employee.id)
                                 ? "Updating..."
                                 : employee.isActive
-                                  ? "Deactivate"
-                                  : "Activate"}
+                                  ? "ปิดใช้งาน"
+                                  : "เปิดใช้งาน"}
                             </button>
                             <button
                               className="admin-delete-action"
@@ -702,7 +690,6 @@ function AdminPortal() {
                                 employee.activeCleanupType !== null ||
                                 session !== null
                               }
-                              title="Disable access and remove the face template. History is retained."
                               onClick={() => {
                                 setEditingEmployeeId(null);
                                 setDeleteConfirmationId(null);
@@ -710,7 +697,7 @@ function AdminPortal() {
                                 setOffboardConfirmationId(employee.id);
                               }}
                             >
-                              Offboard
+                              นำออกจากระบบ
                             </button>
                           </>
                         )}
@@ -731,7 +718,7 @@ function AdminPortal() {
                               setDeleteConfirmationId(employee.id);
                             }}
                           >
-                            Delete Draft
+                            ลบแบบร่าง
                           </button>
                         )}
                         {!employee.faceRegistered &&
@@ -747,7 +734,7 @@ function AdminPortal() {
                                 void handleStartFaceRegistration(employee)
                               }
                             >
-                              Start Face Registration
+                              เริ่มลงทะเบียนใบหน้า
                             </button>
                           )}
                       </div>

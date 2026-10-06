@@ -130,15 +130,19 @@ test("directory headers and authoritative draft actions match lifecycle eligibil
 
   assert.match(
     admin,
-    /<span>ID<\/span>[\s\S]*<span>Name<\/span>[\s\S]*<span>Status<\/span>[\s\S]*<span>Face Status<\/span>/,
+    /<span>รหัสพนักงาน<\/span>[\s\S]*<span>ชื่อ-นามสกุล<\/span>[\s\S]*<span>สถานะ<\/span>[\s\S]*<span>สถานะใบหน้า<\/span>[\s\S]*<span>การดำเนินการ<\/span>/,
   );
   assert.match(admin, /\{!employee\.canDeleteDraft && \(/);
   assert.match(admin, /\{employee\.canDeleteDraft && \(/);
-  assert.match(admin, />\s*Edit\s*</);
-  assert.match(admin, />\s*Delete Draft\s*</);
-  assert.match(admin, />\s*Start Face Registration\s*</);
-  assert.match(admin, /"Deactivate"/);
-  assert.match(admin, />\s*Offboard\s*</);
+  assert.match(admin, /employee\.isActive \? "ใช้งานอยู่" : "ปิดใช้งาน"/);
+  assert.match(admin, /"ลงทะเบียนแล้ว"/);
+  assert.match(admin, /"ต้องลงทะเบียนใบหน้า"/);
+  assert.match(admin, />\s*แก้ไข\s*</);
+  assert.match(admin, />\s*ลบแบบร่าง\s*</);
+  assert.match(admin, />\s*เริ่มลงทะเบียนใบหน้า\s*</);
+  assert.match(admin, /"ปิดใช้งาน"/);
+  assert.match(admin, /"เปิดใช้งาน"/);
+  assert.match(admin, />\s*นำออกจากระบบ\s*</);
   assert.doesNotMatch(admin, /faceStatus\s*===/);
 });
 
