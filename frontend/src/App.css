@@ -804,6 +804,12 @@
   cursor: not-allowed;
 }
 
+@media (min-width: 901px) {
+  .staff-add-employee .staff-add-row {
+    align-items: flex-start;
+  }
+}
+
 .staff-message {
   margin: 20px 0 0;
   padding: 16px;
