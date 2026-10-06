@@ -583,14 +583,14 @@ function AdminPortal() {
                         >
                           {busyEmployeeIds.has(employee.id)
                             ? "Saving..."
-                            : "Save"}
+                            : "บันทึก"}
                         </button>
                         <button
                           type="button"
                           disabled={busyEmployeeIds.has(employee.id)}
                           onClick={cancelEdit}
                         >
-                          Cancel
+                          ยกเลิก
                         </button>
                       </div>
                     ) : deleteConfirmationId === employee.id ? (

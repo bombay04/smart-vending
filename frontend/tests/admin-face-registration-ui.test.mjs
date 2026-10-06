@@ -134,6 +134,8 @@ test("directory headers and authoritative draft actions match lifecycle eligibil
   );
   assert.match(admin, /\{!employee\.canDeleteDraft && \(/);
   assert.match(admin, /\{employee\.canDeleteDraft && \(/);
+  assert.match(admin, /: "บันทึก"/);
+  assert.match(admin, /onClick=\{cancelEdit\}[\s\S]*?>\s*ยกเลิก\s*</);
   assert.match(admin, /employee\.isActive \? "ใช้งานอยู่" : "ปิดใช้งาน"/);
   assert.match(admin, /"ลงทะเบียนแล้ว"/);
   assert.match(admin, /"ต้องลงทะเบียนใบหน้า"/);
@@ -198,6 +200,10 @@ test("Pi face setup keeps Back enabled during capture and reuses the scan indica
   );
   assert.match(registration, /READY: \{ instruction: "กรุณามองตรงไปที่กล้อง" \}/);
   assert.match(
+    registration,
+    /\{employee\.employeeCode\} \{employee\.name\}/,
+  );
+  assert.doesNotMatch(
     registration,
     /กรุณา \{employee\.employeeCode\} \{employee\.name\}/,
   );
