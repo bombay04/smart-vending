@@ -78,6 +78,7 @@ model Transaction {
   providerStatus              String?
   expiresAt                   DateTime?
   paidAt                      DateTime?
+  customerCancelledAt         DateTime?
   saleNotificationAttemptedAt DateTime?
   createdAt                   DateTime        @default(now())
   updatedAt                   DateTime        @updatedAt

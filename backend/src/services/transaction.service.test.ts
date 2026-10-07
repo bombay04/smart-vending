@@ -12,6 +12,7 @@ import type {
 } from "../notifications/notification-provider";
 import { HttpError } from "../utils/http-error";
 import {
+  cancelPaymentWithDependencies,
   createPromptPayPaymentWithDependencies,
   getPaymentStatusWithDependencies,
   type PaymentRecord,
@@ -44,6 +45,7 @@ function baseRecord(overrides: Partial<PaymentRecord> = {}): PaymentRecord {
     providerStatus: null,
     expiresAt: null,
     paidAt: null,
+    customerCancelledAt: null,
     ...overrides,
   };
 }
@@ -114,15 +116,43 @@ class MemoryStore implements PaymentStore {
       ...this.record,
       paymentStatus,
       providerStatus: payment.status,
-      slotStatus: paymentStatus === "SUCCESS" ? "SOLD_OUT" : this.record.slotStatus,
+      slotStatus:
+        paymentStatus === "SUCCESS" && this.record.customerCancelledAt === null
+          ? "SOLD_OUT"
+          : this.record.slotStatus,
       paidAt: paymentStatus === "SUCCESS" ? new Date("2026-09-23T09:00:00Z") : null,
+    };
+    return { ...this.record };
+  }
+
+  async abandonPayment(transactionId: number) {
+    if (!this.record || this.record.id !== transactionId) {
+      throw new HttpError("Transaction not found.", 404);
+    }
+    if (this.record.customerCancelledAt !== null) {
+      return { ...this.record };
+    }
+    if (this.record.paymentStatus === "SUCCESS") {
+      throw new HttpError(
+        "Payment has already been confirmed.",
+        409,
+        "PAYMENT_ALREADY_CONFIRMED",
+      );
+    }
+    this.record = {
+      ...this.record,
+      customerCancelledAt: new Date("2026-10-07T09:00:00Z"),
     };
     return { ...this.record };
   }
 
   async claimSaleNotification(transactionId: number) {
     assert.equal(transactionId, this.record?.id);
-    if (this.record?.paymentStatus !== "SUCCESS" || this.saleNotificationClaimed) {
+    if (
+      this.record?.paymentStatus !== "SUCCESS" ||
+      this.record.customerCancelledAt !== null ||
+      this.saleNotificationClaimed
+    ) {
       return false;
     }
     this.saleNotificationClaimed = true;
@@ -224,6 +254,120 @@ test("provider pending status remains pending and does not sell out the slot", a
   const result = await getPaymentStatusWithDependencies(91, store, new MockProvider());
   assert.equal(result.paymentStatus, "PENDING");
   assert.equal(result.slotStatus, "AVAILABLE");
+});
+
+test("pending payment cancellation persists abandonment without changing slot state", async () => {
+  const store = new MemoryStore(
+    baseRecord({ providerChargeId: providerPending.chargeId }),
+  );
+  const result = await cancelPaymentWithDependencies(
+    91,
+    store,
+    new MockProvider(),
+  );
+
+  assert.equal(result.customerCancelled, true);
+  assert.ok(store.record?.customerCancelledAt);
+  assert.equal(store.record?.paymentStatus, "PENDING");
+  assert.equal(store.record?.slotStatus, "AVAILABLE");
+});
+
+test("repeated payment cancellation is idempotent", async () => {
+  const store = new MemoryStore(
+    baseRecord({ providerChargeId: providerPending.chargeId }),
+  );
+  const provider = new MockProvider();
+
+  const first = await cancelPaymentWithDependencies(91, store, provider);
+  const cancelledAt = store.record?.customerCancelledAt;
+  const second = await cancelPaymentWithDependencies(91, store, provider);
+
+  assert.equal(first.customerCancelled, true);
+  assert.equal(second.customerCancelled, true);
+  assert.equal(store.record?.customerCancelledAt, cancelledAt);
+  assert.equal(provider.retrieveCount, 1);
+});
+
+test("unknown payment cannot be cancelled", async () => {
+  await assert.rejects(
+    cancelPaymentWithDependencies(
+      404,
+      new MemoryStore(null),
+      new MockProvider(),
+    ),
+    (error: unknown) => error instanceof HttpError && error.statusCode === 404,
+  );
+});
+
+test("already-successful payment cannot be falsely cancelled", async () => {
+  const store = new MemoryStore(
+    baseRecord({
+      paymentStatus: "SUCCESS",
+      providerChargeId: providerPending.chargeId,
+      slotStatus: "SOLD_OUT",
+    }),
+  );
+
+  await assert.rejects(
+    cancelPaymentWithDependencies(91, store, new MockProvider()),
+    (error: unknown) =>
+      error instanceof HttpError &&
+      error.statusCode === 409 &&
+      error.code === "PAYMENT_ALREADY_CONFIRMED",
+  );
+  assert.equal(store.record?.customerCancelledAt, null);
+});
+
+test("provider success observed during cancellation wins and completes the existing sale", async () => {
+  const success: ProviderPayment = {
+    ...providerPending,
+    status: "successful",
+    paid: true,
+  };
+  const store = new MemoryStore(
+    baseRecord({ providerChargeId: success.chargeId }),
+  );
+
+  await assert.rejects(
+    cancelPaymentWithDependencies(
+      91,
+      store,
+      new MockProvider(providerPending, success),
+    ),
+    (error: unknown) =>
+      error instanceof HttpError &&
+      error.statusCode === 409 &&
+      error.code === "PAYMENT_ALREADY_CONFIRMED",
+  );
+  assert.equal(store.record?.customerCancelledAt, null);
+  assert.equal(store.record?.paymentStatus, "SUCCESS");
+  assert.equal(store.record?.slotStatus, "SOLD_OUT");
+});
+
+test("late provider success remains recorded but an abandoned sale is never fulfillable", async () => {
+  const success: ProviderPayment = {
+    ...providerPending,
+    status: "successful",
+    paid: true,
+  };
+  const store = new MemoryStore(
+    baseRecord({ providerChargeId: success.chargeId }),
+  );
+  const notificationProvider = new MockNotificationProvider();
+
+  await cancelPaymentWithDependencies(91, store, new MockProvider());
+  const result = await getPaymentStatusWithDependencies(
+    91,
+    store,
+    new MockProvider(providerPending, success),
+    { provider: notificationProvider },
+  );
+
+  assert.equal(result.paymentStatus, "SUCCESS");
+  assert.equal(result.customerCancelled, true);
+  assert.equal(result.slotStatus, "AVAILABLE");
+  assert.equal(notificationProvider.saleNotifications.length, 0);
+  assert.equal(store.saleNotificationClaimCount, 0);
 });
 
 test("provider success immediately completes the sale and marks the slot sold out", async () => {

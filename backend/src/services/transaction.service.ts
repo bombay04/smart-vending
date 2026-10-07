@@ -1,4 +1,4 @@
-import type { PaymentStatus, Prisma } from "@prisma/client";
+import type { PaymentStatus, Prisma } from "../../generated/prisma-client";
 import { prisma } from "../lib/prisma";
 import {
   dispatchSaleNotification,
@@ -26,6 +26,7 @@ export interface PaymentRecord {
   providerStatus: string | null;
   expiresAt: Date | null;
   paidAt: Date | null;
+  customerCancelledAt: Date | null;
 }
 
 export interface SaveProviderPaymentInput {
@@ -44,6 +45,7 @@ export interface PaymentStore {
   findPayment(transactionId: number): Promise<PaymentRecord | null>;
   findPaymentByProviderChargeId(providerChargeId: string): Promise<PaymentRecord | null>;
   applyProviderStatus(transactionId: number, payment: ProviderPayment): Promise<PaymentRecord>;
+  abandonPayment(transactionId: number): Promise<PaymentRecord>;
   claimSaleNotification(transactionId: number): Promise<boolean>;
 }
 
@@ -65,6 +67,7 @@ function toPaymentRecord(transaction: TransactionWithRelations): PaymentRecord {
     providerStatus: transaction.providerStatus,
     expiresAt: transaction.expiresAt,
     paidAt: transaction.paidAt,
+    customerCancelledAt: transaction.customerCancelledAt,
   };
 }
 
@@ -110,7 +113,11 @@ const prismaPaymentStore: PaymentStore = {
           }
 
           const pendingPayment = await database.transaction.findFirst({
-            where: { slotId: slot.id, paymentStatus: "PENDING" },
+            where: {
+              slotId: slot.id,
+              paymentStatus: "PENDING",
+              customerCancelledAt: null,
+            },
             select: { id: true },
           });
           if (pendingPayment) {
@@ -208,7 +215,7 @@ const prismaPaymentStore: PaymentStore = {
             },
           });
 
-          if (paymentStatus === "SUCCESS") {
+          if (paymentStatus === "SUCCESS" && current.customerCancelledAt === null) {
             await database.slot.update({
               where: { id: current.slotId },
               data: { status: "SOLD_OUT" },
@@ -226,11 +233,46 @@ const prismaPaymentStore: PaymentStore = {
     );
   },
 
+  async abandonPayment(transactionId) {
+    return withSerializableRetry(() =>
+      prisma.$transaction(
+        async (database) => {
+          const current = await database.transaction.findUnique({
+            where: { id: transactionId },
+            include: { slot: true, product: true },
+          });
+          if (!current) {
+            throw new HttpError("Transaction not found.", 404);
+          }
+          if (current.customerCancelledAt !== null) {
+            return toPaymentRecord(current);
+          }
+          if (current.paymentStatus === "SUCCESS") {
+            throw new HttpError(
+              "Payment has already been confirmed.",
+              409,
+              PAYMENT_ALREADY_CONFIRMED_CODE,
+            );
+          }
+
+          const updated = await database.transaction.update({
+            where: { id: transactionId },
+            data: { customerCancelledAt: new Date() },
+            include: { slot: true, product: true },
+          });
+          return toPaymentRecord(updated);
+        },
+        { isolationLevel: "Serializable" },
+      ),
+    );
+  },
+
   async claimSaleNotification(transactionId) {
     const result = await prisma.transaction.updateMany({
       where: {
         id: transactionId,
         paymentStatus: "SUCCESS",
+        customerCancelledAt: null,
         saleNotificationAttemptedAt: null,
       },
       data: { saleNotificationAttemptedAt: new Date() },
@@ -266,8 +308,11 @@ function toSafePaymentResponse(payment: PaymentRecord, qrImageUrl?: string | nul
     qrImageUrl: qrImageUrl ?? undefined,
     expiresAt: payment.expiresAt?.toISOString() ?? null,
     paidAt: payment.paidAt?.toISOString() ?? null,
+    customerCancelled: payment.customerCancelledAt !== null,
   };
 }
+
+export const PAYMENT_ALREADY_CONFIRMED_CODE = "PAYMENT_ALREADY_CONFIRMED";
 
 function validateProviderPayment(payment: PaymentRecord, providerPayment: ProviderPayment): void {
   if (payment.providerChargeId !== providerPayment.chargeId) {
@@ -310,7 +355,12 @@ async function notifyCompletedSale(
   store: PaymentStore,
   notifications?: NotificationDependencies,
 ): Promise<void> {
-  if (!notifications || payment.paymentStatus !== "SUCCESS" || payment.slotStatus !== "SOLD_OUT") {
+  if (
+    !notifications ||
+    payment.paymentStatus !== "SUCCESS" ||
+    payment.slotStatus !== "SOLD_OUT" ||
+    payment.customerCancelledAt !== null
+  ) {
     return;
   }
 
@@ -400,6 +450,62 @@ export function getPaymentStatus(transactionId: number) {
   return getPaymentStatusWithDependencies(transactionId, prismaPaymentStore, getPaymentProvider(), {
     provider: getNotificationProvider(),
   });
+}
+
+export async function cancelPaymentWithDependencies(
+  transactionId: number,
+  store: PaymentStore,
+  provider: PaymentProvider,
+  notifications?: NotificationDependencies,
+) {
+  const payment = await store.findPayment(transactionId);
+  if (!payment) {
+    throw new HttpError("Transaction not found.", 404);
+  }
+  if (payment.customerCancelledAt !== null) {
+    return toSafePaymentResponse(payment);
+  }
+  if (payment.paymentStatus === "SUCCESS") {
+    throw new HttpError(
+      "Payment has already been confirmed.",
+      409,
+      PAYMENT_ALREADY_CONFIRMED_CODE,
+    );
+  }
+
+  let current = payment;
+  if (payment.providerChargeId) {
+    try {
+      const providerPayment = await provider.retrievePayment(payment.providerChargeId);
+      validateProviderPayment(payment, providerPayment);
+      current = await store.applyProviderStatus(payment.id, providerPayment);
+      await notifyCompletedSale(current, store, notifications);
+    } catch (error: unknown) {
+      if (error instanceof HttpError) {
+        throw error;
+      }
+      throw new HttpError("Unable to verify payment before cancellation.", 502);
+    }
+  }
+
+  if (current.paymentStatus === "SUCCESS") {
+    throw new HttpError(
+      "Payment has already been confirmed.",
+      409,
+      PAYMENT_ALREADY_CONFIRMED_CODE,
+    );
+  }
+
+  return toSafePaymentResponse(await store.abandonPayment(transactionId));
+}
+
+export function cancelPayment(transactionId: number) {
+  return cancelPaymentWithDependencies(
+    transactionId,
+    prismaPaymentStore,
+    getPaymentProvider(),
+    { provider: getNotificationProvider() },
+  );
 }
 
 export async function reconcileWebhookChargeWithDependencies(

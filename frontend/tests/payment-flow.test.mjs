@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { handleConfirmedPaymentOnce } from "../src/payment-flow.mjs";
+import {
+  handleConfirmedPaymentOnce,
+  resumeWaitingPaymentAfterCancellationReconciliation,
+} from "../src/payment-flow.mjs";
 import {
   AUDIO_EVENTS,
   commitRestockAndNotify,
@@ -31,6 +34,68 @@ test("pending, failed, and expired payments never unlock", async () => {
     assert.equal(unlockCount, 0);
     assert.deepEqual(audioEvents, []);
   }
+});
+
+test("customer-cancelled provider success never unlocks", async () => {
+  let unlockCount = 0;
+  let confirmedCount = 0;
+  const handled = await handleConfirmedPaymentOnce(
+    {
+      transactionId: 2,
+      slotNumber: 1,
+      paymentStatus: "SUCCESS",
+      customerCancelled: true,
+    },
+    new Set(),
+    {
+      onSaleConfirmed() {
+        confirmedCount += 1;
+      },
+      async unlock() {
+        unlockCount += 1;
+      },
+      onUnlocked() {},
+      onUnlockFailed() {},
+    },
+  );
+
+  assert.equal(handled, false);
+  assert.equal(unlockCount, 0);
+  assert.equal(confirmedCount, 0);
+});
+
+test("non-terminal cancellation conflict reconciliation resumes waiting and polling", () => {
+  const stalePayment = {
+    transactionId: 91,
+    slotNumber: 1,
+    paymentStatus: "PENDING",
+  };
+  const authoritativePayment = {
+    ...stalePayment,
+    qrImageUrl: "https://api.omise.co/qr/current",
+  };
+  const currentScreen = {
+    phase: "waiting",
+    payment: stalePayment,
+    isCancelling: true,
+    cancelError: "stale cancellation error",
+    pollError: "stale polling error",
+  };
+
+  assert.deepEqual(
+    resumeWaitingPaymentAfterCancellationReconciliation(
+      currentScreen,
+      91,
+      authoritativePayment,
+    ),
+    {
+      phase: "waiting",
+      payment: authoritativePayment,
+      isCancelling: false,
+      cancelError: null,
+      pollError: null,
+    },
+  );
 });
 
 test("success unlocks the correct slot exactly once and completes the customer success path", async () => {
@@ -330,4 +395,52 @@ test("customer UI uses provider QR, backend polling, waiting state, and no fake 
   assert.match(audioApi, /\/audio\/play/);
   assert.doesNotMatch(home, /mock-purchase|createMockPurchase|fake payment/i);
   assert.doesNotMatch(home, /setTimeout\([^)]*SUCCESS/i);
+});
+
+test("QR cancellation is backend-authoritative, guarded, retryable, and race-safe", async () => {
+  const [home, api, flow] = await Promise.all([
+    readFile(new URL("../src/pages/HomePage.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/api/transaction.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/payment-flow.mjs", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(home, /"ยกเลิก"/);
+  assert.match(home, /cancelPayment\(transactionId\)/);
+  assert.match(home, /disabled=\{paymentScreen\.isCancelling\}/);
+  assert.match(home, /cancellationInFlightTransactionIds/);
+  assert.match(home, /ไม่สามารถยกเลิกรายการได้ กรุณาลองอีกครั้ง/);
+  assert.match(home, /PAYMENT_ALREADY_CONFIRMED/);
+  assert.match(home, /fetchPaymentStatus\(transactionId\)/);
+  assert.match(
+    home,
+    /resumeWaitingPaymentAfterCancellationReconciliation\([\s\S]*?currentPayment/,
+  );
+  assert.match(home, /customerCancelledTransactionIds\.current\.has\(transactionId\)/);
+  assert.match(home, /controller\?\.abort\(\)/);
+  assert.match(api, /\$\{transactionId\}\/cancel/);
+  assert.match(api, /method: "POST"/);
+  assert.match(flow, /payment\.customerCancelled === true/);
+});
+
+test("FAILED and EXPIRED auto-return while unlock failure remains persistent", async () => {
+  const home = await readFile(
+    new URL("../src/pages/HomePage.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(home, /PAYMENT_FAILURE_RETURN_MS = 2000/);
+  assert.match(
+    home,
+    /paymentScreen\?\.phase !== "failed"[\s\S]*?setPaymentScreen\(null\)[\s\S]*?PAYMENT_FAILURE_RETURN_MS/,
+  );
+  assert.match(home, /ชำระเงินไม่สำเร็จ/);
+  assert.match(home, /กรุณาลองใหม่อีกครั้ง/);
+  assert.match(home, /หมดเวลาชำระเงิน/);
+  assert.match(home, /กรุณาเลือกสินค้าและทำรายการใหม่/);
+  assert.doesNotMatch(home, /กลับไปเลือกสินค้า/);
+  assert.match(home, /paymentScreen\.phase === "unlock-failed"/);
+  assert.doesNotMatch(
+    home,
+    /paymentScreen\?\.phase !== "unlock-failed"[\s\S]*?PAYMENT_FAILURE_RETURN_MS/,
+  );
 });
