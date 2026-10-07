@@ -182,29 +182,15 @@
   font-weight: 900;
 }
 
-.payment-back-button {
-  min-width: 220px;
-  min-height: 58px;
-  margin-top: 24px;
-  padding: 0 24px;
-  border: 0;
-  border-radius: 18px;
-  color: #ffffff;
-  background: #2563eb;
-  font-weight: 850;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
 .payment-cancel-button {
   min-width: 180px;
   min-height: 52px;
   margin-top: 14px;
   padding: 0 24px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid #2563eb;
   border-radius: 16px;
-  color: #475569;
-  background: #ffffff;
+  color: #ffffff;
+  background: #2563eb;
   font: inherit;
   font-weight: 850;
   cursor: pointer;
@@ -212,7 +198,9 @@
 }
 
 .payment-cancel-button:disabled {
-  opacity: 0.55;
+  border-color: #93c5fd;
+  color: #eff6ff;
+  background: #93c5fd;
   cursor: not-allowed;
 }
 
@@ -1898,11 +1886,6 @@
     height: 62px;
     margin-bottom: 12px;
     font-size: 2.25rem;
-  }
-
-  .payment-back-button {
-    min-height: 56px;
-    margin-top: 14px;
   }
 
   .payment-cancel-button {

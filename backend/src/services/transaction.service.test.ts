@@ -116,6 +116,9 @@ class MemoryStore implements PaymentStore {
       ...this.record,
       paymentStatus,
       providerStatus: payment.status,
+      expiresAt: payment.expiresAt
+        ? new Date(payment.expiresAt)
+        : this.record.expiresAt,
       slotStatus:
         paymentStatus === "SUCCESS" && this.record.customerCancelledAt === null
           ? "SOLD_OUT"
@@ -220,6 +223,8 @@ test("payment creation uses backend slot, product, and price and starts pending"
   });
   assert.equal(result.paymentStatus, "PENDING");
   assert.equal(result.qrImageUrl, providerPending.qrImageUrl);
+  assert.equal(result.expiresAt, providerPending.expiresAt);
+  assert.equal(store.record?.expiresAt?.toISOString(), providerPending.expiresAt);
   assert.equal(store.savedProviderChargeId, providerPending.chargeId);
   assert.equal("providerChargeId" in result, false);
   assert.equal(JSON.stringify(result).includes("skey_"), false);
@@ -419,6 +424,7 @@ test("failed and expired provider payments never sell out the slot", async () =>
     );
     assert.equal(result.paymentStatus, status === "failed" ? "FAILED" : "EXPIRED");
     assert.equal(result.slotStatus, "AVAILABLE");
+    assert.equal(result.expiresAt, providerPayment.expiresAt);
     assert.equal(notificationProvider.saleNotifications.length, 0);
   }
 });

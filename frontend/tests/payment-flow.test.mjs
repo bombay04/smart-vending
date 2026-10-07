@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   handleConfirmedPaymentOnce,
@@ -39,6 +39,7 @@ test("pending, failed, and expired payments never unlock", async () => {
 test("customer-cancelled provider success never unlocks", async () => {
   let unlockCount = 0;
   let confirmedCount = 0;
+  const audioEvents = [];
   const handled = await handleConfirmedPaymentOnce(
     {
       transactionId: 2,
@@ -51,6 +52,9 @@ test("customer-cancelled provider success never unlocks", async () => {
       onSaleConfirmed() {
         confirmedCount += 1;
       },
+      playAudio(event) {
+        audioEvents.push(event);
+      },
       async unlock() {
         unlockCount += 1;
       },
@@ -62,6 +66,7 @@ test("customer-cancelled provider success never unlocks", async () => {
   assert.equal(handled, false);
   assert.equal(unlockCount, 0);
   assert.equal(confirmedCount, 0);
+  assert.deepEqual(audioEvents, []);
 });
 
 test("non-terminal cancellation conflict reconciliation resumes waiting and polling", () => {
@@ -320,6 +325,19 @@ test("audio failure never prevents a confirmed payment from attempting unlock", 
   assert.equal(completed, 1);
 });
 
+test("UNLOCK_FAILED is mapped to the existing Pi unlock_failed.wav asset", async () => {
+  const piService = await readFile(
+    new URL("../../edge/pi_unlock_service.py", import.meta.url),
+    "utf8",
+  );
+
+  assert.equal(AUDIO_EVENTS.UNLOCK_FAILED, "UNLOCK_FAILED");
+  assert.match(piService, /"UNLOCK_FAILED": "unlock_failed\.wav"/);
+  await access(
+    new URL("../../edge/audio/assets/unlock_failed.wav", import.meta.url),
+  );
+});
+
 test("employee success audio occurs only after backend validation accepts the match", async () => {
   const audioEvents = [];
   const employee = { id: 7, employeeCode: "EMP007", name: "Nok" };
@@ -398,10 +416,11 @@ test("customer UI uses provider QR, backend polling, waiting state, and no fake 
 });
 
 test("QR cancellation is backend-authoritative, guarded, retryable, and race-safe", async () => {
-  const [home, api, flow] = await Promise.all([
+  const [home, api, flow, css] = await Promise.all([
     readFile(new URL("../src/pages/HomePage.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/api/transaction.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/payment-flow.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../src/App.css", import.meta.url), "utf8"),
   ]);
 
   assert.match(home, /"ยกเลิก"/);
@@ -420,15 +439,18 @@ test("QR cancellation is backend-authoritative, guarded, retryable, and race-saf
   assert.match(api, /\$\{transactionId\}\/cancel/);
   assert.match(api, /method: "POST"/);
   assert.match(flow, /payment\.customerCancelled === true/);
+  assert.match(css, /\.payment-cancel-button \{[\s\S]*?color: #ffffff;[\s\S]*?background: #2563eb;/);
+  assert.match(css, /\.payment-cancel-button:disabled \{[\s\S]*?background: #93c5fd;/);
 });
 
-test("FAILED and EXPIRED auto-return while unlock failure remains persistent", async () => {
+test("payment failures and unlock failure use their distinct auto-return delays", async () => {
   const home = await readFile(
     new URL("../src/pages/HomePage.tsx", import.meta.url),
     "utf8",
   );
 
   assert.match(home, /PAYMENT_FAILURE_RETURN_MS = 2000/);
+  assert.match(home, /UNLOCK_FAILURE_RETURN_MS = 5000/);
   assert.match(
     home,
     /paymentScreen\?\.phase !== "failed"[\s\S]*?setPaymentScreen\(null\)[\s\S]*?PAYMENT_FAILURE_RETURN_MS/,
@@ -439,8 +461,33 @@ test("FAILED and EXPIRED auto-return while unlock failure remains persistent", a
   assert.match(home, /กรุณาเลือกสินค้าและทำรายการใหม่/);
   assert.doesNotMatch(home, /กลับไปเลือกสินค้า/);
   assert.match(home, /paymentScreen\.phase === "unlock-failed"/);
-  assert.doesNotMatch(
+  assert.match(
     home,
-    /paymentScreen\?\.phase !== "unlock-failed"[\s\S]*?PAYMENT_FAILURE_RETURN_MS/,
+    /paymentScreen\?\.phase !== "unlock-failed"[\s\S]*?setPaymentScreen\(null\)[\s\S]*?UNLOCK_FAILURE_RETURN_MS/,
   );
+  const unlockFailureEffect = home.match(
+    /if \(paymentScreen\?\.phase !== "unlock-failed"\)[\s\S]*?\}, \[paymentScreen\]\);/,
+  )?.[0];
+  assert.ok(unlockFailureEffect);
+  assert.doesNotMatch(unlockFailureEffect, /PAYMENT_FAILURE_RETURN_MS/);
+});
+
+test("unlock failure shows only the staff-assistance warning with no manual navigation", async () => {
+  const home = await readFile(
+    new URL("../src/pages/HomePage.tsx", import.meta.url),
+    "utf8",
+  );
+  const unlockFailureStart = home.indexOf(
+    '{paymentScreen.phase === "unlock-failed"',
+  );
+  const unlockFailureEnd = home.indexOf("\n          )}", unlockFailureStart);
+  const unlockFailureUi = home.slice(unlockFailureStart, unlockFailureEnd);
+
+  assert.ok(unlockFailureStart >= 0 && unlockFailureEnd > unlockFailureStart);
+  assert.match(unlockFailureUi, /<h1>ชำระเงินสำเร็จ<\/h1>/);
+  assert.match(unlockFailureUi, /ไม่สามารถปลดล็อกช่องสินค้าได้\s*<br \/>\s*กรุณาติดต่อพนักงาน/);
+  assert.doesNotMatch(unlockFailureUi, /การซื้อเสร็จสมบูรณ์แล้ว/);
+  assert.doesNotMatch(unlockFailureUi, /ไม่มีสินค้า/);
+  assert.doesNotMatch(unlockFailureUi, /กลับหน้าหลัก/);
+  assert.doesNotMatch(unlockFailureUi, /<button/);
 });

@@ -42,6 +42,7 @@ interface PurchaseSuccess {
 }
 
 export const PAYMENT_FAILURE_RETURN_MS = 2000;
+export const UNLOCK_FAILURE_RETURN_MS = 5000;
 
 type PaymentScreen =
   | { phase: "creating"; slotNumber: number; productName: string }
@@ -419,6 +420,15 @@ function HomePage() {
   }, [paymentScreen]);
 
   useEffect(() => {
+    if (paymentScreen?.phase !== "unlock-failed") return undefined;
+    const timeoutId = window.setTimeout(
+      () => setPaymentScreen(null),
+      UNLOCK_FAILURE_RETURN_MS,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [paymentScreen]);
+
+  useEffect(() => {
     let stopped = false;
     let timeoutId: number | undefined;
     let controller: AbortController | undefined;
@@ -666,18 +676,10 @@ function HomePage() {
               </div>
               <h1>ชำระเงินสำเร็จ</h1>
               <p className="payment-message payment-message--error">
-                ไม่สามารถปลดล็อกช่องสินค้าได้ กรุณาติดต่อพนักงาน
+                ไม่สามารถปลดล็อกช่องสินค้าได้
+                <br />
+                กรุณาติดต่อพนักงาน
               </p>
-              <p>
-                การซื้อเสร็จสมบูรณ์แล้ว และช่อง {payment.slotNumber} ไม่มีสินค้า
-              </p>
-              <button
-                className="payment-back-button"
-                type="button"
-                onClick={() => setPaymentScreen(null)}
-              >
-                กลับหน้าหลัก
-              </button>
             </>
           )}
         </section>

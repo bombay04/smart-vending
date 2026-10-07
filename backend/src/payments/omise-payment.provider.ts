@@ -8,7 +8,7 @@ import {
 
 const OMISE_API_URL = "https://api.omise.co";
 const DEFAULT_API_VERSION = "2019-05-29";
-const DEFAULT_EXPIRY_MINUTES = 15;
+export const PAYMENT_EXPIRY_MINUTES = 3;
 const PROVIDER_STATUSES = new Set<ProviderPaymentStatus>([
   "pending",
   "successful",
@@ -91,20 +91,12 @@ function normalizeCharge(value: unknown): ProviderPayment {
   };
 }
 
-function getExpiryMinutes(): number {
-  const configuredValue = Number(process.env.OMISE_PROMPTPAY_EXPIRY_MINUTES);
-  if (Number.isInteger(configuredValue) && configuredValue >= 1 && configuredValue <= 1440) {
-    return configuredValue;
-  }
-
-  return DEFAULT_EXPIRY_MINUTES;
-}
-
 export class OmisePaymentProvider implements PaymentProvider {
   constructor(
     private readonly secretKey: string,
     private readonly apiVersion = DEFAULT_API_VERSION,
     private readonly fetchImplementation: typeof fetch = fetch,
+    private readonly now: () => number = Date.now,
   ) {
     if (!secretKey) {
       throw new PaymentProviderError("Payment provider is not configured.");
@@ -112,7 +104,7 @@ export class OmisePaymentProvider implements PaymentProvider {
   }
 
   async createPromptPayPayment(input: CreateProviderPaymentInput): Promise<ProviderPayment> {
-    const expiresAt = new Date(Date.now() + getExpiryMinutes() * 60_000)
+    const expiresAt = new Date(this.now() + PAYMENT_EXPIRY_MINUTES * 60_000)
       .toISOString()
       .replace(/\.\d{3}Z$/, "Z");
     const body = new URLSearchParams({

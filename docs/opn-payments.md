@@ -8,7 +8,7 @@ The customer payment method is Omise/Opn Payments PromptPay QR. The authority ch
 
 Payment success completes the sale immediately. Product removal is not a completion condition. If the local unlock request fails after payment, the sale remains successful and the slot remains `SOLD_OUT`; staff assistance is required and no automatic refund is attempted.
 
-The backend creates the PromptPay source and charge in one server-side Opn Charge API request. It reads the slot, product, and price from PostgreSQL and converts the Prisma decimal price to integer satang. The frontend cannot supply a price, product identifier, provider status, or successful-payment flag.
+The backend creates the PromptPay source and charge in one server-side Opn Charge API request with a three-minute expiry. It reads the slot, product, and price from PostgreSQL and converts the Prisma decimal price to integer satang. The frontend cannot supply a price, product identifier, provider status, or successful-payment flag.
 
 Opn PromptPay currently accepts THB 20.00 through THB 150,000.00. The prototype seed prices are THB 20, THB 25, and THB 30 so all three slots remain purchasable; the backend rejects an out-of-range database price before contacting Opn.
 
@@ -19,7 +19,6 @@ Copy `backend/.env.example` and set these backend-only values:
 ```dotenv
 OMISE_SECRET_KEY=skey_test_replace_me
 OMISE_API_VERSION=2019-05-29
-OMISE_PROMPTPAY_EXPIRY_MINUTES=15
 OMISE_WEBHOOK_SECRET=
 ```
 
