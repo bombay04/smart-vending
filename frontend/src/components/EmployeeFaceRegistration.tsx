@@ -8,6 +8,7 @@ import { completeEmployeeFaceRegistration } from "../api/employee-auth";
 import type { KioskSession } from "../api/kiosk-session";
 import { fetchCurrentKioskSession } from "../api/kiosk-session";
 import { canCancelFaceRegistration } from "../face-registration-session-cleanup.mjs";
+import SuccessCheckIcon from "./SuccessCheckIcon";
 
 type RegistrationState =
   | "CHECKING"
@@ -195,6 +196,19 @@ function EmployeeFaceRegistration({
     "BUSY",
     "PI_UNAVAILABLE",
   ].includes(state);
+  const statusTone = state === "SUCCESS"
+    ? "success"
+    : state === "BUSY"
+      ? "busy"
+      : [
+          "SYNC_ERROR",
+          "NO_FACE",
+          "MULTIPLE_FACES",
+          "FACE_ALREADY_REGISTERED",
+          "PI_UNAVAILABLE",
+        ].includes(state)
+        ? "error"
+        : "ready";
 
   return (
     <main className="home-page employee-registration-page">
@@ -208,11 +222,11 @@ function EmployeeFaceRegistration({
           }`}
           aria-hidden="true"
         >
-          <span>{state === "SUCCESS" ? "✓" : "◎"}</span>
+          {state === "SUCCESS" ? <SuccessCheckIcon /> : <span>◎</span>}
         </div>
         <h1 id="registration-title">ลงทะเบียนใบหน้า</h1>
         <div
-          className="employee-registration-status"
+          className={`employee-registration-status face-flow-status face-flow-status--${statusTone}`}
           aria-live="polite"
           aria-busy={busy}
         >

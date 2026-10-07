@@ -12,6 +12,7 @@ import {
 import type { AuthenticatedEmployee } from "../types/employee";
 import { playAudioFeedback } from "../api/audio";
 import { validateEmployeeAndNotify } from "../audio-feedback.mjs";
+import SuccessCheckIcon from "./SuccessCheckIcon";
 
 interface EmployeeAuthenticationProps {
   sessionId: number;
@@ -28,54 +29,50 @@ type AuthenticationState =
 
 const STATE_CONTENT: Record<
   AuthenticationState,
-  { title: string; instruction: string }
+  { title?: string; instruction: string }
 > = {
   CHECKING: {
-    title: "Checking Scanner",
-    instruction:
-      "Checking whether employee face authentication is available...",
+    title: "กำลังตรวจสอบเครื่องสแกน",
+    instruction: "กำลังตรวจสอบว่าระบบยืนยันตัวตนด้วยใบหน้าพร้อมใช้งานหรือไม่...",
   },
   IDLE: {
-    title: "Ready to Scan",
-    instruction:
-      "Face the camera, make sure you are the only person visible, then tap Scan Face.",
+    instruction: "กรุณามองตรงไปที่กล้อง",
   },
   SCANNING: {
-    title: "Scanning Face",
+    title: "กำลังสแกนใบหน้า",
     instruction:
-      "Look directly at the camera and keep still while three samples are captured.",
+      "กรุณามองตรงไปที่กล้องและอยู่นิ่ง ขณะระบบกำลังสแกนใบหน้า",
   },
   SUCCESS: {
-    title: "Authentication Successful",
-    instruction: "Employee identity verified. Opening Restock Mode...",
+    title: "ยืนยันตัวตนสำเร็จ",
+    instruction:
+      "ยืนยันตัวตนพนักงานเรียบร้อยแล้ว กำลังเข้าสู่โหมดเติมสินค้า...",
   },
   NO_MATCH: {
-    title: "Face Not Recognized",
-    instruction:
-      "We could not verify an active employee. Adjust your position and try again.",
+    title: "ยืนยันตัวตนไม่สำเร็จ",
+    instruction: "ไม่สามารถยืนยันตัวตนได้ กรุณาลองอีกครั้ง",
   },
   NO_FACE: {
-    title: "No Face Detected",
-    instruction: "Center your face in front of the camera, then try again.",
+    title: "ไม่พบใบหน้า",
+    instruction:
+      "กรุณาจัดใบหน้าให้อยู่ในตำแหน่งที่กล้องมองเห็น แล้วลองอีกครั้ง",
   },
   MULTIPLE_FACES: {
-    title: "One Person at a Time",
-    instruction:
-      "Make sure only one person is visible to the camera, then try again.",
+    title: "ตรวจพบหลายใบหน้า",
+    instruction: "กรุณาให้พนักงานอยู่หน้ากล้องเพียงคนเดียว",
   },
   BUSY: {
-    title: "Scanner Busy",
-    instruction: "Another scan is in progress. Wait a moment, then try again.",
+    title: "กล้องกำลังถูกใช้งาน",
+    instruction: "มีการใช้งานกล้องอยู่ กรุณาลองอีกครั้งในอีกสักครู่",
   },
   UNAVAILABLE: {
-    title: "Scanner Unavailable",
-    instruction:
-      "Face authentication is unavailable. Check the camera service and try again.",
+    title: "ไม่สามารถใช้งานเครื่องสแกนได้",
+    instruction: "กรุณาตรวจสอบบริการสแกนใบหน้าบนเครื่อง แล้วลองอีกครั้ง",
   },
   LOCKED: {
-    title: "Face Authentication Locked",
+    title: "ระบบยืนยันตัวตนถูกล็อกชั่วคราว",
     instruction:
-      "Too many failed attempts. Face scanning is temporarily disabled.",
+      "มีการยืนยันตัวตนไม่สำเร็จหลายครั้ง ระบบสแกนใบหน้าจึงถูกปิดใช้งานชั่วคราว",
   },
 };
 
@@ -287,7 +284,7 @@ function EmployeeAuthentication({
       await onCancel();
     } catch {
       setCancelError(
-        "Unable to close the restock session. Check the connection and try again.",
+        "ไม่สามารถกลับสู่หน้าหลักได้ กรุณาตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง",
       );
       setAuthenticationState("IDLE");
     } finally {
@@ -307,6 +304,13 @@ function EmployeeAuthentication({
     "SUCCESS",
     "LOCKED",
   ].includes(authenticationState);
+  const statusTone = isSuccessful
+    ? "success"
+    : authenticationState === "BUSY"
+      ? "busy"
+      : isFailure || isLocked
+        ? "error"
+        : "ready";
 
   return (
     <main className="home-page employee-auth-page">
@@ -314,36 +318,33 @@ function EmployeeAuthentication({
         className="employee-auth-card"
         aria-labelledby="employee-auth-title"
       >
-        <p className="mode-label mode-label--employee">Employee Mode</p>
         <div
           className={`face-scan-indicator face-scan-indicator--${authenticationState.toLowerCase()}`}
           aria-hidden="true"
         >
-          <span>{isSuccessful ? "✓" : "◎"}</span>
+          {isSuccessful ? <SuccessCheckIcon /> : <span>◎</span>}
         </div>
-        <h1 id="employee-auth-title">Face Authentication</h1>
+        <h1 id="employee-auth-title">ยืนยันตัวตนพนักงาน</h1>
         <div
-          className="employee-auth-status"
+          className={`employee-auth-status face-flow-status face-flow-status--${statusTone}`}
           aria-live="polite"
           aria-busy={isScanning}
         >
-          <h2>{content.title}</h2>
+          {content.title && <h2>{content.title}</h2>}
           <p>{content.instruction}</p>
           {remainingAttempts !== null && remainingAttempts > 0 && isFailure && (
             <p className="employee-auth-attempts">
-              {remainingAttempts}{" "}
-              {remainingAttempts === 1 ? "attempt" : "attempts"} remaining
-              before temporary lockout.
+              เหลืออีก {remainingAttempts} ครั้งก่อนระบบล็อกชั่วคราว
             </p>
           )}
           {isLocked && lockoutSeconds !== null && (
             <p className="employee-auth-countdown">
-              Try again in {formatCountdown(lockoutSeconds)}
+              ลองอีกครั้งใน {formatCountdown(lockoutSeconds)}
             </p>
           )}
           {authenticatedEmployee && (
             <p className="employee-auth-identity">
-              Welcome, {authenticatedEmployee.name}
+              ยินดีต้อนรับ {authenticatedEmployee.name}
             </p>
           )}
           {cancelError && (
@@ -361,14 +362,14 @@ function EmployeeAuthentication({
             onClick={() => void handleScan()}
           >
             {isChecking
-              ? "Checking..."
+              ? "กำลังตรวจสอบ..."
               : isScanning
-                ? "Scanning..."
+                ? "กำลังสแกน..."
                 : isLocked
-                  ? "Temporarily Locked"
+                  ? "ระบบถูกล็อกชั่วคราว"
                   : isFailure
-                    ? "Try Again"
-                    : "Scan Face"}
+                    ? "ลองอีกครั้ง"
+                    : "สแกนใบหน้า"}
           </button>
           <button
             className="employee-auth-cancel"
@@ -376,7 +377,7 @@ function EmployeeAuthentication({
             disabled={isCancelling}
             onClick={() => void handleCancel()}
           >
-            {isCancelling ? "Closing Restock Session..." : "Back to Customer Mode"}
+            {isCancelling ? "กำลังกลับสู่หน้าหลัก..." : "กลับสู่หน้าหลัก"}
           </button>
         </div>
       </section>
