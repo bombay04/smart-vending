@@ -356,7 +356,10 @@
 .face-scan-indicator--no_face,
 .face-scan-indicator--multiple_faces,
 .face-scan-indicator--unavailable,
-.face-scan-indicator--locked {
+.face-scan-indicator--locked,
+.face-scan-indicator--sync_error,
+.face-scan-indicator--face_already_registered,
+.face-scan-indicator--pi_unavailable {
   border-color: #fecaca;
   color: #b91c1c;
   background: #fff7f7;
@@ -453,16 +456,6 @@
   font-size: clamp(2.1rem, 6vw, 3.75rem);
   line-height: 1.05;
   letter-spacing: -0.04em;
-}
-
-.employee-registration-card .face-scan-indicator {
-  border-color: #c4b5fd;
-  color: #6d28d9;
-  background: #f5f3ff;
-}
-
-.employee-registration-card .face-scan-indicator--scanning {
-  border-color: #a78bfa;
 }
 
 .employee-registration-status {

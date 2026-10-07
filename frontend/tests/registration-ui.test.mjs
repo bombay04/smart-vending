@@ -180,6 +180,36 @@ test("local face setup uses the session-bound employee and metadata-only sync re
   assert.doesNotMatch(registration, /type="text"/);
 });
 
+test("Pi face registration reuses authentication icon colors for every state", async () => {
+  const [registration, css] = await Promise.all([
+    source("src/components/EmployeeFaceRegistration.tsx"),
+    source("src/App.css"),
+  ]);
+
+  assert.match(registration, /className=\{`face-scan-indicator/);
+  assert.match(registration, /state\.toLowerCase\(\)/);
+  assert.match(
+    css,
+    /\.face-scan-indicator \{[\s\S]*?border: 3px solid #a5f3fc;[\s\S]*?color: #0e7490;[\s\S]*?background: #ecfeff;/,
+  );
+  assert.doesNotMatch(
+    css,
+    /\.employee-registration-card \.face-scan-indicator/,
+  );
+  assert.match(
+    css,
+    /\.face-scan-indicator--sync_error,[\s\S]*?\.face-scan-indicator--face_already_registered,[\s\S]*?\.face-scan-indicator--pi_unavailable \{[\s\S]*?border-color: #fecaca;[\s\S]*?color: #b91c1c;[\s\S]*?background: #fff7f7;/,
+  );
+  assert.match(
+    css,
+    /\.face-scan-indicator--success \{[\s\S]*?color: #15803d;[\s\S]*?background: #f0fdf4;/,
+  );
+  assert.match(
+    css,
+    /\.face-scan-indicator--busy \{[\s\S]*?color: #a16207;[\s\S]*?background: #fffbeb;/,
+  );
+});
+
 test("customer Home does not expose staff or admin registration navigation", async () => {
   const home = await source("src/pages/HomePage.tsx");
 
