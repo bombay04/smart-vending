@@ -33,7 +33,7 @@ test("pending, failed, and expired payments never unlock", async () => {
   }
 });
 
-test("success unlocks the correct slot exactly once and completes the Thank You path", async () => {
+test("success unlocks the correct slot exactly once and completes the customer success path", async () => {
   const attempted = new Set();
   const unlockedSlots = [];
   const audioEvents = [];
@@ -319,12 +319,12 @@ test("customer UI uses provider QR, backend polling, waiting state, and no fake 
   );
 
   assert.match(home, /src=\{payment\.qrImageUrl\}/);
-  assert.match(home, /Waiting for payment confirmation/);
+  assert.match(home, /กำลังรอยืนยันการชำระเงิน/);
   assert.match(home, /fetchPaymentStatus\(\s*transactionId/);
   assert.match(home, /handleConfirmedPaymentOnce/);
-  assert.match(home, /Payment successful/);
-  assert.match(home, /Unable to unlock the compartment/);
-  assert.match(home, /<h1>Thank You<\/h1>/);
+  assert.match(home, /ชำระเงินสำเร็จ/);
+  assert.match(home, /ไม่สามารถปลดล็อกช่องสินค้าได้/);
+  assert.match(home, /<h1>ขอบคุณ<\/h1>/);
   assert.match(api, /\/payment-status/);
   assert.match(audioApi, /PI_UNLOCK_BASE_URL/);
   assert.match(audioApi, /\/audio\/play/);

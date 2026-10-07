@@ -28,6 +28,8 @@ import type { MockRestockResult } from "../api/restock";
 import type { Slot } from "../types/slot";
 import { decideKioskSessionAction } from "../kiosk-session-flow.mjs";
 import { cancelRestockSessionAndCleanup } from "../restock-session-cleanup.mjs";
+import { getProductDisplayName } from "../product-display";
+import SuccessCheckIcon from "../components/SuccessCheckIcon";
 
 interface PurchaseSuccess {
   slotNumber: number;
@@ -201,13 +203,9 @@ function HomePage() {
       } else {
         setPaymentScreen({ phase: "waiting", payment, pollError: null });
       }
-    } catch (paymentFailure: unknown) {
+    } catch {
       setPaymentScreen(null);
-      setPurchaseError(
-        paymentFailure instanceof Error
-          ? paymentFailure.message
-          : "Unable to start payment. Please try again.",
-      );
+      setPurchaseError("ไม่สามารถเริ่มการชำระเงินได้ กรุณาลองอีกครั้ง");
     }
   }
 
@@ -260,16 +258,14 @@ function HomePage() {
         }
 
         setPaymentScreen({ phase: "waiting", payment, pollError: null });
-      } catch (pollFailure: unknown) {
+      } catch {
         if (!stopped) {
           setPaymentScreen((current) =>
             current?.phase === "waiting"
               ? {
                   ...current,
                   pollError:
-                    pollFailure instanceof Error
-                      ? pollFailure.message
-                      : "Unable to check payment. We will keep trying.",
+                    "ไม่สามารถตรวจสอบการชำระเงินได้ ระบบจะลองอีกครั้ง",
                 }
               : current,
           );
@@ -428,25 +424,11 @@ function HomePage() {
 
   if (purchaseSuccess !== null) {
     return (
-      <main className="home-page home-page--success">
+      <main className="home-page home-page--success customer-kiosk-page">
         <section className="purchase-success" aria-live="polite">
-          <div className="purchase-success__icon" aria-hidden="true">
-            ✓
-          </div>
-          <p className="mode-label">Customer Mode</p>
-          <h1>Thank You</h1>
-          <p className="purchase-success__product">
-            Payment successful — {purchaseSuccess.productName}
-          </p>
-          <p className="purchase-success__slot">
-            Slot <strong>{purchaseSuccess.slotNumber}</strong> is unlocked.
-          </p>
-          <p className="purchase-success__instruction">
-            Please take your product.
-          </p>
-          <p className="purchase-success__return">
-            Returning to product selection...
-          </p>
+          <SuccessCheckIcon />
+          <h1>ขอบคุณ</h1>
+          <p className="purchase-success__instruction">กรุณารับสินค้า</p>
         </section>
       </main>
     );
@@ -455,17 +437,17 @@ function HomePage() {
   if (paymentScreen !== null) {
     const payment = "payment" in paymentScreen ? paymentScreen.payment : null;
     return (
-      <main className="home-page payment-page">
+      <main className="home-page payment-page customer-kiosk-page">
         <section
           className={`payment-card payment-card--${paymentScreen.phase}`}
           aria-live="polite"
         >
-          <p className="mode-label">PromptPay</p>
           {paymentScreen.phase === "creating" && (
             <>
-              <h1>Preparing payment</h1>
+              <h1>กำลังเตรียมการชำระเงิน</h1>
               <p>
-                Creating a secure QR code for {paymentScreen.productName}...
+                กำลังสร้าง QR สำหรับ
+                {getProductDisplayName(paymentScreen.productName)}...
               </p>
               <div className="payment-spinner" aria-hidden="true" />
             </>
@@ -473,27 +455,29 @@ function HomePage() {
 
           {paymentScreen.phase === "waiting" && payment !== null && (
             <>
-              <h1>Scan to pay</h1>
-              <p className="payment-product">{payment.productName}</p>
-              <p className="payment-amount">{payment.amount} THB</p>
+              <h1>สแกน QR เพื่อชำระเงิน</h1>
+              <p className="payment-product">
+                {getProductDisplayName(payment.productName)}
+              </p>
+              <p className="payment-amount">{payment.amount} บาท</p>
               {payment.qrImageUrl ? (
                 <img
                   className="payment-qr"
                   src={payment.qrImageUrl}
-                  alt="PromptPay payment QR code"
+                  alt="QR สำหรับชำระเงินพร้อมเพย์"
                 />
               ) : (
                 <p className="payment-message payment-message--error">
-                  QR code unavailable.
+                  ไม่สามารถแสดง QR ได้
                 </p>
               )}
               <p className="payment-waiting">
-                Waiting for payment confirmation...
+                กำลังรอยืนยันการชำระเงิน...
               </p>
               {payment.expiresAt && (
                 <p className="payment-expiry">
-                  Please complete payment before{" "}
-                  {new Date(payment.expiresAt).toLocaleTimeString()}.
+                  กรุณาชำระเงินก่อน{" "}
+                  {new Date(payment.expiresAt).toLocaleTimeString("th-TH")} น.
                 </p>
               )}
               {paymentScreen.pollError && (
@@ -506,8 +490,8 @@ function HomePage() {
 
           {paymentScreen.phase === "unlocking" && payment !== null && (
             <>
-              <h1>Payment successful</h1>
-              <p>Unlocking slot {payment.slotNumber}...</p>
+              <h1>ชำระเงินสำเร็จ</h1>
+              <p>กำลังปลดล็อกช่อง {payment.slotNumber}...</p>
               <div className="payment-spinner" aria-hidden="true" />
             </>
           )}
@@ -516,19 +500,18 @@ function HomePage() {
             <>
               <h1>
                 {payment.paymentStatus === "EXPIRED"
-                  ? "Payment expired"
-                  : "Payment unsuccessful"}
+                  ? "หมดเวลาชำระเงิน"
+                  : "ชำระเงินไม่สำเร็จ"}
               </h1>
               <p>
-                Your payment was not completed. The compartment was not
-                unlocked.
+                การชำระเงินไม่เสร็จสมบูรณ์ ระบบจึงไม่ได้ปลดล็อกช่องสินค้า
               </p>
               <button
                 className="payment-back-button"
                 type="button"
                 onClick={() => setPaymentScreen(null)}
               >
-                Back to products
+                กลับไปเลือกสินค้า
               </button>
             </>
           )}
@@ -538,20 +521,19 @@ function HomePage() {
               <div className="payment-warning-icon" aria-hidden="true">
                 !
               </div>
-              <h1>Payment successful</h1>
+              <h1>ชำระเงินสำเร็จ</h1>
               <p className="payment-message payment-message--error">
-                Unable to unlock the compartment. Please contact staff.
+                ไม่สามารถปลดล็อกช่องสินค้าได้ กรุณาติดต่อพนักงาน
               </p>
               <p>
-                Your purchase remains complete and slot {payment.slotNumber} is
-                sold out.
+                การซื้อเสร็จสมบูรณ์แล้ว และช่อง {payment.slotNumber} ไม่มีสินค้า
               </p>
               <button
                 className="payment-back-button"
                 type="button"
                 onClick={() => setPaymentScreen(null)}
               >
-                Return home
+                กลับหน้าหลัก
               </button>
             </>
           )}
@@ -561,18 +543,16 @@ function HomePage() {
   }
 
   return (
-    <main className="home-page">
+    <main className="home-page customer-kiosk-page">
       <div className="customer-container">
-        <header className="page-header">
-          <p className="mode-label">Customer Mode</p>
+        <header className="page-header customer-page-header">
           <h1>Smart Vending Machine</h1>
-          <p className="instruction">Please select a product</p>
         </header>
 
-        {isLoading && <p className="state-message">Loading slots...</p>}
+        {isLoading && <p className="state-message">กำลังโหลดช่องสินค้า...</p>}
         {error && (
           <p className="state-message state-message--error">
-            Failed to load slots.
+            ไม่สามารถโหลดช่องสินค้าได้
           </p>
         )}
         {purchaseError && (
@@ -582,28 +562,30 @@ function HomePage() {
         {!isLoading && !error && (
           <section
             className="slot-grid"
-            aria-label="Available vending machine slots"
+            aria-label="สถานะช่องจำหน่ายสินค้า"
           >
             {slots.map((slot) => {
               const canBuy =
                 slot.status === "AVAILABLE" && slot.product !== null;
               const buttonText =
                 slot.product === null
-                  ? "Unavailable"
+                  ? "ไม่พร้อมจำหน่าย"
                   : slot.status === "SOLD_OUT"
-                    ? "Sold Out"
-                    : "Buy";
+                    ? "สินค้าหมด"
+                    : "ซื้อ";
               return (
                 <article
                   className={`slot-card${slot.status === "SOLD_OUT" ? " slot-card--sold-out" : ""}`}
                   key={slot.id}
                 >
                   <div className="slot-card__header">
-                    <span className="slot-number">Slot {slot.slotNumber}</span>
+                    <span className="slot-number">ช่อง {slot.slotNumber}</span>
                     <span
                       className={`status-badge status-badge--${slot.status.toLowerCase()}`}
                     >
-                      {slot.status}
+                      {slot.status === "AVAILABLE"
+                        ? "พร้อมจำหน่าย"
+                        : "สินค้าหมด"}
                     </span>
                   </div>
                   {slot.product ? (
@@ -612,7 +594,7 @@ function HomePage() {
                         {slot.product.imageUrl ? (
                           <img
                             src={slot.product.imageUrl}
-                            alt={slot.product.name}
+                            alt={getProductDisplayName(slot.product.name)}
                           />
                         ) : (
                           <span aria-hidden="true">
@@ -620,15 +602,17 @@ function HomePage() {
                           </span>
                         )}
                       </div>
-                      <h2 className="product-name">{slot.product.name}</h2>
+                      <h2 className="product-name">
+                        {getProductDisplayName(slot.product.name)}
+                      </h2>
                       <p className="product-price">
-                        {slot.product.price} <span>THB</span>
+                        {slot.product.price} <span>บาท</span>
                       </p>
                     </>
                   ) : (
                     <div className="empty-product">
                       <span aria-hidden="true">—</span>
-                      <h2 className="product-name">No product</h2>
+                      <h2 className="product-name">ไม่มีสินค้า</h2>
                     </div>
                   )}
                   <button

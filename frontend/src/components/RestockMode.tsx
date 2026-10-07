@@ -6,6 +6,7 @@ import type { AuthenticatedEmployee } from "../types/employee";
 import type { HardwareSlotStatus } from "../types/hardware";
 import { playAudioFeedback } from "../api/audio";
 import { commitRestockAndNotify } from "../audio-feedback.mjs";
+import SuccessCheckIcon from "./SuccessCheckIcon";
 
 const POLLING_INTERVAL_MS = 2000;
 const REQUEST_TIMEOUT_MS = 3000;
@@ -153,7 +154,7 @@ function RestockMode({
       await onExit();
     } catch {
       setRestockError(
-        "Unable to close the restock session. Check the connection and try again.",
+        "ไม่สามารถปิดโหมดเติมสินค้าได้ กรุณาตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง",
       );
       setIsExiting(false);
     }
@@ -175,12 +176,8 @@ function RestockMode({
         commitRestock: (employeeId) => createMockRestock(sessionId, employeeId),
         playAudio: playAudioFeedback,
       });
-    } catch (error: unknown) {
-      setRestockError(
-        error instanceof Error
-          ? error.message
-          : "Failed to confirm restock. Please try again.",
-      );
+    } catch {
+      setRestockError("ยืนยันการเติมสินค้าไม่สำเร็จ กรุณาลองอีกครั้ง");
       submissionInProgressRef.current = false;
       setIsSubmitting(false);
       return;
@@ -198,16 +195,10 @@ function RestockMode({
           role="status"
           aria-live="polite"
         >
-          <div className="purchase-success__icon" aria-hidden="true">
-            {"\u2713"}
-          </div>
-          <p className="mode-label mode-label--employee">Employee Mode</p>
-          <h1>Restock Successful</h1>
-          <p className="restock-success__inventory">
-            Inventory has been restored.
-          </p>
+          <SuccessCheckIcon />
+          <h1>เติมสินค้าสำเร็จ</h1>
           <p className="purchase-success__return">
-            Returning to Customer Mode...
+            กำลังกลับสู่หน้าขายสินค้า...
           </p>
         </section>
       </main>
@@ -219,12 +210,9 @@ function RestockMode({
       <div className="customer-container">
         <header className="restock-header">
           <div>
-            <p className="mode-label mode-label--employee">Employee Mode</p>
-            <h1>Restock Mode</h1>
-            <p className="instruction">
-              Signed in as {authenticatedEmployee.name} (
-              {authenticatedEmployee.employeeCode}) · Current physical slot and
-              door status
+            <h1>เติมสินค้า</h1>
+            <p className="instruction restock-employee-identity">
+              {authenticatedEmployee.name} · {authenticatedEmployee.employeeCode}
             </p>
           </div>
           <button
@@ -233,20 +221,19 @@ function RestockMode({
             disabled={isSubmitting || isExiting}
             onClick={() => void handleExitRestockMode()}
           >
-            {isExiting ? "Closing Restock Session..." : "Exit Restock Mode"}
+            {isExiting ? "กำลังออกจากโหมดเติมสินค้า..." : "ออกจากโหมดเติมสินค้า"}
           </button>
         </header>
 
         {slots === null && !isUnavailable && (
-          <p className="state-message">Reading hardware status...</p>
+          <p className="state-message">กำลังอ่านสถานะอุปกรณ์...</p>
         )}
 
         {isUnavailable && (
           <section className="hardware-unavailable" role="status">
-            <h2>Hardware status unavailable</h2>
+            <h2>ไม่สามารถอ่านสถานะอุปกรณ์ได้</h2>
             <p>
-              Check the Pi hardware service and ESP32 connection. Retrying
-              automatically...
+              กรุณาตรวจสอบการเชื่อมต่ออุปกรณ์ ระบบจะลองอีกครั้งโดยอัตโนมัติ...
             </p>
           </section>
         )}
@@ -254,40 +241,44 @@ function RestockMode({
         {slots !== null && !isUnavailable && (
           <section
             className="hardware-grid"
-            aria-label="Physical vending slot status"
+            aria-label="สถานะช่องสินค้าและฝาตู้"
           >
             {slots.map((slot) => (
               <article className="hardware-card" key={slot.slotNumber}>
                 <div className="hardware-card__header">
-                  <h2>Slot {slot.slotNumber}</h2>
+                  <h2>ช่อง {slot.slotNumber}</h2>
                   <strong
                     className={`validation-badge validation-badge--${slot.validationState
                       .toLowerCase()
                       .replace("_", "-")}`}
                   >
-                    {slot.validationState.replace("_", " ")}
+                    {slot.validationState === "READY"
+                      ? "พร้อม"
+                      : slot.validationState === "CHECKING"
+                        ? "กำลังตรวจสอบ"
+                        : "ยังไม่พร้อม"}
                   </strong>
                 </div>
 
                 <div className="hardware-status-row">
-                  <span className="hardware-status-label">Product</span>
+                  <span className="hardware-status-label">สินค้า</span>
                   <strong
                     className={`hardware-value hardware-value--${
                       slot.productPresent ? "ready" : "attention"
                     }`}
                   >
-                    {slot.productPresent ? "PRESENT" : "EMPTY"}
+                    {slot.productPresent ? "มีสินค้า" : "ไม่มีสินค้า"}
                   </strong>
                 </div>
 
                 <div className="hardware-status-row">
-                  <span className="hardware-status-label">Door</span>
+                  <span className="hardware-status-label">ฝาตู้</span>
                   <strong
                     className={`hardware-value hardware-value--${
                       slot.doorClosed ? "ready" : "danger"
                     }`}
                   >
-                    {slot.doorClosed ? "CLOSED" : "OPEN"}
+                    {slot.doorClosed ? "ปิด" : "เปิด"}
                   </strong>
                 </div>
               </article>
@@ -302,8 +293,8 @@ function RestockMode({
           <div>
             <p>
               {allSlotsReady
-                ? "All slots ready for restock confirmation"
-                : "All slots must be READY before restock can be confirmed."}
+                ? "ตรวจสอบว่าสินค้าครบทุกช่องและฝาตู้ปิดสนิทแล้ว"
+                : "กรุณาตรวจสอบสินค้าในทุกช่องและปิดฝาตู้ให้สนิทก่อนยืนยันการเติมสินค้า"}
             </p>
             {restockError && <p className="restock-error">{restockError}</p>}
           </div>
@@ -313,7 +304,7 @@ function RestockMode({
             disabled={!allSlotsReady || isSubmitting}
             onClick={handleConfirmRestock}
           >
-            {isSubmitting ? "Confirming..." : "Confirm Restock"}
+            {isSubmitting ? "กำลังยืนยัน..." : "ยืนยันการเติมสินค้า"}
           </button>
         </section>
       </div>
