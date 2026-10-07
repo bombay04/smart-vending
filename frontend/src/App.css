@@ -356,7 +356,10 @@
 .face-scan-indicator--no_face,
 .face-scan-indicator--multiple_faces,
 .face-scan-indicator--unavailable,
-.face-scan-indicator--locked {
+.face-scan-indicator--locked,
+.face-scan-indicator--sync_error,
+.face-scan-indicator--face_already_registered,
+.face-scan-indicator--pi_unavailable {
   border-color: #fecaca;
   color: #b91c1c;
   background: #fff7f7;
@@ -453,16 +456,6 @@
   font-size: clamp(2.1rem, 6vw, 3.75rem);
   line-height: 1.05;
   letter-spacing: -0.04em;
-}
-
-.employee-registration-card .face-scan-indicator {
-  border-color: #c4b5fd;
-  color: #6d28d9;
-  background: #f5f3ff;
-}
-
-.employee-registration-card .face-scan-indicator--scanning {
-  border-color: #a78bfa;
 }
 
 .employee-registration-status {
@@ -1188,13 +1181,27 @@
   background: #fffbeb;
 }
 
+.admin-feedback-modal--info .admin-feedback-modal-icon {
+  color: #0369a1;
+  background: #ecfeff;
+}
+
 .admin-feedback-modal h2,
 .admin-face-registration-modal h2 {
   margin: 0;
-  color: #2e1065;
   font-size: clamp(1.65rem, 5vw, 2.25rem);
   line-height: 1.3;
   letter-spacing: -0.02em;
+}
+
+.admin-feedback-modal h2 {
+  color: #2e1065;
+}
+
+.admin-feedback-modal--success h2,
+.admin-feedback-modal--info h2,
+.admin-face-registration-modal h2 {
+  color: #172033;
 }
 
 .admin-feedback-modal p,
@@ -1239,7 +1246,7 @@
 
 .admin-face-registration-modal .admin-face-registration-countdown {
   margin-top: 24px;
-  color: #111827;
+  color: #1d4ed8;
   font-size: clamp(1.3rem, 4vw, 1.65rem);
   font-weight: 900;
   font-variant-numeric: tabular-nums;

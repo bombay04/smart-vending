@@ -32,9 +32,9 @@ import type { RegistrationEmployee } from "../types/employee";
 const sortEmployees = (employees: RegistrationEmployee[]) =>
   [...employees].sort((a, b) => a.employeeCode.localeCompare(b.employeeCode));
 
-const EMPLOYEE_CREATED_MODAL_MS = 3000;
+const SUCCESS_MODAL_MS = 2000;
+const STALE_EMPLOYEE_MODAL_MS = 2000;
 const KIOSK_BUSY_MODAL_MS = 5000;
-const CLEANUP_SUCCESS_MODAL_MS = 3000;
 const CLEANUP_RESULT_MODAL_MS = 5000;
 const EMPLOYEE_NAME_INVALID_CODE = "EMPLOYEE_NAME_INVALID";
 const EMPLOYEE_NAME_CONFLICT_CODE = "EMPLOYEE_NAME_CONFLICT";
@@ -44,6 +44,7 @@ const DUPLICATE_EMPLOYEE_NAME_MESSAGE = "มีชื่อพนักงาน
 
 type TimedModal =
   | { type: "EMPLOYEE_CREATED" }
+  | { type: "STALE_EMPLOYEE" }
   | { type: "KIOSK_BUSY" }
   | {
       type: "CLEANUP_RESULT";
@@ -211,10 +212,23 @@ function AdminPortal() {
                 {
                   type: "CLEANUP_RESULT",
                   tone: "SUCCESS",
-                  title: "ลบข้อมูลพนักงานสำเร็จ",
+                  title: "ลบแบบร่างสำเร็จ",
                   body: `${previous.employee?.employeeCode ?? "พนักงาน"} ถูกลบออกจากระบบแล้ว`,
                 },
-                CLEANUP_SUCCESS_MODAL_MS,
+                SUCCESS_MODAL_MS,
+              );
+            } else if (
+              previous.type === "EMPLOYEE_OFFBOARDING" &&
+              refreshedEmployee === undefined
+            ) {
+              showTimedModal(
+                {
+                  type: "CLEANUP_RESULT",
+                  tone: "SUCCESS",
+                  title: "นำพนักงานออกจากระบบสำเร็จ",
+                  body: `${previous.employee?.employeeCode ?? "พนักงาน"} ถูกนำออกจากระบบแล้ว`,
+                },
+                SUCCESS_MODAL_MS,
               );
             } else if (previous.type === "EMPLOYEE_DRAFT_DELETE") {
               showTimedModal(
@@ -287,7 +301,7 @@ function AdminPortal() {
     try {
       const employee = await createEmployee(name);
       setEmployees((current) => sortEmployees([...current, employee]));
-      showTimedModal({ type: "EMPLOYEE_CREATED" }, EMPLOYEE_CREATED_MODAL_MS);
+      showTimedModal({ type: "EMPLOYEE_CREATED" }, SUCCESS_MODAL_MS);
       setName("");
     } catch (error) {
       if (
@@ -332,11 +346,23 @@ function AdminPortal() {
     return error instanceof EmployeeManagementError ? error.message : fallback;
   }
 
-  const isEmployeeOffboardedError = (error: unknown) =>
-    ((error instanceof EmployeeManagementError ||
+  const isAuthoritativeStaleEmployeeError = (error: unknown) =>
+    (error instanceof EmployeeManagementError ||
       error instanceof KioskSessionRequestError) &&
-      error.status === 409 &&
-      error.code === EMPLOYEE_OFFBOARDED_CODE);
+    (error.status === 404 ||
+      (error.status === 409 && error.code === EMPLOYEE_OFFBOARDED_CODE));
+
+  async function reconcileStaleEmployee(employeeId: number) {
+    setRowError(employeeId, null);
+    setEmployees((current) =>
+      current.filter((employee) => employee.id !== employeeId),
+    );
+    if (editingEmployeeId === employeeId) cancelEdit();
+    setDeleteConfirmationId(null);
+    setOffboardConfirmationId(null);
+    await loadEmployees();
+    showTimedModal({ type: "STALE_EMPLOYEE" }, STALE_EMPLOYEE_MODAL_MS);
+  }
 
   function replaceEmployee(updatedEmployee: RegistrationEmployee) {
     setEmployees((current) =>
@@ -379,9 +405,8 @@ function AdminPortal() {
       });
       cancelEdit();
     } catch (error) {
-      if (isEmployeeOffboardedError(error)) {
-        cancelEdit();
-        await loadEmployees();
+      if (isAuthoritativeStaleEmployeeError(error)) {
+        await reconcileStaleEmployee(employee.id);
       } else {
         setRowError(
           employee.id,
@@ -410,8 +435,8 @@ function AdminPortal() {
         activeCleanupType: employee.activeCleanupType,
       });
     } catch (error) {
-      if (isEmployeeOffboardedError(error)) {
-        await loadEmployees();
+      if (isAuthoritativeStaleEmployeeError(error)) {
+        await reconcileStaleEmployee(employee.id);
       } else {
         setRowError(
           employee.id,
@@ -456,10 +481,8 @@ function AdminPortal() {
       setDeleteConfirmationId(null);
       setOffboardConfirmationId(null);
     } catch (error) {
-      if (isEmployeeOffboardedError(error)) {
-        setDeleteConfirmationId(null);
-        setOffboardConfirmationId(null);
-        await loadEmployees();
+      if (isAuthoritativeStaleEmployeeError(error)) {
+        await reconcileStaleEmployee(employee.id);
       } else {
         setRowError(
           employee.id,
@@ -487,8 +510,8 @@ function AdminPortal() {
       previousSessionRef.current = registrationSession;
       setSession(registrationSession);
     } catch (error) {
-      if (isEmployeeOffboardedError(error)) {
-        await loadEmployees();
+      if (isAuthoritativeStaleEmployeeError(error)) {
+        await reconcileStaleEmployee(employee.id);
       } else if (
         error instanceof KioskSessionRequestError &&
         error.status === 409 &&
@@ -875,6 +898,24 @@ function AdminPortal() {
         </div>
       )}
 
+      {timedModal?.type === "STALE_EMPLOYEE" && (
+        <div className="admin-modal-backdrop">
+          <section
+            className="admin-feedback-modal admin-feedback-modal--info"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="stale-employee-modal-title"
+          >
+            <div className="admin-feedback-modal-icon" aria-hidden="true">
+              i
+            </div>
+            <h2 id="stale-employee-modal-title">
+              ข้อมูลพนักงานมีการเปลี่ยนแปลง
+            </h2>
+          </section>
+        </div>
+      )}
+
       {timedModal?.type === "KIOSK_BUSY" && (
         <div className="admin-modal-backdrop">
           <section
@@ -932,15 +973,15 @@ function AdminPortal() {
               aria-modal="true"
               aria-labelledby="admin-face-registration-modal-title"
             >
-              <div className="admin-feedback-modal-icon" aria-hidden="true">
-                ◎
+              <div className="staff-restock-modal-icon" aria-hidden="true">
+                ◉
               </div>
               <h2 id="admin-face-registration-modal-title">
                 กำลังลงทะเบียนใบหน้า
               </h2>
               <p className="admin-feedback-modal-identity">
                 {session.employee?.employeeCode}
-                {session.employee?.name ? ` - ${session.employee.name}` : ""}
+                {session.employee?.name ? ` ${session.employee.name}` : ""}
               </p>
               <p className="admin-face-registration-countdown" role="timer">
                 หมดอายุใน {secondsRemaining} วินาที
