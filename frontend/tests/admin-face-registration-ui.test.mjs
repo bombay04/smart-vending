@@ -23,7 +23,11 @@ test("employee creation stays independent from kiosk state and uses an expiring 
   assert.match(createHandler, /setName\(""\)/);
   assert.match(createHandler, /type: "EMPLOYEE_CREATED"/);
   assert.doesNotMatch(createHandler, /session|portalState|KIOSK_BUSY/);
-  assert.match(admin, /const EMPLOYEE_CREATED_MODAL_MS = 3000/);
+  assert.match(admin, /const SUCCESS_MODAL_MS = 2000/);
+  assert.match(
+    createHandler,
+    /showTimedModal\(\{ type: "EMPLOYEE_CREATED" \}, SUCCESS_MODAL_MS\)/,
+  );
   assert.match(admin, /เพิ่มพนักงานสำเร็จ/);
   assert.doesNotMatch(admin, /เพิ่มข้อมูลพนักงานเรียบร้อยแล้ว/);
   assert.doesNotMatch(admin, /Created \$\{employee\.employeeCode\}/);
@@ -55,7 +59,7 @@ test("busy kiosk feedback blocks only session creation and can close or retry", 
   assert.match(kioskApi, /response\.status/);
 });
 
-test("terminal lifecycle conflicts refresh stale admin rows without showing success", async () => {
+test("authoritative 404 and terminal 409 responses reconcile stale admin rows", async () => {
   const [admin, employeeApi, kioskApi] = await Promise.all([
     source("src/components/AdminPortal.tsx"),
     source("src/api/employee-auth.ts"),
@@ -65,16 +69,31 @@ test("terminal lifecycle conflicts refresh stale admin rows without showing succ
   assert.match(admin, /const EMPLOYEE_OFFBOARDED_CODE = "EMPLOYEE_OFFBOARDED"/);
   assert.match(
     admin,
-    /isEmployeeOffboardedError[\s\S]*error\.status === 409[\s\S]*error\.code === EMPLOYEE_OFFBOARDED_CODE/,
+    /isAuthoritativeStaleEmployeeError[\s\S]*error\.status === 404[\s\S]*error\.status === 409 && error\.code === EMPLOYEE_OFFBOARDED_CODE/,
   );
   assert.match(
     admin,
-    /handleActiveChange[\s\S]*isEmployeeOffboardedError\(error\)[\s\S]*await loadEmployees\(\)/,
+    /reconcileStaleEmployee[\s\S]*setRowError\(employeeId, null\)[\s\S]*filter\(\(employee\) => employee\.id !== employeeId\)[\s\S]*await loadEmployees\(\)[\s\S]*type: "STALE_EMPLOYEE"/,
   );
   assert.match(
     admin,
-    /handleStartFaceRegistration[\s\S]*isEmployeeOffboardedError\(error\)[\s\S]*await loadEmployees\(\)/,
+    /handleActiveChange[\s\S]*isAuthoritativeStaleEmployeeError\(error\)[\s\S]*await reconcileStaleEmployee\(employee\.id\)/,
   );
+  assert.match(
+    admin,
+    /handleSaveName[\s\S]*isAuthoritativeStaleEmployeeError\(error\)[\s\S]*await reconcileStaleEmployee\(employee\.id\)/,
+  );
+  assert.match(
+    admin,
+    /handleLifecycleAction[\s\S]*isAuthoritativeStaleEmployeeError\(error\)[\s\S]*await reconcileStaleEmployee\(employee\.id\)/,
+  );
+  assert.match(
+    admin,
+    /handleStartFaceRegistration[\s\S]*isAuthoritativeStaleEmployeeError\(error\)[\s\S]*await reconcileStaleEmployee\(employee\.id\)/,
+  );
+  assert.match(admin, /ข้อมูลพนักงานมีการเปลี่ยนแปลง/);
+  assert.match(admin, /const STALE_EMPLOYEE_MODAL_MS = 2000/);
+  assert.doesNotMatch(admin, /setRowError\([\s\S]*"Employee not found\."/);
   assert.match(employeeApi, /readonly code: string \| null = null/);
   assert.match(kioskApi, /typeof payload\.code === "string" \? payload\.code : null/);
 });
@@ -100,6 +119,15 @@ test("authoritative FACE_REGISTRATION state drives the accessible active modal",
     admin,
     /กรุณาดำเนินการลงทะเบียนที่หน้าจอเครื่องขายสินค้า/,
   );
+  assert.match(
+    admin,
+    /className="staff-restock-modal-icon"[\s\S]*?>\s*◉\s*</,
+  );
+  assert.equal(
+    admin.includes('{session.employee?.name ? ` ${session.employee.name}` : ""}'),
+    true,
+  );
+  assert.equal(admin.includes('` - ${session.employee.name}`'), false);
   assert.match(admin, /หมดอายุใน \{secondsRemaining\} วินาที/);
   assert.match(admin, /handleCancelFaceRegistration/);
   assert.doesNotMatch(admin, /Face registration status/);
@@ -108,7 +136,11 @@ test("authoritative FACE_REGISTRATION state drives the accessible active modal",
   assert.match(css, /\.admin-face-registration-modal[\s\S]*width: min\(100%, 560px\)/);
   assert.match(
     css,
-    /\.admin-face-registration-modal \.admin-face-registration-countdown \{[\s\S]*?color: #111827;/,
+    /\.admin-face-registration-modal \.admin-face-registration-countdown \{[\s\S]*?color: #1d4ed8;/,
+  );
+  assert.match(
+    css,
+    /\.admin-face-registration-modal h2 \{[\s\S]*?color: #172033;/,
   );
 });
 
@@ -195,18 +227,30 @@ test("draft cleanup runs in the background without showing an active inspection 
   assert.doesNotMatch(admin, /className="admin-cleanup-modal"/);
 });
 
-test("draft completion uses timed result modals while polling remains authoritative", async () => {
+test("draft and offboard completion use authoritative two-second success modals", async () => {
   const admin = await source("src/components/AdminPortal.tsx");
 
-  assert.match(admin, /const CLEANUP_SUCCESS_MODAL_MS = 3000/);
+  assert.match(admin, /const SUCCESS_MODAL_MS = 2000/);
   assert.match(admin, /const CLEANUP_RESULT_MODAL_MS = 5000/);
   assert.match(admin, /type: "CLEANUP_RESULT"/);
   assert.match(admin, /tone: "SUCCESS"/);
   assert.match(admin, /tone: "WARNING"/);
-  assert.match(admin, /previous\.type === "EMPLOYEE_DRAFT_DELETE"/);
+  assert.match(
+    admin,
+    /previous\.type === "EMPLOYEE_DRAFT_DELETE" &&[\s\S]*refreshedEmployee === undefined[\s\S]*title: "ลบแบบร่างสำเร็จ"[\s\S]*SUCCESS_MODAL_MS/,
+  );
+  assert.doesNotMatch(admin, /title: "ลบข้อมูลพนักงานสำเร็จ"/);
+  assert.match(
+    admin,
+    /previous\.type === "EMPLOYEE_OFFBOARDING" &&[\s\S]*refreshedEmployee === undefined[\s\S]*title: "นำพนักงานออกจากระบบสำเร็จ"[\s\S]*SUCCESS_MODAL_MS/,
+  );
   assert.match(admin, /await loadEmployees\(\)/);
-  assert.match(admin, /ลบข้อมูลพนักงานสำเร็จ/);
-  assert.doesNotMatch(admin, /นำพนักงานออกจากระบบสำเร็จ/);
+  assert.match(admin, /ลบแบบร่างสำเร็จ/);
+  assert.match(admin, /นำพนักงานออกจากระบบสำเร็จ/);
+  assert.match(
+    admin,
+    /refreshedEmployees === null[\s\S]*tone: "WARNING"[\s\S]*CLEANUP_RESULT_MODAL_MS/,
+  );
   assert.doesNotMatch(admin, /กำลังนำพนักงานออกจากระบบ/);
   assert.doesNotMatch(admin, /lifecycleMessage/);
 });
