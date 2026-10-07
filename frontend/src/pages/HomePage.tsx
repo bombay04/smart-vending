@@ -427,7 +427,7 @@ function HomePage() {
       <main className="home-page home-page--success customer-kiosk-page">
         <section className="purchase-success" aria-live="polite">
           <SuccessCheckIcon />
-          <h1>ขอบคุณ</h1>
+          <h1>ขอบคุณค่ะ</h1>
           <p className="purchase-success__instruction">กรุณารับสินค้า</p>
         </section>
       </main>

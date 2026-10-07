@@ -324,7 +324,7 @@ test("customer UI uses provider QR, backend polling, waiting state, and no fake 
   assert.match(home, /handleConfirmedPaymentOnce/);
   assert.match(home, /ชำระเงินสำเร็จ/);
   assert.match(home, /ไม่สามารถปลดล็อกช่องสินค้าได้/);
-  assert.match(home, /<h1>ขอบคุณ<\/h1>/);
+  assert.match(home, /<h1>ขอบคุณค่ะ<\/h1>/);
   assert.match(api, /\/payment-status/);
   assert.match(audioApi, /PI_UNLOCK_BASE_URL/);
   assert.match(audioApi, /\/audio\/play/);
