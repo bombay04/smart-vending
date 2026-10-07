@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchSlots } from "../api/slot";
 import {
+  cancelPayment,
   createPromptPayPayment,
   fetchPaymentStatus,
+  PaymentApiError,
   type PaymentResult,
 } from "../api/transaction";
 import { unlockSlot } from "../api/unlock";
@@ -22,7 +24,10 @@ import {
   fetchFaceRegistrationStatuses,
   removeEmployeeFaceTemplate,
 } from "../api/face-registration";
-import { handleConfirmedPaymentOnce } from "../payment-flow.mjs";
+import {
+  handleConfirmedPaymentOnce,
+  resumeWaitingPaymentAfterCancellationReconciliation,
+} from "../payment-flow.mjs";
 import type { AuthenticatedEmployee } from "../types/employee";
 import type { MockRestockResult } from "../api/restock";
 import type { Slot } from "../types/slot";
@@ -36,9 +41,17 @@ interface PurchaseSuccess {
   productName: string;
 }
 
+export const PAYMENT_FAILURE_RETURN_MS = 2000;
+
 type PaymentScreen =
   | { phase: "creating"; slotNumber: number; productName: string }
-  | { phase: "waiting"; payment: PaymentResult; pollError: string | null }
+  | {
+      phase: "waiting";
+      payment: PaymentResult;
+      pollError: string | null;
+      cancelError: string | null;
+      isCancelling: boolean;
+    }
   | { phase: "unlocking"; payment: PaymentResult }
   | { phase: "failed"; payment: PaymentResult }
   | { phase: "unlock-failed"; payment: PaymentResult };
@@ -61,11 +74,13 @@ function HomePage() {
   const [purchaseSuccess, setPurchaseSuccess] =
     useState<PurchaseSuccess | null>(null);
   const unlockAttemptedTransactionIds = useRef(new Set<number>());
+  const customerCancelledTransactionIds = useRef(new Set<number>());
+  const cancellationInFlightTransactionIds = useRef(new Set<number>());
   const acceptedSessionIds = useRef(new Set<number>());
   const staffWorkflowCompletedRef = useRef(false);
   const maintenanceInFlightSessionId = useRef<number | null>(null);
   const waitingTransactionId =
-    paymentScreen?.phase === "waiting"
+    paymentScreen?.phase === "waiting" && !paymentScreen.isCancelling
       ? paymentScreen.payment.transactionId
       : null;
 
@@ -90,6 +105,12 @@ function HomePage() {
 
   const completeConfirmedPayment = useCallback(
     async (payment: PaymentResult) => {
+      if (
+        payment.customerCancelled ||
+        customerCancelledTransactionIds.current.has(payment.transactionId)
+      ) {
+        return;
+      }
       await handleConfirmedPaymentOnce(
         payment,
         unlockAttemptedTransactionIds.current,
@@ -201,13 +222,102 @@ function HomePage() {
       } else if (payment.paymentStatus === "SUCCESS") {
         await completeConfirmedPayment(payment);
       } else {
-        setPaymentScreen({ phase: "waiting", payment, pollError: null });
+        setPaymentScreen({
+          phase: "waiting",
+          payment,
+          pollError: null,
+          cancelError: null,
+          isCancelling: false,
+        });
       }
     } catch {
       setPaymentScreen(null);
       setPurchaseError("ไม่สามารถเริ่มการชำระเงินได้ กรุณาลองอีกครั้ง");
     }
   }
+
+  const handleCancelPayment = useCallback(
+    async (payment: PaymentResult) => {
+      const transactionId = payment.transactionId;
+      if (cancellationInFlightTransactionIds.current.has(transactionId)) {
+        return;
+      }
+
+      cancellationInFlightTransactionIds.current.add(transactionId);
+      setPaymentScreen((current) =>
+        current?.phase === "waiting" &&
+        current.payment.transactionId === transactionId
+          ? {
+              ...current,
+              isCancelling: true,
+              pollError: null,
+              cancelError: null,
+            }
+          : current,
+      );
+
+      try {
+        const cancelledPayment = await cancelPayment(transactionId);
+        if (cancelledPayment.customerCancelled) {
+          customerCancelledTransactionIds.current.add(transactionId);
+          setPaymentScreen((current) =>
+            current?.phase === "waiting" &&
+            current.payment.transactionId === transactionId
+              ? null
+              : current,
+          );
+          return;
+        }
+        throw new Error("Cancellation was not confirmed.");
+      } catch (error: unknown) {
+        if (
+          error instanceof PaymentApiError &&
+          error.code === "PAYMENT_ALREADY_CONFIRMED"
+        ) {
+          try {
+            const currentPayment = await fetchPaymentStatus(transactionId);
+            if (currentPayment.customerCancelled) {
+              customerCancelledTransactionIds.current.add(transactionId);
+              setPaymentScreen(null);
+            } else if (currentPayment.paymentStatus === "SUCCESS") {
+              await completeConfirmedPayment(currentPayment);
+            } else if (
+              currentPayment.paymentStatus === "FAILED" ||
+              currentPayment.paymentStatus === "EXPIRED"
+            ) {
+              setPaymentScreen({ phase: "failed", payment: currentPayment });
+            } else {
+              setPaymentScreen((current) =>
+                resumeWaitingPaymentAfterCancellationReconciliation(
+                  current,
+                  transactionId,
+                  currentPayment,
+                ),
+              );
+            }
+            return;
+          } catch {
+            // Keep the QR visible so polling can continue reconciliation.
+          }
+        }
+
+        setPaymentScreen((current) =>
+          current?.phase === "waiting" &&
+          current.payment.transactionId === transactionId
+            ? {
+                ...current,
+                isCancelling: false,
+                cancelError:
+                  "ไม่สามารถยกเลิกรายการได้ กรุณาลองอีกครั้ง",
+              }
+            : current,
+        );
+      } finally {
+        cancellationInFlightTransactionIds.current.delete(transactionId);
+      }
+    },
+    [completeConfirmedPayment],
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -243,7 +353,18 @@ function HomePage() {
           transactionId,
           controller.signal,
         );
-        if (stopped) return;
+        if (
+          stopped ||
+          customerCancelledTransactionIds.current.has(transactionId)
+        ) {
+          return;
+        }
+
+        if (payment.customerCancelled) {
+          customerCancelledTransactionIds.current.add(transactionId);
+          setPaymentScreen(null);
+          return;
+        }
 
         if (payment.paymentStatus === "SUCCESS") {
           await completeConfirmedPayment(payment);
@@ -257,7 +378,12 @@ function HomePage() {
           return;
         }
 
-        setPaymentScreen({ phase: "waiting", payment, pollError: null });
+        setPaymentScreen((current) =>
+          current?.phase === "waiting" &&
+          current.payment.transactionId === transactionId
+            ? { ...current, payment, pollError: null }
+            : current,
+        );
       } catch {
         if (!stopped) {
           setPaymentScreen((current) =>
@@ -282,6 +408,15 @@ function HomePage() {
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
   }, [completeConfirmedPayment, waitingTransactionId]);
+
+  useEffect(() => {
+    if (paymentScreen?.phase !== "failed") return undefined;
+    const timeoutId = window.setTimeout(
+      () => setPaymentScreen(null),
+      PAYMENT_FAILURE_RETURN_MS,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [paymentScreen]);
 
   useEffect(() => {
     let stopped = false;
@@ -485,6 +620,19 @@ function HomePage() {
                   {paymentScreen.pollError}
                 </p>
               )}
+              {paymentScreen.cancelError && (
+                <p className="payment-message payment-message--error">
+                  {paymentScreen.cancelError}
+                </p>
+              )}
+              <button
+                className="payment-cancel-button"
+                type="button"
+                disabled={paymentScreen.isCancelling}
+                onClick={() => void handleCancelPayment(payment)}
+              >
+                {paymentScreen.isCancelling ? "กำลังยกเลิก..." : "ยกเลิก"}
+              </button>
             </>
           )}
 
@@ -504,15 +652,10 @@ function HomePage() {
                   : "ชำระเงินไม่สำเร็จ"}
               </h1>
               <p>
-                การชำระเงินไม่เสร็จสมบูรณ์ ระบบจึงไม่ได้ปลดล็อกช่องสินค้า
+                {payment.paymentStatus === "EXPIRED"
+                  ? "กรุณาเลือกสินค้าและทำรายการใหม่"
+                  : "กรุณาลองใหม่อีกครั้ง"}
               </p>
-              <button
-                className="payment-back-button"
-                type="button"
-                onClick={() => setPaymentScreen(null)}
-              >
-                กลับไปเลือกสินค้า
-              </button>
             </>
           )}
 

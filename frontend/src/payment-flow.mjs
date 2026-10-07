@@ -1,5 +1,26 @@
 import { AUDIO_EVENTS, sendAudioFeedback } from "./audio-feedback.mjs";
 
+export function resumeWaitingPaymentAfterCancellationReconciliation(
+  currentScreen,
+  transactionId,
+  payment,
+) {
+  if (
+    currentScreen?.phase !== "waiting" ||
+    currentScreen.payment.transactionId !== transactionId
+  ) {
+    return currentScreen;
+  }
+
+  return {
+    ...currentScreen,
+    payment,
+    isCancelling: false,
+    cancelError: null,
+    pollError: null,
+  };
+}
+
 export async function handleConfirmedPaymentOnce(
   payment,
   attemptedTransactionIds,
@@ -11,7 +32,7 @@ export async function handleConfirmedPaymentOnce(
     playAudio = () => undefined,
   },
 ) {
-  if (payment.paymentStatus !== "SUCCESS") {
+  if (payment.paymentStatus !== "SUCCESS" || payment.customerCancelled === true) {
     return false;
   }
 

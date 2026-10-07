@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { parseOmiseWebhookChargeId, verifyOmiseWebhookSignature } from "../payments/omise-webhook";
 import {
+  cancelPayment,
   createPromptPayPayment,
   getPaymentStatus,
   reconcileWebhookCharge,
@@ -39,6 +40,24 @@ export async function paymentStatus(
 
   try {
     response.json({ data: await getPaymentStatus(transactionId) });
+  } catch (error: unknown) {
+    next(error);
+  }
+}
+
+export async function cancelTransactionPayment(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+): Promise<void> {
+  const transactionId = Number(request.params.transactionId);
+  if (!Number.isSafeInteger(transactionId) || transactionId <= 0) {
+    response.status(400).json({ error: "transactionId must be a positive integer." });
+    return;
+  }
+
+  try {
+    response.json({ data: await cancelPayment(transactionId) });
   } catch (error: unknown) {
     next(error);
   }
