@@ -212,7 +212,7 @@ function RestockMode({
           <div>
             <h1>เติมสินค้า</h1>
             <p className="instruction restock-employee-identity">
-              {authenticatedEmployee.name} · {authenticatedEmployee.employeeCode}
+              {authenticatedEmployee.employeeCode} {authenticatedEmployee.name}
             </p>
           </div>
           <button

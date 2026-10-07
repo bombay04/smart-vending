@@ -78,7 +78,7 @@ test("restock screen uses Thai status copy, guidance, and compact employee ident
   }
   assert.match(
     restock,
-    /\{authenticatedEmployee\.name\} · \{authenticatedEmployee\.employeeCode\}/,
+    /\{authenticatedEmployee\.employeeCode\} \{authenticatedEmployee\.name\}/,
   );
 });
 
