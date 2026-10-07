@@ -28,6 +28,7 @@ import {
 } from "../employee-name.mjs";
 import { didKioskSessionEnd } from "../kiosk-session-flow.mjs";
 import type { RegistrationEmployee } from "../types/employee";
+import SuccessCheckIcon from "./SuccessCheckIcon";
 
 const sortEmployees = (employees: RegistrationEmployee[]) =>
   [...employees].sort((a, b) => a.employeeCode.localeCompare(b.employeeCode));
@@ -52,19 +53,6 @@ type TimedModal =
       title: string;
       body: string;
     };
-
-function SuccessCheckIcon() {
-  return (
-    <svg
-      className="admin-success-check-icon"
-      viewBox="0 0 64 64"
-      focusable="false"
-    >
-      <circle cx="32" cy="32" r="32" />
-      <path d="M15 32.5 26 44l23-25" />
-    </svg>
-  );
-}
 
 function AdminPortal() {
   const [employees, setEmployees] = useState<RegistrationEmployee[]>([]);

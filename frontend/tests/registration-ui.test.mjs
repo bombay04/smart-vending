@@ -200,9 +200,18 @@ test("Pi face registration reuses authentication icon colors for every state", a
     css,
     /\.face-scan-indicator--sync_error,[\s\S]*?\.face-scan-indicator--face_already_registered,[\s\S]*?\.face-scan-indicator--pi_unavailable \{[\s\S]*?border-color: #fecaca;[\s\S]*?color: #b91c1c;[\s\S]*?background: #fff7f7;/,
   );
+  assert.match(registration, /<SuccessCheckIcon \/>/);
   assert.match(
     css,
-    /\.face-scan-indicator--success \{[\s\S]*?color: #15803d;[\s\S]*?background: #f0fdf4;/,
+    /\.face-scan-indicator--success \{[\s\S]*?border-color: transparent;[\s\S]*?background: transparent;/,
+  );
+  assert.match(
+    css,
+    /\.success-check-icon circle \{[\s\S]*?fill: #00c800;/,
+  );
+  assert.match(
+    css,
+    /\.success-check-icon path \{[\s\S]*?stroke: #ffffff;/,
   );
   assert.match(
     css,
