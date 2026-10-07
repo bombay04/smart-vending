@@ -150,3 +150,27 @@ test("normal face-session countdown stays blue while lockout remains red", async
     /\.employee-auth-status \.employee-auth-countdown \{[\s\S]*?color: #991b1b;/,
   );
 });
+
+test("face registration shares the authentication card footprint", async () => {
+  const css = await source("src/App.css");
+
+  assert.match(
+    css,
+    /\.employee-auth-card,\s*\.employee-registration-card \{\s*width: min\(100%, 620px\);\s*padding: clamp\(32px, 7vw, 64px\);\s*border-radius: 32px;\s*text-align: center;\s*\}/,
+  );
+  assert.match(
+    css,
+    /@media \(min-width: 901px\) and \(max-height: 700px\) \{[\s\S]*?\.employee-auth-card,\s*\.employee-registration-card \{\s*width: min\(100%, 660px\);\s*max-height: 100%;\s*padding: 17px 30px;\s*border-radius: 24px;\s*\}/,
+  );
+
+  const registrationCardRules = [
+    ...css.matchAll(/\.employee-registration-card(?:\s*,|\s*\{)([\s\S]*?)\}/g),
+  ].map((match) => match[1]);
+  for (const rule of registrationCardRules) {
+    assert.doesNotMatch(rule, /width: min\(100%, (?:860|900)px\)/);
+    assert.doesNotMatch(rule, /(?:^|\n)\s*height: 100%/);
+    assert.doesNotMatch(rule, /padding: 14px 24px/);
+    assert.doesNotMatch(rule, /overflow: hidden/);
+  }
+  assert.doesNotMatch(css, /\.(?:payment|purchase|restock|admin)[^,{]*card,\s*\.employee-auth-card/);
+});
