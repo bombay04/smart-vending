@@ -140,7 +140,7 @@ test("success unlocks the correct slot exactly once and completes the customer s
   assert.equal(completed, 1);
 });
 
-test("unlock HTTP failure emits both events once and preserves the failure outcome", async () => {
+test("unlock HTTP failure emits only UNLOCK_FAILED once and preserves the failure outcome", async () => {
   const attempted = new Set();
   let confirmed = 0;
   let unlockFailed = 0;
@@ -181,10 +181,8 @@ test("unlock HTTP failure emits both events once and preserves the failure outco
   assert.equal(confirmed, 1);
   assert.equal(unlockFailed, 1);
   assert.equal(unlocked, 0);
-  assert.deepEqual(audioEvents, [
-    AUDIO_EVENTS.PAYMENT_SUCCESS,
-    AUDIO_EVENTS.UNLOCK_FAILED,
-  ]);
+  assert.deepEqual(audioEvents, [AUDIO_EVENTS.UNLOCK_FAILED]);
+  assert.equal(audioEvents.includes(AUDIO_EVENTS.PAYMENT_SUCCESS), false);
 });
 
 test("unlock network rejection emits UNLOCK_FAILED through the same UI failure path", async () => {
@@ -212,52 +210,40 @@ test("unlock network rejection emits UNLOCK_FAILED through the same UI failure p
   );
 
   assert.equal(unlockFailed, 1);
-  assert.deepEqual(audioEvents, [
-    AUDIO_EVENTS.PAYMENT_SUCCESS,
-    AUDIO_EVENTS.UNLOCK_FAILED,
-  ]);
+  assert.deepEqual(audioEvents, [AUDIO_EVENTS.UNLOCK_FAILED]);
+  assert.equal(audioEvents.includes(AUDIO_EVENTS.PAYMENT_SUCCESS), false);
 });
 
-test("UNLOCK_FAILED waits for PAYMENT_SUCCESS audio without delaying failure UI", async () => {
+test("purchase audio waits for the unlock outcome", async () => {
   const audioEvents = [];
-  let unlockFailed = 0;
-  let finishPaymentAudio;
-  const paymentAudio = new Promise((resolve) => {
-    finishPaymentAudio = resolve;
+  let finishUnlock;
+  const unlockResult = new Promise((resolve) => {
+    finishUnlock = resolve;
   });
 
-  await handleConfirmedPaymentOnce(
+  const handling = handleConfirmedPaymentOnce(
     { transactionId: 85, slotNumber: 1, paymentStatus: "SUCCESS" },
     new Set(),
     {
       onSaleConfirmed() {},
       playAudio(event) {
         audioEvents.push(event);
-        return event === AUDIO_EVENTS.PAYMENT_SUCCESS
-          ? paymentAudio
-          : Promise.resolve();
       },
       async unlock() {
-        throw new Error("Pi hardware unavailable");
+        await unlockResult;
       },
       onUnlocked() {},
-      onUnlockFailed() {
-        unlockFailed += 1;
-      },
+      onUnlockFailed() {},
     },
   );
 
-  assert.equal(unlockFailed, 1);
-  assert.deepEqual(audioEvents, [AUDIO_EVENTS.PAYMENT_SUCCESS]);
-
-  finishPaymentAudio();
-  await paymentAudio;
   await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(audioEvents, []);
 
-  assert.deepEqual(audioEvents, [
-    AUDIO_EVENTS.PAYMENT_SUCCESS,
-    AUDIO_EVENTS.UNLOCK_FAILED,
-  ]);
+  finishUnlock();
+  await handling;
+
+  assert.deepEqual(audioEvents, [AUDIO_EVENTS.PAYMENT_SUCCESS]);
 });
 
 test("UNLOCK_FAILED audio rejection does not change the existing failure outcome", async () => {
@@ -293,10 +279,8 @@ test("UNLOCK_FAILED audio rejection does not change the existing failure outcome
   assert.equal(confirmed, 1);
   assert.equal(unlockFailed, 1);
   assert.equal(unlocked, 0);
-  assert.deepEqual(audioEvents, [
-    AUDIO_EVENTS.PAYMENT_SUCCESS,
-    AUDIO_EVENTS.UNLOCK_FAILED,
-  ]);
+  assert.deepEqual(audioEvents, [AUDIO_EVENTS.UNLOCK_FAILED]);
+  assert.equal(audioEvents.includes(AUDIO_EVENTS.PAYMENT_SUCCESS), false);
 });
 
 test("audio failure never prevents a confirmed payment from attempting unlock", async () => {
