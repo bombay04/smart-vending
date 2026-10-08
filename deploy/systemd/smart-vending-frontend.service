@@ -1,0 +1,15 @@
+[Unit]
+Description=Smart Vending customer frontend
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=user
+WorkingDirectory=/home/user/smart-vending/frontend
+ExecStart=/usr/bin/npm run dev -- --host 0.0.0.0
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

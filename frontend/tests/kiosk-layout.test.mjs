@@ -19,9 +19,53 @@ test("Pi launcher uses configurable kiosk mode without browser recovery chrome",
   assert.match(launcher, /--app="\$kiosk_url"/);
   assert.match(launcher, /--disable-session-crashed-bubble/);
   assert.match(launcher, /--noerrdialogs/);
+  assert.match(launcher, /until curl .*"\$kiosk_url"; do/);
+  assert.match(launcher, /sleep "\$readiness_retry_seconds"/);
   assert.match(desktop, /X-GNOME-Autostart-enabled=true/);
   assert.match(desktop, /smart-vending-kiosk/);
   assert.match(exampleConfig, /KIOSK_URL=http:\/\/localhost:5173/);
+  assert.match(exampleConfig, /KIOSK_READY_RETRY_SECONDS=2/);
+});
+
+test("Pi systemd units supervise independent local services", async () => {
+  const [frontendUnit, piUnit, piEnvironment] = await Promise.all([
+    repositorySource("deploy/systemd/smart-vending-frontend.service"),
+    repositorySource("deploy/systemd/smart-vending-pi-unlock.service"),
+    repositorySource("deploy/systemd/pi-unlock-service.env.example"),
+  ]);
+
+  assert.match(frontendUnit, /^User=user$/m);
+  assert.match(
+    frontendUnit,
+    /^WorkingDirectory=\/home\/user\/smart-vending\/frontend$/m,
+  );
+  assert.match(
+    frontendUnit,
+    /^ExecStart=\/usr\/bin\/npm run dev -- --host 0\.0\.0\.0$/m,
+  );
+  assert.match(frontendUnit, /^Restart=on-failure$/m);
+
+  assert.match(piUnit, /^User=user$/m);
+  assert.match(piUnit, /^WorkingDirectory=\/home\/user\/smart-vending$/m);
+  assert.match(
+    piUnit,
+    /^EnvironmentFile=\/home\/user\/\.config\/smart-vending\/pi-unlock-service\.env$/m,
+  );
+  assert.match(
+    piUnit,
+    /^ExecStart=\/home\/user\/smart-vending\/\.venv\/bin\/python edge\/pi_unlock_service\.py$/m,
+  );
+  assert.match(piUnit, /^Restart=on-failure$/m);
+  assert.doesNotMatch(frontendUnit, /smart-vending-pi-unlock/);
+  assert.doesNotMatch(piUnit, /smart-vending-frontend/);
+
+  assert.match(piEnvironment, /^ESP32_SERIAL_PORT=\/dev\/ttyUSB0$/m);
+  assert.match(
+    piEnvironment,
+    /^AUDIO_ALSA_DEVICE=plughw:CARD=UACDemoV10,DEV=0$/m,
+  );
+  assert.match(piEnvironment, /^FACE_CAMERA_INDEX=0$/m);
+  assert.match(piEnvironment, /^FACE_CAMERA_USB_RECOVERY_ENABLED=true$/m);
 });
 
 test("touch hardening preserves selection for editable controls", async () => {

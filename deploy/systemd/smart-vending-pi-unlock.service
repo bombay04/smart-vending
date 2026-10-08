@@ -1,0 +1,17 @@
+[Unit]
+Description=Smart Vending Raspberry Pi hardware, face, and audio service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=user
+WorkingDirectory=/home/user/smart-vending
+EnvironmentFile=/home/user/.config/smart-vending/pi-unlock-service.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/user/smart-vending/.venv/bin/python edge/pi_unlock_service.py
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
