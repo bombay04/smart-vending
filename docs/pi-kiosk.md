@@ -8,7 +8,7 @@ Run these commands from the repository root while signed in as the Linux user wh
 
 ```bash
 sudo apt update
-sudo apt install chromium
+sudo apt install chromium curl
 
 mkdir -p "$HOME/.local/bin" "$HOME/.config/autostart"
 install -m 0755 edge/kiosk/launch-chromium-kiosk.sh "$HOME/.local/bin/smart-vending-kiosk"
@@ -30,13 +30,15 @@ KIOSK_URL=http://localhost:5173
 
 Prefer `localhost` when the frontend runs on the same Pi. If the frontend is hosted elsewhere, set its stable hostname or deployment URL rather than a developer PC address. `CHROMIUM_BIN=/path/to/chromium` is also supported when automatic detection is insufficient.
 
-Ensure the frontend is already started by the existing deployment setup before the desktop session begins. Test the launcher once from a terminal:
+The launcher checks `KIOSK_URL` with `curl` every two seconds and starts Chromium only after the URL returns a successful HTTP response. It waits indefinitely so that a slow boot or a frontend restart cannot leave Chromium on a permanent connection-refused page. Set `KIOSK_READY_RETRY_SECONDS` to another positive whole number in the configuration file if needed.
+
+Test the launcher once from a terminal while the frontend is running:
 
 ```bash
 "$HOME/.local/bin/smart-vending-kiosk"
 ```
 
-Then log out and back in, or reboot. The XDG autostart entry launches Chromium only after the graphical session starts.
+Then log out and back in, or reboot. The XDG autostart entry launches the readiness-checking script only after the graphical session starts. The Chromium profile remains at `$HOME/.local/state/smart-vending-kiosk/chromium`.
 
 There is intentionally no customer-facing kiosk exit control. Perform maintenance over SSH or with a locally attached keyboard/Linux console. To disable autostart during maintenance, rename or remove `$HOME/.config/autostart/smart-vending-kiosk.desktop`, then restore it when finished.
 
