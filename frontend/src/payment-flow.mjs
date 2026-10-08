@@ -21,6 +21,43 @@ export function resumeWaitingPaymentAfterCancellationReconciliation(
   };
 }
 
+function classifyUnpersistedPayment(payment) {
+  if (payment.customerCancelled === true) return "CANCELLED";
+  if (payment.paymentStatus === "SUCCESS") return "SUCCESS";
+  if (
+    payment.paymentStatus === "FAILED" ||
+    payment.paymentStatus === "EXPIRED"
+  ) {
+    return "FAILED";
+  }
+  return "BLOCKED";
+}
+
+export async function reconcileUnpersistedPayment(
+  payment,
+  { cancel, fetchStatus },
+) {
+  try {
+    const cancellationResult = await cancel(payment.transactionId);
+    if (cancellationResult.customerCancelled === true) {
+      return { action: "CANCELLED", payment: cancellationResult };
+    }
+  } catch {
+    // Reconcile below. A failed request is not proof that cancellation failed.
+  }
+
+  try {
+    const currentPayment = await fetchStatus(payment.transactionId);
+    return {
+      action: classifyUnpersistedPayment(currentPayment),
+      payment: currentPayment,
+    };
+  } catch (error) {
+    if (error?.status === 404) return { action: "MISSING", payment };
+    return { action: "BLOCKED", payment };
+  }
+}
+
 export async function handleConfirmedPaymentOnce(
   payment,
   attemptedTransactionIds,
@@ -29,6 +66,11 @@ export async function handleConfirmedPaymentOnce(
     unlock,
     onUnlocked,
     onUnlockFailed,
+    beforeUnlockAttempt = () => true,
+    onUnlockSuppressed = () => undefined,
+    onUnlockAlreadyHandled = () => undefined,
+    onUnlockSucceeded = () => undefined,
+    onUnlockRejected = () => undefined,
     playAudio = () => undefined,
   },
 ) {
@@ -42,15 +84,31 @@ export async function handleConfirmedPaymentOnce(
 
   attemptedTransactionIds.add(payment.transactionId);
   onSaleConfirmed(payment);
+  if (beforeUnlockAttempt(payment) === false) {
+    await onUnlockSuppressed(payment);
+    return true;
+  }
 
+  let unlockResult;
   try {
-    await unlock(payment.slotNumber);
+    unlockResult = await unlock(payment.slotNumber, payment.transactionId);
   } catch {
+    onUnlockRejected(payment);
     void sendAudioFeedback(playAudio, AUDIO_EVENTS.UNLOCK_FAILED);
     await onUnlockFailed(payment);
     return true;
   }
 
+  if (unlockResult?.data?.deduplicated === true) {
+    if (unlockResult.data.status === "ALREADY_UNLOCKED") {
+      onUnlockSucceeded(payment);
+      await onUnlockAlreadyHandled(payment);
+    } else {
+      await onUnlockSuppressed(payment);
+    }
+    return true;
+  }
+  onUnlockSucceeded(payment);
   void sendAudioFeedback(playAudio, AUDIO_EVENTS.PAYMENT_SUCCESS);
   await onUnlocked(payment);
   return true;

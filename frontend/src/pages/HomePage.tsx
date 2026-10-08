@@ -26,6 +26,7 @@ import {
 } from "../api/face-registration";
 import {
   handleConfirmedPaymentOnce,
+  reconcileUnpersistedPayment,
   resumeWaitingPaymentAfterCancellationReconciliation,
 } from "../payment-flow.mjs";
 import type { AuthenticatedEmployee } from "../types/employee";
@@ -35,8 +36,21 @@ import { decideKioskSessionAction } from "../kiosk-session-flow.mjs";
 import { cancelRestockSessionAndCleanup } from "../restock-session-cleanup.mjs";
 import { getProductDisplayName } from "../product-display";
 import SuccessCheckIcon from "../components/SuccessCheckIcon";
+import {
+  clearActivePayment,
+  FULFILLMENT_STATES,
+  getCurrentSuccessfulPaymentRecovery,
+  getPaymentRecoveryAction,
+  installKioskRefreshGuard,
+  persistActivePayment,
+  readActivePayment,
+  recoverSuccessfulPaymentOnce,
+  type ActivePaymentSession,
+  type FulfillmentState,
+} from "../active-payment-recovery.mjs";
 
 interface PurchaseSuccess {
+  transactionId: number;
   slotNumber: number;
   productName: string;
 }
@@ -55,7 +69,11 @@ type PaymentScreen =
     }
   | { phase: "unlocking"; payment: PaymentResult }
   | { phase: "failed"; payment: PaymentResult }
-  | { phase: "unlock-failed"; payment: PaymentResult };
+  | { phase: "unlock-failed"; payment: PaymentResult }
+  | { phase: "assistance"; payment: PaymentResult }
+  | { phase: "persistence-failed"; payment: PaymentResult };
+
+type RecoveryState = "idle" | "loading" | "error";
 
 function HomePage() {
   const [activeMode, setActiveMode] = useState<
@@ -74,7 +92,14 @@ function HomePage() {
   );
   const [purchaseSuccess, setPurchaseSuccess] =
     useState<PurchaseSuccess | null>(null);
+  const [startupActivePayment] = useState<ActivePaymentSession | null>(() =>
+    readActivePayment(),
+  );
+  const [recoveryState, setRecoveryState] = useState<RecoveryState>(() =>
+    startupActivePayment === null ? "idle" : "loading",
+  );
   const unlockAttemptedTransactionIds = useRef(new Set<number>());
+  const recoveryEvaluatedTransactionIds = useRef(new Set<number>());
   const customerCancelledTransactionIds = useRef(new Set<number>());
   const cancellationInFlightTransactionIds = useRef(new Set<number>());
   const acceptedSessionIds = useRef(new Set<number>());
@@ -104,12 +129,44 @@ function HomePage() {
     [markSlotAsSoldOut],
   );
 
+  const restoreHandledSuccessfulPayment = useCallback(
+    (payment: PaymentResult, fulfillmentState: FulfillmentState) => {
+      markSlotAsSoldOut(payment.slotNumber);
+      if (fulfillmentState === FULFILLMENT_STATES.ATTEMPTING) {
+        setPaymentScreen({ phase: "assistance", payment });
+      } else if (fulfillmentState === FULFILLMENT_STATES.UNLOCKED) {
+        setPaymentScreen(null);
+        setPurchaseSuccess({
+          transactionId: payment.transactionId,
+          slotNumber: payment.slotNumber,
+          productName: payment.productName,
+        });
+      } else {
+        setPaymentScreen({ phase: "unlock-failed", payment });
+      }
+    },
+    [markSlotAsSoldOut],
+  );
+
   const completeConfirmedPayment = useCallback(
     async (payment: PaymentResult) => {
       if (
         payment.customerCancelled ||
         customerCancelledTransactionIds.current.has(payment.transactionId)
       ) {
+        return;
+      }
+      const currentRecovery = getCurrentSuccessfulPaymentRecovery(
+        payment.transactionId,
+      );
+      if (
+        currentRecovery.action !== "ATTEMPT_UNLOCK" &&
+        currentRecovery.activePayment !== null
+      ) {
+        restoreHandledSuccessfulPayment(
+          payment,
+          currentRecovery.activePayment.fulfillmentState,
+        );
         return;
       }
       await handleConfirmedPaymentOnce(
@@ -122,10 +179,45 @@ function HomePage() {
           },
           unlock: unlockSlot,
           playAudio: playAudioFeedback,
+          beforeUnlockAttempt(confirmedPayment) {
+            return persistActivePayment(
+              confirmedPayment.transactionId,
+              FULFILLMENT_STATES.ATTEMPTING,
+            );
+          },
+          async onUnlockSuppressed(confirmedPayment) {
+            await refreshSlotsAfterSale(confirmedPayment.slotNumber);
+            setPaymentScreen({
+              phase: "assistance",
+              payment: confirmedPayment,
+            });
+          },
+          async onUnlockAlreadyHandled(confirmedPayment) {
+            await refreshSlotsAfterSale(confirmedPayment.slotNumber);
+            setPaymentScreen(null);
+            setPurchaseSuccess({
+              transactionId: confirmedPayment.transactionId,
+              slotNumber: confirmedPayment.slotNumber,
+              productName: confirmedPayment.productName,
+            });
+          },
+          onUnlockSucceeded(confirmedPayment) {
+            persistActivePayment(
+              confirmedPayment.transactionId,
+              FULFILLMENT_STATES.UNLOCKED,
+            );
+          },
+          onUnlockRejected(confirmedPayment) {
+            persistActivePayment(
+              confirmedPayment.transactionId,
+              FULFILLMENT_STATES.UNLOCK_FAILED,
+            );
+          },
           async onUnlocked(confirmedPayment) {
             await refreshSlotsAfterSale(confirmedPayment.slotNumber);
             setPaymentScreen(null);
             setPurchaseSuccess({
+              transactionId: confirmedPayment.transactionId,
               slotNumber: confirmedPayment.slotNumber,
               productName: confirmedPayment.productName,
             });
@@ -140,7 +232,11 @@ function HomePage() {
         },
       );
     },
-    [markSlotAsSoldOut, refreshSlotsAfterSale],
+    [
+      markSlotAsSoldOut,
+      refreshSlotsAfterSale,
+      restoreHandledSuccessfulPayment,
+    ],
   );
 
   const handleRestockSuccess = useCallback((restock: MockRestockResult) => {
@@ -202,7 +298,7 @@ function HomePage() {
   );
 
   async function handleBuy(slot: Slot) {
-    if (!slot.product) {
+    if (!slot.product || recoveryState !== "idle") {
       return;
     }
 
@@ -213,27 +309,58 @@ function HomePage() {
       productName: slot.product.name,
     });
 
+    let payment: PaymentResult;
     try {
-      const payment = await createPromptPayPayment(slot.slotNumber);
-      if (
-        payment.paymentStatus === "FAILED" ||
-        payment.paymentStatus === "EXPIRED"
-      ) {
-        setPaymentScreen({ phase: "failed", payment });
-      } else if (payment.paymentStatus === "SUCCESS") {
-        await completeConfirmedPayment(payment);
-      } else {
-        setPaymentScreen({
-          phase: "waiting",
-          payment,
-          pollError: null,
-          cancelError: null,
-          isCancelling: false,
-        });
-      }
+      payment = await createPromptPayPayment(slot.slotNumber);
     } catch {
       setPaymentScreen(null);
       setPurchaseError("ไม่สามารถเริ่มการชำระเงินได้ กรุณาลองอีกครั้ง");
+      return;
+    }
+
+    const persistenceSucceeded = persistActivePayment(
+      payment.transactionId,
+      FULFILLMENT_STATES.NOT_STARTED,
+    );
+    if (!persistenceSucceeded) {
+      setPaymentScreen({ phase: "persistence-failed", payment });
+      const outcome = await reconcileUnpersistedPayment(payment, {
+        cancel: cancelPayment,
+        fetchStatus: fetchPaymentStatus,
+      });
+
+      if (outcome.action === "CANCELLED") {
+        customerCancelledTransactionIds.current.add(payment.transactionId);
+        clearActivePayment(payment.transactionId);
+        setPaymentScreen(null);
+      } else if (outcome.action === "SUCCESS") {
+        await completeConfirmedPayment(outcome.payment);
+      } else if (outcome.action === "FAILED") {
+        setPaymentScreen({ phase: "failed", payment: outcome.payment });
+      } else if (outcome.action === "MISSING") {
+        clearActivePayment(payment.transactionId);
+        setPaymentScreen(null);
+      } else {
+        setPaymentScreen({ phase: "persistence-failed", payment });
+      }
+      return;
+    }
+
+    if (
+      payment.paymentStatus === "FAILED" ||
+      payment.paymentStatus === "EXPIRED"
+    ) {
+      setPaymentScreen({ phase: "failed", payment });
+    } else if (payment.paymentStatus === "SUCCESS") {
+      await completeConfirmedPayment(payment);
+    } else {
+      setPaymentScreen({
+        phase: "waiting",
+        payment,
+        pollError: null,
+        cancelError: null,
+        isCancelling: false,
+      });
     }
   }
 
@@ -261,6 +388,7 @@ function HomePage() {
         const cancelledPayment = await cancelPayment(transactionId);
         if (cancelledPayment.customerCancelled) {
           customerCancelledTransactionIds.current.add(transactionId);
+          clearActivePayment(transactionId);
           setPaymentScreen((current) =>
             current?.phase === "waiting" &&
             current.payment.transactionId === transactionId
@@ -279,6 +407,7 @@ function HomePage() {
             const currentPayment = await fetchPaymentStatus(transactionId);
             if (currentPayment.customerCancelled) {
               customerCancelledTransactionIds.current.add(transactionId);
+              clearActivePayment(transactionId);
               setPaymentScreen(null);
             } else if (currentPayment.paymentStatus === "SUCCESS") {
               await completeConfirmedPayment(currentPayment);
@@ -321,6 +450,10 @@ function HomePage() {
   );
 
   useEffect(() => {
+    return installKioskRefreshGuard(window);
+  }, []);
+
+  useEffect(() => {
     let isMounted = true;
     fetchSlots()
       .then((data) => {
@@ -336,6 +469,110 @@ function HomePage() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (startupActivePayment === null) return undefined;
+
+    let stopped = false;
+    let timeoutId: number | undefined;
+    let controller: AbortController | undefined;
+
+    const recover = async () => {
+      setRecoveryState("loading");
+      controller = new AbortController();
+
+      try {
+        const payment = await fetchPaymentStatus(
+          startupActivePayment.transactionId,
+          controller.signal,
+        );
+        if (stopped) return;
+
+        const action = getPaymentRecoveryAction(
+          payment,
+          startupActivePayment.fulfillmentState,
+        );
+
+        if (action === "CLEAR_CANCELLED") {
+          customerCancelledTransactionIds.current.add(payment.transactionId);
+          clearActivePayment(payment.transactionId);
+          setRecoveryState("idle");
+          return;
+        }
+
+        if (action === "SHOW_FAILURE") {
+          setPaymentScreen({ phase: "failed", payment });
+          setRecoveryState("idle");
+          return;
+        }
+
+        if (action === "RESTORE_WAITING") {
+          setPaymentScreen({
+            phase: "waiting",
+            payment,
+            pollError: null,
+            cancelError: null,
+            isCancelling: false,
+          });
+          setRecoveryState("idle");
+          return;
+        }
+
+        await recoverSuccessfulPaymentOnce(
+          payment,
+          startupActivePayment,
+          recoveryEvaluatedTransactionIds.current,
+          {
+            attemptUnlock: completeConfirmedPayment,
+            showAssistance(recoveredPayment) {
+              restoreHandledSuccessfulPayment(
+                recoveredPayment,
+                FULFILLMENT_STATES.ATTEMPTING,
+              );
+            },
+            showSuccess(recoveredPayment) {
+              restoreHandledSuccessfulPayment(
+                recoveredPayment,
+                FULFILLMENT_STATES.UNLOCKED,
+              );
+            },
+            showUnlockFailed(recoveredPayment) {
+              restoreHandledSuccessfulPayment(
+                recoveredPayment,
+                FULFILLMENT_STATES.UNLOCK_FAILED,
+              );
+            },
+          },
+        );
+        setRecoveryState("idle");
+      } catch (recoveryError: unknown) {
+        if (stopped) return;
+
+        if (
+          recoveryError instanceof PaymentApiError &&
+          recoveryError.status === 404
+        ) {
+          clearActivePayment(startupActivePayment.transactionId);
+          setRecoveryState("idle");
+          return;
+        }
+
+        setRecoveryState("error");
+        timeoutId = window.setTimeout(() => void recover(), 2000);
+      }
+    };
+
+    void recover();
+    return () => {
+      stopped = true;
+      controller?.abort();
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [
+    completeConfirmedPayment,
+    restoreHandledSuccessfulPayment,
+    startupActivePayment,
+  ]);
 
   useEffect(() => {
     if (waitingTransactionId === null) {
@@ -363,6 +600,7 @@ function HomePage() {
 
         if (payment.customerCancelled) {
           customerCancelledTransactionIds.current.add(transactionId);
+          clearActivePayment(transactionId);
           setPaymentScreen(null);
           return;
         }
@@ -412,8 +650,12 @@ function HomePage() {
 
   useEffect(() => {
     if (paymentScreen?.phase !== "failed") return undefined;
+    const transactionId = paymentScreen.payment.transactionId;
     const timeoutId = window.setTimeout(
-      () => setPaymentScreen(null),
+      () => {
+        clearActivePayment(transactionId);
+        setPaymentScreen(null);
+      },
       PAYMENT_FAILURE_RETURN_MS,
     );
     return () => window.clearTimeout(timeoutId);
@@ -421,8 +663,12 @@ function HomePage() {
 
   useEffect(() => {
     if (paymentScreen?.phase !== "unlock-failed") return undefined;
+    const transactionId = paymentScreen.payment.transactionId;
     const timeoutId = window.setTimeout(
-      () => setPaymentScreen(null),
+      () => {
+        clearActivePayment(transactionId);
+        setPaymentScreen(null);
+      },
       UNLOCK_FAILURE_RETURN_MS,
     );
     return () => window.clearTimeout(timeoutId);
@@ -441,7 +687,10 @@ function HomePage() {
 
         const action = decideKioskSessionAction({
           session,
-          isSafeIdle: paymentScreen === null && purchaseSuccess === null,
+          isSafeIdle:
+            recoveryState === "idle" &&
+            paymentScreen === null &&
+            purchaseSuccess === null,
           currentMode: activeMode,
           acceptedSessionIds: acceptedSessionIds.current,
           workflowCompleted: staffWorkflowCompletedRef.current,
@@ -513,11 +762,15 @@ function HomePage() {
       controller?.abort();
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [activeMode, paymentScreen, purchaseSuccess]);
+  }, [activeMode, paymentScreen, purchaseSuccess, recoveryState]);
 
   useEffect(() => {
     if (purchaseSuccess === null) return undefined;
-    const timeoutId = window.setTimeout(() => setPurchaseSuccess(null), 4000);
+    const transactionId = purchaseSuccess.transactionId;
+    const timeoutId = window.setTimeout(() => {
+      clearActivePayment(transactionId);
+      setPurchaseSuccess(null);
+    }, 4000);
     return () => window.clearTimeout(timeoutId);
   }, [purchaseSuccess]);
 
@@ -564,6 +817,26 @@ function HomePage() {
           clearStaffWorkflowState();
         }}
       />
+    );
+  }
+
+  if (recoveryState !== "idle") {
+    return (
+      <main className="home-page payment-page customer-kiosk-page">
+        <section
+          className="payment-card payment-card--recovering"
+          aria-live="polite"
+        >
+          <h1>กำลังกู้คืนรายการชำระเงิน...</h1>
+          {recoveryState === "error" ? (
+            <p className="payment-message payment-message--warning">
+              ไม่สามารถตรวจสอบการชำระเงินได้ ระบบจะลองอีกครั้ง
+            </p>
+          ) : (
+            <div className="payment-spinner" aria-hidden="true" />
+          )}
+        </section>
+      </main>
     );
   }
 
@@ -678,6 +951,31 @@ function HomePage() {
               <p className="payment-message payment-message--error">
                 ไม่สามารถปลดล็อกช่องสินค้าได้
                 <br />
+                กรุณาติดต่อพนักงาน
+              </p>
+            </>
+          )}
+
+          {paymentScreen.phase === "persistence-failed" &&
+            payment !== null && (
+              <>
+                <div className="payment-warning-icon" aria-hidden="true">
+                  !
+                </div>
+                <h1>ไม่สามารถดำเนินรายการต่อได้</h1>
+                <p className="payment-message payment-message--warning">
+                  กรุณาติดต่อพนักงาน
+                </p>
+              </>
+            )}
+
+          {paymentScreen.phase === "assistance" && payment !== null && (
+            <>
+              <div className="payment-warning-icon" aria-hidden="true">
+                !
+              </div>
+              <h1>ชำระเงินสำเร็จ</h1>
+              <p className="payment-message payment-message--warning">
                 กรุณาติดต่อพนักงาน
               </p>
             </>

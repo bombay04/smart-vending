@@ -23,6 +23,7 @@ export class PaymentApiError extends Error {
   constructor(
     message: string,
     readonly code?: string,
+    readonly status?: number,
   ) {
     super(message);
     this.name = "PaymentApiError";
@@ -50,7 +51,7 @@ async function readPaymentResponse(
     } catch {
       // Keep the customer-safe fallback for a non-JSON response.
     }
-    throw new PaymentApiError(errorMessage, errorCode);
+    throw new PaymentApiError(errorMessage, errorCode, response.status);
   }
 
   return ((await response.json()) as PaymentResponse).data;

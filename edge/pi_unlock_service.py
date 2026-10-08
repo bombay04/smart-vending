@@ -90,8 +90,10 @@ logger = logging.getLogger("pi-unlock-service")
 app = Flask(__name__)
 serial_client: Esp32SerialClient | None = None
 serial_operation_lock = threading.Lock()
+unlock_idempotency_lock = threading.Lock()
 face_authentication_lock = threading.Lock()
 audio_playback_lock = threading.Lock()
+unlock_transaction_outcomes: dict[int, tuple[int, str, bool]] = {}
 
 
 class FaceRecognizer(Protocol):
@@ -754,38 +756,119 @@ def unlock() -> tuple[Response, int] | Response:
     if type(slot_number) is not int or slot_number not in (1, 2, 3):
         return jsonify(error="slotNumber must be an integer: 1, 2, or 3."), 400
 
-    logger.info("Unlock requested for slot %s", slot_number)
+    transaction_id = body.get("transactionId")
+    if type(transaction_id) is not int or transaction_id <= 0:
+        return jsonify(error="transactionId must be a positive integer."), 400
 
-    if MOCK_HARDWARE:
-        logger.info("Mock unlock command accepted for slot %s", slot_number)
-        return jsonify(
-            data={
-                "slotNumber": slot_number,
-                "status": "UNLOCK_COMMAND_SENT",
-                "mockHardware": True,
-            }
+    logger.info(
+        "Unlock requested for transaction %s and slot %s",
+        transaction_id,
+        slot_number,
+    )
+
+    with unlock_idempotency_lock:
+        previous_outcome = unlock_transaction_outcomes.get(transaction_id)
+        if previous_outcome is not None:
+            previous_slot, outcome, was_mock_hardware = previous_outcome
+            if previous_slot != slot_number:
+                logger.error(
+                    "Duplicate unlock transaction %s used a different slot",
+                    transaction_id,
+                )
+                return (
+                    jsonify(error="transactionId is already bound to another slot."),
+                    409,
+                )
+
+            logger.warning(
+                "Duplicate unlock suppressed for transaction %s and slot %s",
+                transaction_id,
+                slot_number,
+            )
+            return jsonify(
+                data={
+                    "transactionId": transaction_id,
+                    "slotNumber": slot_number,
+                    "status": (
+                        "ALREADY_UNLOCKED"
+                        if outcome == "UNLOCKED"
+                        else "UNLOCK_OUTCOME_UNCERTAIN"
+                    ),
+                    "mockHardware": was_mock_hardware,
+                    "deduplicated": True,
+                }
+            )
+
+        if not MOCK_HARDWARE and (
+            serial_client is None or not serial_client.is_connected
+        ):
+            logger.error("Serial connection is unavailable")
+            return jsonify(error="Serial connection unavailable."), 503
+
+        unlock_transaction_outcomes[transaction_id] = (
+            slot_number,
+            "ATTEMPTING",
+            MOCK_HARDWARE,
         )
 
-    if serial_client is None or not serial_client.is_connected:
-        logger.error("Serial connection is unavailable")
-        return jsonify(error="Serial connection unavailable."), 503
+        if MOCK_HARDWARE:
+            unlock_transaction_outcomes[transaction_id] = (
+                slot_number,
+                "UNLOCKED",
+                True,
+            )
+            logger.info(
+                "Mock unlock command accepted for transaction %s and slot %s",
+                transaction_id,
+                slot_number,
+            )
+            return jsonify(
+                data={
+                    "transactionId": transaction_id,
+                    "slotNumber": slot_number,
+                    "status": "UNLOCK_COMMAND_SENT",
+                    "mockHardware": True,
+                    "deduplicated": False,
+                }
+            )
 
-    try:
-        with serial_operation_lock:
-            serial_client.open_slot(slot_number)
-        logger.info("Serial unlock command sent for slot %s", slot_number)
-    except SerialClientError as error:
-        logger.error("Serial command failed: %s", error)
-        return jsonify(error="Serial connection unavailable."), 503
-    except Exception:
-        logger.exception("Unexpected unlock error")
-        return jsonify(error="Internal server error."), 500
+        try:
+            with serial_operation_lock:
+                serial_client.open_slot(slot_number)
+            unlock_transaction_outcomes[transaction_id] = (
+                slot_number,
+                "UNLOCKED",
+                False,
+            )
+            logger.info(
+                "Serial unlock command sent for transaction %s and slot %s",
+                transaction_id,
+                slot_number,
+            )
+        except SerialClientError as error:
+            unlock_transaction_outcomes[transaction_id] = (
+                slot_number,
+                "UNLOCK_FAILED",
+                False,
+            )
+            logger.error("Serial command failed: %s", error)
+            return jsonify(error="Serial connection unavailable."), 503
+        except Exception:
+            unlock_transaction_outcomes[transaction_id] = (
+                slot_number,
+                "UNLOCK_FAILED",
+                False,
+            )
+            logger.exception("Unexpected unlock error")
+            return jsonify(error="Internal server error."), 500
 
     return jsonify(
         data={
+            "transactionId": transaction_id,
             "slotNumber": slot_number,
             "status": "UNLOCK_COMMAND_SENT",
             "mockHardware": False,
+            "deduplicated": False,
         }
     )
 

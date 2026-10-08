@@ -311,7 +311,7 @@ Slot 1:
 ```bash
 curl -X POST http://localhost:5000/unlock \
   -H "Content-Type: application/json" \
-  -d '{"slotNumber":1}'
+  -d '{"slotNumber":1,"transactionId":9001}'
 ```
 
 Slot 2 และ 3:
@@ -319,17 +319,17 @@ Slot 2 และ 3:
 ```bash
 curl -X POST http://localhost:5000/unlock \
   -H "Content-Type: application/json" \
-  -d '{"slotNumber":2}'
+  -d '{"slotNumber":2,"transactionId":9002}'
 
 curl -X POST http://localhost:5000/unlock \
   -H "Content-Type: application/json" \
-  -d '{"slotNumber":3}'
+  -d '{"slotNumber":3,"transactionId":9003}'
 ```
 
 Expected response:
 
 ```json
-{"data":{"mockHardware":false,"slotNumber":1,"status":"UNLOCK_COMMAND_SENT"}}
+{"data":{"deduplicated":false,"mockHardware":false,"slotNumber":1,"status":"UNLOCK_COMMAND_SENT","transactionId":9001}}
 ```
 
 > Response นี้หมายถึง Python เขียนคำสั่งลง Serial แล้วเท่านั้น Service ปัจจุบันยังไม่ได้รอจับคู่ `ACK`, `ERROR:BUSY` หรือยืนยันว่ากลไกเปิดจริง
@@ -351,7 +351,7 @@ curl http://localhost:5000/health
 
 curl -X POST http://localhost:5000/unlock \
   -H "Content-Type: application/json" \
-  -d '{"slotNumber":1}'
+  -d '{"slotNumber":1,"transactionId":9101}'
 ```
 
 Expected:
@@ -361,7 +361,7 @@ Expected:
 ```
 
 ```json
-{"data":{"mockHardware":true,"slotNumber":1,"status":"UNLOCK_COMMAND_SENT"}}
+{"data":{"deduplicated":false,"mockHardware":true,"slotNumber":1,"status":"UNLOCK_COMMAND_SENT","transactionId":9101}}
 ```
 
 ## 8. แก้ปัญหา Port 5000 ถูกใช้งาน

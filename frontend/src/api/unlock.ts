@@ -3,8 +3,11 @@ import type { UnlockRequest, UnlockResponse } from "../types/unlock";
 
 const unlockUrl = `${PI_UNLOCK_BASE_URL}/unlock`;
 
-export async function unlockSlot(slotNumber: number): Promise<UnlockResponse> {
-  const requestBody: UnlockRequest = { slotNumber };
+export async function unlockSlot(
+  slotNumber: number,
+  transactionId: number,
+): Promise<UnlockResponse> {
+  const requestBody: UnlockRequest = { slotNumber, transactionId };
   const response = await fetch(unlockUrl, {
     method: "POST",
     headers: {

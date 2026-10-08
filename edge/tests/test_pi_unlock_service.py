@@ -145,6 +145,8 @@ class PiUnlockServiceTests(unittest.TestCase):
         pi_unlock_service.face_authentication_lockout = (
             pi_unlock_service.FaceAuthenticationLockout(clock=self.clock)
         )
+        with pi_unlock_service.unlock_idempotency_lock:
+            pi_unlock_service.unlock_transaction_outcomes.clear()
 
     def tearDown(self) -> None:
         pi_unlock_service.face_engine = None
@@ -923,7 +925,9 @@ class PiUnlockServiceTests(unittest.TestCase):
     def test_mock_unlock_and_status_endpoints_still_work(self) -> None:
         with patch.object(pi_unlock_service, "MOCK_HARDWARE", True):
             status_response = self.client.get("/hardware/status")
-            unlock_response = self.client.post("/unlock", json={"slotNumber": 1})
+            unlock_response = self.client.post(
+                "/unlock", json={"slotNumber": 1, "transactionId": 81}
+            )
 
         self.assertEqual(status_response.status_code, 200)
         self.assertEqual(len(status_response.get_json()["slots"]), 3)
@@ -931,6 +935,94 @@ class PiUnlockServiceTests(unittest.TestCase):
         self.assertEqual(
             unlock_response.get_json()["data"]["status"], "UNLOCK_COMMAND_SENT"
         )
+        self.assertFalse(unlock_response.get_json()["data"]["deduplicated"])
+
+    def test_unlock_requires_a_positive_transaction_id(self) -> None:
+        with patch.object(pi_unlock_service, "MOCK_HARDWARE", True):
+            missing = self.client.post("/unlock", json={"slotNumber": 1})
+            invalid = self.client.post(
+                "/unlock", json={"slotNumber": 1, "transactionId": 0}
+            )
+
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(invalid.status_code, 400)
+
+    def test_duplicate_transaction_unlock_is_suppressed(self) -> None:
+        with patch.object(pi_unlock_service, "MOCK_HARDWARE", True):
+            first = self.client.post(
+                "/unlock", json={"slotNumber": 2, "transactionId": 82}
+            )
+            duplicate = self.client.post(
+                "/unlock", json={"slotNumber": 2, "transactionId": 82}
+            )
+            wrong_slot = self.client.post(
+                "/unlock", json={"slotNumber": 3, "transactionId": 82}
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertFalse(first.get_json()["data"]["deduplicated"])
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertEqual(duplicate.get_json()["data"]["status"], "ALREADY_UNLOCKED")
+        self.assertTrue(duplicate.get_json()["data"]["deduplicated"])
+        self.assertEqual(wrong_slot.status_code, 409)
+
+    def test_real_hardware_duplicate_opens_the_slot_once(self) -> None:
+        class StubSerialClient:
+            is_connected = True
+
+            def __init__(self) -> None:
+                self.opened_slots: list[int] = []
+
+            def open_slot(self, slot_number: int) -> None:
+                self.opened_slots.append(slot_number)
+
+        serial = StubSerialClient()
+        with (
+            patch.object(pi_unlock_service, "MOCK_HARDWARE", False),
+            patch.object(pi_unlock_service, "serial_client", serial),
+        ):
+            first = self.client.post(
+                "/unlock", json={"slotNumber": 3, "transactionId": 83}
+            )
+            duplicate = self.client.post(
+                "/unlock", json={"slotNumber": 3, "transactionId": 83}
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertEqual(serial.opened_slots, [3])
+        self.assertTrue(duplicate.get_json()["data"]["deduplicated"])
+
+    def test_uncertain_hardware_outcome_is_not_retried(self) -> None:
+        class FailingSerialClient:
+            is_connected = True
+
+            def __init__(self) -> None:
+                self.open_calls = 0
+
+            def open_slot(self, _slot_number: int) -> None:
+                self.open_calls += 1
+                raise RuntimeError("outcome unknown")
+
+        serial = FailingSerialClient()
+        with (
+            patch.object(pi_unlock_service, "MOCK_HARDWARE", False),
+            patch.object(pi_unlock_service, "serial_client", serial),
+        ):
+            first = self.client.post(
+                "/unlock", json={"slotNumber": 1, "transactionId": 84}
+            )
+            duplicate = self.client.post(
+                "/unlock", json={"slotNumber": 1, "transactionId": 84}
+            )
+
+        self.assertEqual(first.status_code, 500)
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertEqual(serial.open_calls, 1)
+        self.assertEqual(
+            duplicate.get_json()["data"]["status"], "UNLOCK_OUTCOME_UNCERTAIN"
+        )
+        self.assertTrue(duplicate.get_json()["data"]["deduplicated"])
 
 
 class AudioPlaybackTests(unittest.TestCase):
