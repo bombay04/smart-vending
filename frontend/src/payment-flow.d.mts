@@ -6,6 +6,10 @@ interface CompletionDependencies {
   unlock(slotNumber: number): Promise<unknown>;
   onUnlocked(payment: PaymentResult): void | Promise<void>;
   onUnlockFailed(payment: PaymentResult): void | Promise<void>;
+  beforeUnlockAttempt?(payment: PaymentResult): boolean;
+  onUnlockSuppressed?(payment: PaymentResult): void | Promise<void>;
+  onUnlockSucceeded?(payment: PaymentResult): void;
+  onUnlockRejected?(payment: PaymentResult): void;
   playAudio?(event: AudioEvent): unknown;
 }
 
@@ -28,3 +32,14 @@ export function handleConfirmedPaymentOnce(
   attemptedTransactionIds: Set<number>,
   dependencies: CompletionDependencies,
 ): Promise<boolean>;
+
+export function reconcileUnpersistedPayment(
+  payment: PaymentResult,
+  dependencies: {
+    cancel(transactionId: number): Promise<PaymentResult>;
+    fetchStatus(transactionId: number): Promise<PaymentResult>;
+  },
+): Promise<{
+  action: "CANCELLED" | "SUCCESS" | "FAILED" | "MISSING" | "BLOCKED";
+  payment: PaymentResult;
+}>;
