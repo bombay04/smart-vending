@@ -144,20 +144,37 @@ The uninstall commands intentionally preserve `/home/user/.config/smart-vending/
 
 4. On the touchscreen, confirm Chromium opened `http://localhost:5173`, the product-selection page appears, and there is no connection-refused page.
 
-5. Verify automatic recovery of each service. Record its current main PID, kill the complete service control group, wait longer than `RestartSec`, and confirm that systemd assigned a new PID and the endpoint recovered:
+5. Verify automatic recovery of each service. Define this helper once in the SSH shell. It polls once per second and returns failure if the endpoint does not become healthy within approximately 30 seconds:
+
+   ```bash
+   wait_for_url() {
+     local url="$1"
+     curl --fail --silent --show-error --output /dev/null \
+       --connect-timeout 2 --max-time 2 \
+       --retry 30 --retry-all-errors --retry-connrefused \
+       --retry-delay 1 --retry-max-time 30 \
+       "$url"
+   }
+   ```
+
+   Record the frontend's current main PID, kill its complete service control group, then wait for Vite to become reachable. Confirm that systemd assigned a new PID and incremented the restart count:
 
    ```bash
    systemctl show -p MainPID -p NRestarts smart-vending-frontend.service
    sudo systemctl kill --signal=SIGKILL smart-vending-frontend.service
-   sleep 7
+   wait_for_url http://localhost:5173/
    systemctl show -p ActiveState -p MainPID -p NRestarts smart-vending-frontend.service
-   curl --fail http://localhost:5173/
+   curl --fail --silent --show-error http://localhost:5173/ --output /dev/null
+   ```
 
+   Repeat the same bounded readiness check for the Pi service:
+
+   ```bash
    systemctl show -p MainPID -p NRestarts smart-vending-pi-unlock.service
    sudo systemctl kill --signal=SIGKILL smart-vending-pi-unlock.service
-   sleep 7
+   wait_for_url http://localhost:5000/health
    systemctl show -p ActiveState -p MainPID -p NRestarts smart-vending-pi-unlock.service
-   curl --fail http://localhost:5000/health
+   curl --fail --silent --show-error http://localhost:5000/health
    ```
 
 6. Check the logs for both controlled failures and successful restarts:
