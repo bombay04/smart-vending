@@ -109,7 +109,7 @@ Mock or real unlock request on Linux/Raspberry Pi:
 ```bash
 curl -X POST http://localhost:5000/unlock \
   -H "Content-Type: application/json" \
-  -d '{"slotNumber":1}'
+  -d '{"slotNumber":1,"transactionId":81}'
 ```
 
 Windows PowerShell:
@@ -117,7 +117,7 @@ Windows PowerShell:
 ```powershell
 curl.exe -X POST http://localhost:5000/unlock `
   -H "Content-Type: application/json" `
-  -d '{"slotNumber":1}'
+  -d '{"slotNumber":1,"transactionId":81}'
 ```
 
 A successful mock response is:
@@ -125,14 +125,24 @@ A successful mock response is:
 ```json
 {
   "data": {
+    "transactionId": 81,
     "slotNumber": 1,
     "status": "UNLOCK_COMMAND_SENT",
-    "mockHardware": true
+    "mockHardware": true,
+    "deduplicated": false
   }
 }
 ```
 
-Invalid JSON, a missing `slotNumber`, or a slot outside `1` through `3` returns HTTP `400`. An unavailable real Serial connection returns HTTP `503`.
+`transactionId` is the positive-integer idempotency key. Repeating the same
+transaction and slot while the Pi service process remains running does not send
+another Serial command; the response has `deduplicated: true`. Reusing a
+transaction ID with a different slot returns HTTP `409`. This deduplication is
+process-local and does not survive a Pi service restart.
+
+Invalid JSON, a missing/invalid `transactionId`, a missing `slotNumber`, or a
+slot outside `1` through `3` returns HTTP `400`. An unavailable real Serial
+connection returns HTTP `503`.
 
 ## Local audio feedback
 

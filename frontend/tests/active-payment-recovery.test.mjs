@@ -5,11 +5,13 @@ import {
   ACTIVE_PAYMENT_STORAGE_KEY,
   FULFILLMENT_STATES,
   clearActivePayment,
+  getCurrentSuccessfulPaymentRecovery,
   getPaymentRecoveryAction,
   installKioskRefreshGuard,
   isKioskRefreshShortcut,
   persistActivePayment,
   readActivePayment,
+  recoverSuccessfulPaymentOnce,
 } from "../src/active-payment-recovery.mjs";
 import {
   handleConfirmedPaymentOnce,
@@ -202,6 +204,126 @@ test("successful recovery maps every persisted fulfillment state safely", () => 
   );
 });
 
+test("fresh-mount SUCCESS recovery unlocks only NOT_STARTED", async () => {
+  const payment = {
+    transactionId: 91,
+    slotNumber: 2,
+    paymentStatus: "SUCCESS",
+    customerCancelled: false,
+  };
+
+  for (const [fulfillmentState, expectedUnlocks, expectedUi] of [
+    [FULFILLMENT_STATES.NOT_STARTED, 1, null],
+    [FULFILLMENT_STATES.ATTEMPTING, 0, "assistance"],
+    [FULFILLMENT_STATES.UNLOCKED, 0, "success"],
+    [FULFILLMENT_STATES.UNLOCK_FAILED, 0, "unlock-failed"],
+  ]) {
+    let unlockCount = 0;
+    const ui = [];
+    await recoverSuccessfulPaymentOnce(
+      payment,
+      { version: 1, transactionId: 91, fulfillmentState },
+      new Set(),
+      {
+        attemptUnlock() {
+          unlockCount += 1;
+        },
+        showAssistance() {
+          ui.push("assistance");
+        },
+        showSuccess() {
+          ui.push("success");
+        },
+        showUnlockFailed() {
+          ui.push("unlock-failed");
+        },
+      },
+    );
+
+    assert.equal(unlockCount, expectedUnlocks);
+    assert.deepEqual(ui, expectedUi === null ? [] : [expectedUi]);
+  }
+});
+
+test("concurrent and repeated recovery evaluation attempts one fulfillment", async () => {
+  let unlockCount = 0;
+  let finishUnlock;
+  const unlockPending = new Promise((resolve) => {
+    finishUnlock = resolve;
+  });
+  const payment = {
+    transactionId: 92,
+    slotNumber: 1,
+    paymentStatus: "SUCCESS",
+    customerCancelled: false,
+  };
+  const activePayment = {
+    version: 1,
+    transactionId: 92,
+    fulfillmentState: FULFILLMENT_STATES.NOT_STARTED,
+  };
+  const evaluated = new Set();
+  const dependencies = {
+    async attemptUnlock() {
+      unlockCount += 1;
+      await unlockPending;
+    },
+    showAssistance() {},
+    showSuccess() {},
+    showUnlockFailed() {},
+  };
+
+  const first = recoverSuccessfulPaymentOnce(
+    payment,
+    activePayment,
+    evaluated,
+    dependencies,
+  );
+  const second = recoverSuccessfulPaymentOnce(
+    payment,
+    activePayment,
+    evaluated,
+    dependencies,
+  );
+
+  assert.equal(await second, false);
+  assert.equal(unlockCount, 1);
+  finishUnlock();
+  assert.equal(await first, true);
+  assert.equal(
+    await recoverSuccessfulPaymentOnce(
+      payment,
+      activePayment,
+      evaluated,
+      dependencies,
+    ),
+    false,
+  );
+  assert.equal(unlockCount, 1);
+});
+
+test("polling cannot re-enter fulfillment for persisted handled transactions", () => {
+  const storage = createStorage();
+
+  persistActivePayment(93, FULFILLMENT_STATES.ATTEMPTING, storage);
+  assert.equal(
+    getCurrentSuccessfulPaymentRecovery(93, storage).action,
+    "SHOW_ASSISTANCE",
+  );
+
+  persistActivePayment(93, FULFILLMENT_STATES.UNLOCKED, storage);
+  assert.equal(
+    getCurrentSuccessfulPaymentRecovery(93, storage).action,
+    "SHOW_SUCCESS",
+  );
+
+  persistActivePayment(93, FULFILLMENT_STATES.UNLOCK_FAILED, storage);
+  assert.equal(
+    getCurrentSuccessfulPaymentRecovery(93, storage).action,
+    "SHOW_UNLOCK_FAILED",
+  );
+});
+
 test("created payment persistence failure uses cancellation and authoritative reconciliation", async () => {
   let fetchCount = 0;
   const payment = {
@@ -317,6 +439,110 @@ test("failed ATTEMPTING persistence suppresses unlock and all outcome audio", as
   assert.deepEqual(audioEvents, []);
 });
 
+test("Pi-deduplicated unlock restores success without replaying audio", async () => {
+  let unlockRequestCount = 0;
+  let restoredSuccessCount = 0;
+  let ordinarySuccessCount = 0;
+  const audioEvents = [];
+
+  await handleConfirmedPaymentOnce(
+    {
+      transactionId: 84,
+      slotNumber: 2,
+      paymentStatus: "SUCCESS",
+      customerCancelled: false,
+    },
+    new Set(),
+    {
+      onSaleConfirmed() {},
+      beforeUnlockAttempt() {
+        return true;
+      },
+      async unlock(slotNumber, transactionId) {
+        unlockRequestCount += 1;
+        assert.equal(slotNumber, 2);
+        assert.equal(transactionId, 84);
+        return {
+          data: { status: "ALREADY_UNLOCKED", deduplicated: true },
+        };
+      },
+      onUnlockSucceeded() {},
+      onUnlockAlreadyHandled() {
+        restoredSuccessCount += 1;
+      },
+      onUnlocked() {
+        ordinarySuccessCount += 1;
+      },
+      onUnlockFailed() {},
+      playAudio(event) {
+        audioEvents.push(event);
+      },
+    },
+  );
+
+  assert.equal(unlockRequestCount, 1);
+  assert.equal(restoredSuccessCount, 1);
+  assert.equal(ordinarySuccessCount, 0);
+  assert.deepEqual(audioEvents, []);
+});
+
+test("Pi-deduplicated uncertain outcome shows assistance without audio", async () => {
+  let assistanceCount = 0;
+  let successCount = 0;
+  const audioEvents = [];
+
+  await handleConfirmedPaymentOnce(
+    {
+      transactionId: 85,
+      slotNumber: 1,
+      paymentStatus: "SUCCESS",
+      customerCancelled: false,
+    },
+    new Set(),
+    {
+      onSaleConfirmed() {},
+      beforeUnlockAttempt() {
+        return true;
+      },
+      async unlock() {
+        return {
+          data: { status: "UNLOCK_OUTCOME_UNCERTAIN", deduplicated: true },
+        };
+      },
+      onUnlockSuppressed() {
+        assistanceCount += 1;
+      },
+      onUnlocked() {
+        successCount += 1;
+      },
+      onUnlockFailed() {},
+      playAudio(event) {
+        audioEvents.push(event);
+      },
+    },
+  );
+
+  assert.equal(assistanceCount, 1);
+  assert.equal(successCount, 0);
+  assert.deepEqual(audioEvents, []);
+});
+
+test("Pi unlock request carries transactionId as its idempotency key", async () => {
+  const unlockApi = await readFile(
+    new URL("../src/api/unlock.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    unlockApi,
+    /unlockSlot\(\s*slotNumber: number,\s*transactionId: number/,
+  );
+  assert.match(
+    unlockApi,
+    /const requestBody: UnlockRequest = \{ slotNumber, transactionId \}/,
+  );
+});
+
 test("failed physical unlock persists UNLOCK_FAILED before failure audio and UI", async () => {
   const order = [];
 
@@ -390,7 +616,10 @@ test("HomePage persists creation before waiting and recovers only from backend a
   assert.match(recovery, /fetchPaymentStatus\(\s*startupActivePayment\.transactionId/);
   assert.doesNotMatch(recovery, /createPromptPayPayment/);
   assert.match(recovery, /phase: "waiting"/);
-  assert.match(recovery, /phase: "assistance"/);
+  assert.match(
+    recovery,
+    /showAssistance[\s\S]*?FULFILLMENT_STATES\.ATTEMPTING/,
+  );
   assert.match(recovery, /recoveryError\.status === 404/);
   assert.match(recovery, /setRecoveryState\("error"\)/);
   assert.doesNotMatch(
@@ -398,4 +627,9 @@ test("HomePage persists creation before waiting and recovers only from backend a
     /clearActivePayment/,
   );
   assert.match(home, /return installKioskRefreshGuard\(window\)/);
+  assert.match(
+    home,
+    /getCurrentSuccessfulPaymentRecovery[\s\S]*?currentRecovery\.action !== "ATTEMPT_UNLOCK"[\s\S]*?restoreHandledSuccessfulPayment[\s\S]*?return;[\s\S]*?handleConfirmedPaymentOnce/,
+  );
+  assert.match(home, /recoveryEvaluatedTransactionIds\.current/);
 });

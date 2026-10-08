@@ -39,11 +39,14 @@ import SuccessCheckIcon from "../components/SuccessCheckIcon";
 import {
   clearActivePayment,
   FULFILLMENT_STATES,
+  getCurrentSuccessfulPaymentRecovery,
   getPaymentRecoveryAction,
   installKioskRefreshGuard,
   persistActivePayment,
   readActivePayment,
+  recoverSuccessfulPaymentOnce,
   type ActivePaymentSession,
+  type FulfillmentState,
 } from "../active-payment-recovery.mjs";
 
 interface PurchaseSuccess {
@@ -96,6 +99,7 @@ function HomePage() {
     startupActivePayment === null ? "idle" : "loading",
   );
   const unlockAttemptedTransactionIds = useRef(new Set<number>());
+  const recoveryEvaluatedTransactionIds = useRef(new Set<number>());
   const customerCancelledTransactionIds = useRef(new Set<number>());
   const cancellationInFlightTransactionIds = useRef(new Set<number>());
   const acceptedSessionIds = useRef(new Set<number>());
@@ -125,12 +129,44 @@ function HomePage() {
     [markSlotAsSoldOut],
   );
 
+  const restoreHandledSuccessfulPayment = useCallback(
+    (payment: PaymentResult, fulfillmentState: FulfillmentState) => {
+      markSlotAsSoldOut(payment.slotNumber);
+      if (fulfillmentState === FULFILLMENT_STATES.ATTEMPTING) {
+        setPaymentScreen({ phase: "assistance", payment });
+      } else if (fulfillmentState === FULFILLMENT_STATES.UNLOCKED) {
+        setPaymentScreen(null);
+        setPurchaseSuccess({
+          transactionId: payment.transactionId,
+          slotNumber: payment.slotNumber,
+          productName: payment.productName,
+        });
+      } else {
+        setPaymentScreen({ phase: "unlock-failed", payment });
+      }
+    },
+    [markSlotAsSoldOut],
+  );
+
   const completeConfirmedPayment = useCallback(
     async (payment: PaymentResult) => {
       if (
         payment.customerCancelled ||
         customerCancelledTransactionIds.current.has(payment.transactionId)
       ) {
+        return;
+      }
+      const currentRecovery = getCurrentSuccessfulPaymentRecovery(
+        payment.transactionId,
+      );
+      if (
+        currentRecovery.action !== "ATTEMPT_UNLOCK" &&
+        currentRecovery.activePayment !== null
+      ) {
+        restoreHandledSuccessfulPayment(
+          payment,
+          currentRecovery.activePayment.fulfillmentState,
+        );
         return;
       }
       await handleConfirmedPaymentOnce(
@@ -154,6 +190,15 @@ function HomePage() {
             setPaymentScreen({
               phase: "assistance",
               payment: confirmedPayment,
+            });
+          },
+          async onUnlockAlreadyHandled(confirmedPayment) {
+            await refreshSlotsAfterSale(confirmedPayment.slotNumber);
+            setPaymentScreen(null);
+            setPurchaseSuccess({
+              transactionId: confirmedPayment.transactionId,
+              slotNumber: confirmedPayment.slotNumber,
+              productName: confirmedPayment.productName,
             });
           },
           onUnlockSucceeded(confirmedPayment) {
@@ -187,7 +232,11 @@ function HomePage() {
         },
       );
     },
-    [markSlotAsSoldOut, refreshSlotsAfterSale],
+    [
+      markSlotAsSoldOut,
+      refreshSlotsAfterSale,
+      restoreHandledSuccessfulPayment,
+    ],
   );
 
   const handleRestockSuccess = useCallback((restock: MockRestockResult) => {
@@ -469,26 +518,33 @@ function HomePage() {
           return;
         }
 
-        if (action === "ATTEMPT_UNLOCK") {
-          setRecoveryState("idle");
-          await completeConfirmedPayment(payment);
-        } else if (action === "SHOW_ASSISTANCE") {
-          markSlotAsSoldOut(payment.slotNumber);
-          setPaymentScreen({ phase: "assistance", payment });
-          setRecoveryState("idle");
-        } else if (action === "SHOW_SUCCESS") {
-          markSlotAsSoldOut(payment.slotNumber);
-          setPurchaseSuccess({
-            transactionId: payment.transactionId,
-            slotNumber: payment.slotNumber,
-            productName: payment.productName,
-          });
-          setRecoveryState("idle");
-        } else {
-          markSlotAsSoldOut(payment.slotNumber);
-          setPaymentScreen({ phase: "unlock-failed", payment });
-          setRecoveryState("idle");
-        }
+        await recoverSuccessfulPaymentOnce(
+          payment,
+          startupActivePayment,
+          recoveryEvaluatedTransactionIds.current,
+          {
+            attemptUnlock: completeConfirmedPayment,
+            showAssistance(recoveredPayment) {
+              restoreHandledSuccessfulPayment(
+                recoveredPayment,
+                FULFILLMENT_STATES.ATTEMPTING,
+              );
+            },
+            showSuccess(recoveredPayment) {
+              restoreHandledSuccessfulPayment(
+                recoveredPayment,
+                FULFILLMENT_STATES.UNLOCKED,
+              );
+            },
+            showUnlockFailed(recoveredPayment) {
+              restoreHandledSuccessfulPayment(
+                recoveredPayment,
+                FULFILLMENT_STATES.UNLOCK_FAILED,
+              );
+            },
+          },
+        );
+        setRecoveryState("idle");
       } catch (recoveryError: unknown) {
         if (stopped) return;
 
@@ -514,7 +570,7 @@ function HomePage() {
     };
   }, [
     completeConfirmedPayment,
-    markSlotAsSoldOut,
+    restoreHandledSuccessfulPayment,
     startupActivePayment,
   ]);
 

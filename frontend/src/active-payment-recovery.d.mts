@@ -1,3 +1,5 @@
+import type { PaymentResult } from "./api/transaction";
+
 export type FulfillmentState =
   | "NOT_STARTED"
   | "ATTEMPTING"
@@ -67,3 +69,27 @@ export function getPaymentRecoveryAction(
   | "SHOW_ASSISTANCE"
   | "SHOW_SUCCESS"
   | "SHOW_UNLOCK_FAILED";
+
+export function getCurrentSuccessfulPaymentRecovery(
+  transactionId: number,
+  storage?: StorageLike,
+): {
+  action:
+    | "ATTEMPT_UNLOCK"
+    | "SHOW_ASSISTANCE"
+    | "SHOW_SUCCESS"
+    | "SHOW_UNLOCK_FAILED";
+  activePayment: ActivePaymentSession | null;
+};
+
+export function recoverSuccessfulPaymentOnce(
+  payment: PaymentResult,
+  activePayment: ActivePaymentSession,
+  evaluatedTransactionIds: Set<number>,
+  dependencies: {
+    attemptUnlock(payment: PaymentResult): void | Promise<void>;
+    showAssistance(payment: PaymentResult): void | Promise<void>;
+    showSuccess(payment: PaymentResult): void | Promise<void>;
+    showUnlockFailed(payment: PaymentResult): void | Promise<void>;
+  },
+): Promise<boolean>;

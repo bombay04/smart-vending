@@ -170,3 +170,52 @@ export function getPaymentRecoveryAction(payment, fulfillmentState) {
       throw new TypeError("Unsupported payment status.");
   }
 }
+
+export function getCurrentSuccessfulPaymentRecovery(
+  transactionId,
+  storage = globalThis.localStorage,
+) {
+  const activePayment = readActivePayment(storage);
+  if (
+    activePayment === null ||
+    activePayment.transactionId !== transactionId
+  ) {
+    return { action: "ATTEMPT_UNLOCK", activePayment: null };
+  }
+
+  return {
+    action: getSuccessfulPaymentRecoveryAction(
+      activePayment.fulfillmentState,
+    ),
+    activePayment,
+  };
+}
+
+export async function recoverSuccessfulPaymentOnce(
+  payment,
+  activePayment,
+  evaluatedTransactionIds,
+  {
+    attemptUnlock,
+    showAssistance,
+    showSuccess,
+    showUnlockFailed,
+  },
+) {
+  if (evaluatedTransactionIds.has(payment.transactionId)) return false;
+  evaluatedTransactionIds.add(payment.transactionId);
+
+  const action = getSuccessfulPaymentRecoveryAction(
+    activePayment.fulfillmentState,
+  );
+  if (action === "ATTEMPT_UNLOCK") {
+    await attemptUnlock(payment);
+  } else if (action === "SHOW_ASSISTANCE") {
+    await showAssistance(payment);
+  } else if (action === "SHOW_SUCCESS") {
+    await showSuccess(payment);
+  } else {
+    await showUnlockFailed(payment);
+  }
+  return true;
+}

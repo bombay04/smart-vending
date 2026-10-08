@@ -68,6 +68,7 @@ export async function handleConfirmedPaymentOnce(
     onUnlockFailed,
     beforeUnlockAttempt = () => true,
     onUnlockSuppressed = () => undefined,
+    onUnlockAlreadyHandled = () => undefined,
     onUnlockSucceeded = () => undefined,
     onUnlockRejected = () => undefined,
     playAudio = () => undefined,
@@ -88,8 +89,9 @@ export async function handleConfirmedPaymentOnce(
     return true;
   }
 
+  let unlockResult;
   try {
-    await unlock(payment.slotNumber);
+    unlockResult = await unlock(payment.slotNumber, payment.transactionId);
   } catch {
     onUnlockRejected(payment);
     void sendAudioFeedback(playAudio, AUDIO_EVENTS.UNLOCK_FAILED);
@@ -97,6 +99,15 @@ export async function handleConfirmedPaymentOnce(
     return true;
   }
 
+  if (unlockResult?.data?.deduplicated === true) {
+    if (unlockResult.data.status === "ALREADY_UNLOCKED") {
+      onUnlockSucceeded(payment);
+      await onUnlockAlreadyHandled(payment);
+    } else {
+      await onUnlockSuppressed(payment);
+    }
+    return true;
+  }
   onUnlockSucceeded(payment);
   void sendAudioFeedback(playAudio, AUDIO_EVENTS.PAYMENT_SUCCESS);
   await onUnlocked(payment);
