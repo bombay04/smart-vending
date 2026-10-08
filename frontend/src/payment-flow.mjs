@@ -42,20 +42,16 @@ export async function handleConfirmedPaymentOnce(
 
   attemptedTransactionIds.add(payment.transactionId);
   onSaleConfirmed(payment);
-  const paymentSuccessAudio = sendAudioFeedback(
-    playAudio,
-    AUDIO_EVENTS.PAYMENT_SUCCESS,
-  );
 
   try {
     await unlock(payment.slotNumber);
-    await onUnlocked(payment);
   } catch {
-    void paymentSuccessAudio.then(() =>
-      sendAudioFeedback(playAudio, AUDIO_EVENTS.UNLOCK_FAILED),
-    );
+    void sendAudioFeedback(playAudio, AUDIO_EVENTS.UNLOCK_FAILED);
     await onUnlockFailed(payment);
+    return true;
   }
 
+  void sendAudioFeedback(playAudio, AUDIO_EVENTS.PAYMENT_SUCCESS);
+  await onUnlocked(payment);
   return true;
 }

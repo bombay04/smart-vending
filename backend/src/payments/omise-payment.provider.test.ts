@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { OmisePaymentProvider } from "./omise-payment.provider";
+import { OmisePaymentProvider, PAYMENT_EXPIRY_MINUTES } from "./omise-payment.provider";
 import { PaymentProviderError } from "./payment-provider";
 
 const chargeResponse = {
@@ -20,18 +20,31 @@ const chargeResponse = {
   },
 };
 
-test("Omise provider creates a server-side PromptPay charge with integer satang", async () => {
+test("Omise provider creates a PromptPay charge with a three-minute expiry", async () => {
+  const now = Date.parse("2026-10-07T09:00:00.000Z");
   let requestedUrl = "";
   let requestedInit: RequestInit | undefined;
   const fetchMock: typeof fetch = async (input, init) => {
     requestedUrl = input.toString();
     requestedInit = init;
-    return new Response(JSON.stringify(chargeResponse), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+    const requestBody = init?.body as URLSearchParams;
+    return new Response(
+      JSON.stringify({
+        ...chargeResponse,
+        expires_at: requestBody.get("expires_at"),
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   };
-  const provider = new OmisePaymentProvider("skey_test_private", "2019-05-29", fetchMock);
+  const provider = new OmisePaymentProvider(
+    "skey_test_private",
+    "2019-05-29",
+    fetchMock,
+    () => now,
+  );
 
   const payment = await provider.createPromptPayPayment({
     amount: 2000,
@@ -52,7 +65,9 @@ test("Omise provider creates a server-side PromptPay charge with integer satang"
   assert.equal(body.get("currency"), "THB");
   assert.equal(body.get("source[type]"), "promptpay");
   assert.equal(body.get("metadata[local_transaction_id]"), "91");
-  assert.match(body.get("expires_at") ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  assert.equal(PAYMENT_EXPIRY_MINUTES, 3);
+  assert.equal(body.get("expires_at"), "2026-10-07T09:03:00Z");
+  assert.equal(payment.expiresAt, "2026-10-07T09:03:00Z");
   assert.equal(payment.qrImageUrl, chargeResponse.source.scannable_code.image.download_uri);
 });
 
