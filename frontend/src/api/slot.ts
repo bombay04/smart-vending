@@ -3,8 +3,8 @@ import { API_BASE_URL } from "../config/api";
 
 const slotsUrl = `${API_BASE_URL}/api/v1/slots`;
 
-export async function fetchSlots(): Promise<Slot[]> {
-  const response = await fetch(slotsUrl);
+export async function fetchSlots(signal?: AbortSignal): Promise<Slot[]> {
+  const response = await fetch(slotsUrl, { signal });
 
   if (!response.ok) {
     throw new Error("Failed to fetch slots.");

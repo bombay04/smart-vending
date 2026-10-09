@@ -36,6 +36,7 @@ import { decideKioskSessionAction } from "../kiosk-session-flow.mjs";
 import { cancelRestockSessionAndCleanup } from "../restock-session-cleanup.mjs";
 import { getProductDisplayName } from "../product-display";
 import SuccessCheckIcon from "../components/SuccessCheckIcon";
+import ProductMedia from "../components/ProductMedia";
 import {
   clearActivePayment,
   FULFILLMENT_STATES,
@@ -57,6 +58,7 @@ interface PurchaseSuccess {
 
 export const PAYMENT_FAILURE_RETURN_MS = 2000;
 export const UNLOCK_FAILURE_RETURN_MS = 5000;
+export const SLOT_REFRESH_INTERVAL_MS = 7000;
 
 type PaymentScreen =
   | { phase: "creating"; slotNumber: number; productName: string }
@@ -105,6 +107,7 @@ function HomePage() {
   const acceptedSessionIds = useRef(new Set<number>());
   const staffWorkflowCompletedRef = useRef(false);
   const maintenanceInFlightSessionId = useRef<number | null>(null);
+  const slotsLoadedRef = useRef(false);
   const waitingTransactionId =
     paymentScreen?.phase === "waiting" && !paymentScreen.isCancelling
       ? paymentScreen.payment.transactionId
@@ -453,22 +456,43 @@ function HomePage() {
     return installKioskRefreshGuard(window);
   }, []);
 
+  const isSafeCustomerIdle =
+    activeMode === "customer" &&
+    recoveryState === "idle" &&
+    paymentScreen === null &&
+    purchaseSuccess === null;
+
   useEffect(() => {
-    let isMounted = true;
-    fetchSlots()
-      .then((data) => {
-        if (isMounted) setSlots(data);
-      })
-      .catch(() => {
-        if (isMounted) setError(true);
-      })
-      .finally(() => {
-        if (isMounted) setIsLoading(false);
-      });
-    return () => {
-      isMounted = false;
+    if (!isSafeCustomerIdle) return undefined;
+    let stopped = false;
+    let timeoutId: number | undefined;
+    let controller: AbortController | undefined;
+
+    const refresh = async () => {
+      controller = new AbortController();
+      try {
+        const data = await fetchSlots(controller.signal);
+        if (stopped) return;
+        setSlots(data);
+        slotsLoadedRef.current = true;
+        setError(false);
+      } catch {
+        if (!stopped && !slotsLoadedRef.current) setError(true);
+      } finally {
+        if (!stopped) {
+          setIsLoading(false);
+          timeoutId = window.setTimeout(refresh, SLOT_REFRESH_INTERVAL_MS);
+        }
+      }
     };
-  }, []);
+
+    void refresh();
+    return () => {
+      stopped = true;
+      controller?.abort();
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [isSafeCustomerIdle]);
 
   useEffect(() => {
     if (startupActivePayment === null) return undefined;
@@ -1009,10 +1033,14 @@ function HomePage() {
           >
             {slots.map((slot) => {
               const canBuy =
-                slot.status === "AVAILABLE" && slot.product !== null;
+                slot.status === "AVAILABLE" &&
+                slot.product !== null &&
+                slot.product.isActive;
               const buttonText =
                 slot.product === null
                   ? "ไม่พร้อมจำหน่าย"
+                  : !slot.product.isActive
+                    ? "ปิดจำหน่าย"
                   : slot.status === "SOLD_OUT"
                     ? "สินค้าหมด"
                     : "ซื้อ";
@@ -1033,18 +1061,10 @@ function HomePage() {
                   </div>
                   {slot.product ? (
                     <>
-                      <div className="product-media">
-                        {slot.product.imageUrl ? (
-                          <img
-                            src={slot.product.imageUrl}
-                            alt={getProductDisplayName(slot.product.name)}
-                          />
-                        ) : (
-                          <span aria-hidden="true">
-                            {slot.product.name.charAt(0)}
-                          </span>
-                        )}
-                      </div>
+                      <ProductMedia
+                        name={slot.product.name}
+                        imageUrl={slot.product.imageUrl}
+                      />
                       <h2 className="product-name">
                         {getProductDisplayName(slot.product.name)}
                       </h2>

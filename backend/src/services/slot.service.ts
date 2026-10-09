@@ -13,6 +13,7 @@ export async function getSlots() {
           name: true,
           price: true,
           imageUrl: true,
+          isActive: true,
         },
       },
     },
