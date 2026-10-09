@@ -5,6 +5,7 @@ export interface SlotProduct {
   name: string;
   price: string;
   imageUrl: string | null;
+  isActive: boolean;
 }
 
 export interface Slot {
@@ -16,4 +17,11 @@ export interface Slot {
 
 export interface SlotResponse {
   data: Slot[];
+}
+
+export interface SlotConfigurationInput {
+  name: string;
+  price: string;
+  imageUrl: string | null;
+  isActive: boolean;
 }

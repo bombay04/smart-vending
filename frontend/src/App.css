@@ -745,6 +745,167 @@
   color: #64748b;
 }
 
+.admin-navigation {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 6px;
+  border: 1px solid #dbe5f0;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.admin-navigation button {
+  min-height: 46px;
+  flex: 1;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 11px;
+  color: #475569;
+  background: transparent;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.admin-navigation button.is-active {
+  color: #ffffff;
+  background: #4f46e5;
+  box-shadow: 0 8px 18px rgba(79, 70, 229, 0.2);
+}
+
+.slot-management {
+  margin-top: 28px;
+  padding: clamp(22px, 4vw, 34px);
+  border: 1px solid #dbe5f0;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 40px rgba(30, 55, 90, 0.08);
+}
+
+.admin-slot-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 24px;
+}
+
+.admin-slot-card {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid #dbe5f0;
+  border-radius: 18px;
+  background: #ffffff;
+}
+
+.admin-slot-card h3 {
+  margin: 0;
+  color: #1e293b;
+}
+
+.admin-slot-card .product-media {
+  width: 88px;
+  height: 88px;
+  margin: 22px auto;
+  border-radius: 18px;
+  font-size: 2.5rem;
+}
+
+.admin-slot-details {
+  display: grid;
+  gap: 9px;
+  margin: 0 0 18px;
+}
+
+.admin-slot-details div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-slot-details dt {
+  color: #64748b;
+}
+
+.admin-slot-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #1e293b;
+  font-weight: 800;
+  text-align: right;
+}
+
+.admin-slot-edit,
+.admin-slot-actions button {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 11px;
+  color: #ffffff;
+  background: #4f46e5;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.admin-slot-edit {
+  width: 100%;
+}
+
+.admin-slot-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.admin-slot-form label {
+  display: grid;
+  gap: 6px;
+  color: #334155;
+  font-weight: 800;
+}
+
+.admin-slot-form input:not([type="checkbox"]) {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font: inherit;
+}
+
+.admin-slot-form .admin-slot-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.admin-slot-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.admin-slot-actions button:last-child {
+  color: #334155;
+  background: #e2e8f0;
+}
+
+.admin-slot-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.admin-slot-form .staff-inline-error,
+.admin-slot-restock-note {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.admin-slot-restock-note {
+  margin: 22px 0 0;
+}
+
 .staff-portal-header button,
 .staff-section-heading button,
 .staff-message button {
@@ -1575,7 +1736,7 @@
 .product-media img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .product-name {
@@ -1644,6 +1805,7 @@
 
 @media (max-width: 900px) {
   .slot-grid,
+  .admin-slot-grid,
   .hardware-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1662,6 +1824,14 @@
 
   .slot-grid {
     grid-template-columns: 1fr;
+  }
+
+  .admin-slot-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-navigation {
+    flex-direction: column;
   }
 
   .hardware-grid {

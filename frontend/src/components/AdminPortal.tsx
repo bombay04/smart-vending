@@ -29,6 +29,7 @@ import {
 import { didKioskSessionEnd } from "../kiosk-session-flow.mjs";
 import type { RegistrationEmployee } from "../types/employee";
 import SuccessCheckIcon from "./SuccessCheckIcon";
+import SlotManagement from "./SlotManagement";
 
 const sortEmployees = (employees: RegistrationEmployee[]) =>
   [...employees].sort((a, b) => a.employeeCode.localeCompare(b.employeeCode));
@@ -55,6 +56,9 @@ type TimedModal =
     };
 
 function AdminPortal() {
+  const [activeSection, setActiveSection] = useState<"employees" | "slots">(
+    "employees",
+  );
   const [employees, setEmployees] = useState<RegistrationEmployee[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -554,10 +558,30 @@ function AdminPortal() {
           </div>
         </header>
 
-        <section
-          className="staff-add-employee"
-          aria-labelledby="add-employee-title"
-        >
+        <nav className="admin-navigation" aria-label="เมนูผู้ดูแล">
+          <button
+            type="button"
+            className={activeSection === "employees" ? "is-active" : ""}
+            aria-current={activeSection === "employees" ? "page" : undefined}
+            onClick={() => setActiveSection("employees")}
+          >
+            จัดการพนักงาน
+          </button>
+          <button
+            type="button"
+            className={activeSection === "slots" ? "is-active" : ""}
+            aria-current={activeSection === "slots" ? "page" : undefined}
+            onClick={() => setActiveSection("slots")}
+          >
+            จัดการช่องสินค้า
+          </button>
+        </nav>
+
+        <div hidden={activeSection !== "employees"}>
+          <section
+            className="staff-add-employee"
+            aria-labelledby="add-employee-title"
+          >
           <div>
             <h2 id="add-employee-title">เพิ่มพนักงาน</h2>
           </div>
@@ -867,7 +891,10 @@ function AdminPortal() {
               ))}
             </div>
           )}
-        </section>
+          </section>
+        </div>
+
+        {activeSection === "slots" && <SlotManagement />}
       </div>
 
       {timedModal?.type === "EMPLOYEE_CREATED" && (
