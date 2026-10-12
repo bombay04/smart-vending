@@ -19,7 +19,10 @@ test("Pi launcher uses configurable kiosk mode without browser recovery chrome",
   assert.match(launcher, /--app="\$kiosk_url"/);
   assert.match(launcher, /--disable-session-crashed-bubble/);
   assert.match(launcher, /--noerrdialogs/);
-  assert.match(launcher, /until curl .*"\$kiosk_url"; do/);
+  assert.match(launcher, /readiness_asset_url=.*\/src\/main\.tsx/);
+  assert.match(launcher, /consecutive_ready == 2/);
+  assert.match(launcher, /chromium_running\(\)/);
+  assert.match(launcher, /KIOSK_READY_MAX_ATTEMPTS/);
   assert.match(launcher, /sleep "\$readiness_retry_seconds"/);
   assert.match(desktop, /X-GNOME-Autostart-enabled=true/);
   assert.match(desktop, /smart-vending-kiosk/);

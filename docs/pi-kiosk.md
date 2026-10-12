@@ -8,7 +8,7 @@ Run these commands from the repository root while signed in as the Linux user wh
 
 ```bash
 sudo apt update
-sudo apt install chromium curl
+sudo apt install chromium curl procps
 
 mkdir -p "$HOME/.local/bin" "$HOME/.config/autostart"
 install -m 0755 edge/kiosk/launch-chromium-kiosk.sh "$HOME/.local/bin/smart-vending-kiosk"
@@ -30,12 +30,14 @@ KIOSK_URL=http://localhost:5173
 
 Prefer `localhost` when the frontend runs on the same Pi. If the frontend is hosted elsewhere, set its stable hostname or deployment URL rather than a developer PC address. `CHROMIUM_BIN=/path/to/chromium` is also supported when automatic detection is insufficient.
 
-The launcher checks `KIOSK_URL` with `curl` every two seconds and starts Chromium only after the URL returns a successful HTTP response. It waits indefinitely so that a slow boot or a frontend restart cannot leave Chromium on a permanent connection-refused page. Set `KIOSK_READY_RETRY_SECONDS` to another positive whole number in the configuration file if needed.
+At cold start, the launcher checks `KIOSK_URL` twice successfully on separate polls before starting Chromium. For the local Vite URL on port 5173, each poll also checks `/src/main.tsx`, the application's entry module. It retries every two seconds for at most 30 polls by default and logs each result; after the limit it exits without opening Chromium. The HTTP probes each have a two-second timeout. Set `KIOSK_READY_RETRY_SECONDS` or `KIOSK_READY_MAX_ATTEMPTS` in the local configuration if boot timing requires it (`MAX_ATTEMPTS` must be at least 2). The launcher checks for an existing Chromium process before waiting and again before launch; it leaves that browser and its active payment session untouched.
 
-Test the launcher once from a terminal while the frontend is running:
+This narrows a possible cold-boot race but does not prove its cause. In the Task 56-G observation, Chromium started before Vite logged readiness, yet the installed launcher already had a one-response `curl` gate. The configured URL, an early transient response, and browser startup behavior were not captured at that instant. A successful HTTP check cannot prove that React rendered or that Chromium's renderer is healthy.
+
+Check shell syntax without starting another browser:
 
 ```bash
-"$HOME/.local/bin/smart-vending-kiosk"
+bash -n "$HOME/.local/bin/smart-vending-kiosk"
 ```
 
 Then log out and back in, or reboot. The XDG autostart entry launches the readiness-checking script only after the graphical session starts. The Chromium profile remains at `$HOME/.local/state/smart-vending-kiosk/chromium`.
@@ -44,11 +46,13 @@ There is intentionally no customer-facing kiosk exit control. Perform maintenanc
 
 ## Updating the launcher
 
-After pulling a reviewed launcher change, reinstall only the repository-owned files:
+After Tech Lead review and pulling the change, install the launcher as the graphical-session user. This replaces only the script for the next graphical launch; it does not restart or refresh a running Chromium session:
 
 ```bash
-install -m 0755 edge/kiosk/launch-chromium-kiosk.sh "$HOME/.local/bin/smart-vending-kiosk"
-install -m 0644 edge/kiosk/smart-vending-kiosk.desktop "$HOME/.config/autostart/smart-vending-kiosk.desktop"
+cd /home/user/smart-vending
+bash -n edge/kiosk/launch-chromium-kiosk.sh
+install -m 0755 edge/kiosk/launch-chromium-kiosk.sh /home/user/.local/bin/smart-vending-kiosk
+bash -n /home/user/.local/bin/smart-vending-kiosk
 ```
 
-The local `smart-vending-kiosk.env` file is not overwritten by this update.
+The launcher also requires `pgrep` from `procps`; install it with `sudo apt install procps` if absent. Confirm that the graphical-session autostart command points to `/home/user/.local/bin/smart-vending-kiosk`; Raspberry Pi OS may use labwc autostart rather than the repository's XDG desktop entry. Leave the local `smart-vending-kiosk.env` file and browser profile unchanged. At the next owner-approved idle cold boot or graphical login, inspect launcher output and confirm that both readiness checks precede the Chromium process and the customer page renders. Do not close or relaunch Chromium during an active payment. If the bounded check expires, inspect Vite and the configured `KIOSK_URL` before a supervised manual launch.

@@ -4,7 +4,7 @@ Task 53 keeps the three local startup responsibilities separate:
 
 - `smart-vending-frontend.service` runs Vite on port 5173.
 - `smart-vending-pi-unlock.service` runs the local hardware, face, and audio API on port 5000.
-- The existing XDG desktop autostart launches Chromium after the graphical session starts. Its launcher waits until the frontend URL is reachable.
+- The repository supplies an XDG desktop autostart entry for Chromium, but the installed graphical session may invoke the same launcher through labwc or another autostart mechanism. Confirm the installed command on the Pi. The launcher waits for stable frontend HTTP responses before opening Chromium.
 
 The two system services do not depend on one another. A camera, audio, or ESP32 failure can restart the Pi service without stopping the frontend. Both services use `Restart=on-failure` with a five-second delay. Their standard output and standard error go to journald.
 
@@ -44,7 +44,7 @@ Install or update the existing kiosk autostart files and its `curl` dependency:
 ```bash
 cd /home/user/smart-vending
 sudo apt update
-sudo apt install curl
+sudo apt install curl procps
 mkdir -p /home/user/.local/bin /home/user/.config/autostart
 install -m 0755 edge/kiosk/launch-chromium-kiosk.sh \
   /home/user/.local/bin/smart-vending-kiosk
