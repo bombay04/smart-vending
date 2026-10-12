@@ -4,7 +4,7 @@ Task 53 keeps the three local startup responsibilities separate:
 
 - `smart-vending-frontend.service` runs Vite on port 5173.
 - `smart-vending-pi-unlock.service` runs the local hardware, face, and audio API on port 5000.
-- The existing XDG desktop autostart launches Chromium after the graphical session starts. Its launcher waits until the frontend URL is reachable.
+- The repository supplies an XDG desktop autostart entry for Chromium, but the installed graphical session may invoke the same launcher through labwc or another autostart mechanism. Confirm the installed command on the Pi. The launcher waits for stable frontend HTTP responses before opening Chromium.
 
 The two system services do not depend on one another. A camera, audio, or ESP32 failure can restart the Pi service without stopping the frontend. Both services use `Restart=on-failure` with a five-second delay. Their standard output and standard error go to journald.
 
@@ -35,7 +35,7 @@ install -m 0600 \
 nano /home/user/.config/smart-vending/pi-unlock-service.env
 ```
 
-The example preserves the current machine values. Keep all machine-specific and future outbound Cloud settings in the installed environment file; do not put credentials in the repository or edit them into the unit. The service defaults to `127.0.0.1:5000`, so it remains local-only.
+The example has an `ESP32_SERIAL_PORT` placeholder. Replace it with the unique, verified `/dev/serial/by-id/...` symlink on this Pi before starting the service; `/dev/ttyUSB0` can change after a disconnect. Keep all machine-specific settings in the installed environment file; do not put credentials in the repository or edit them into the unit. The service defaults to `127.0.0.1:5000`, so it remains local-only.
 
 The camera recovery code invokes its fixed helper through non-interactive `sudo`. Ensure the existing sudoers rule permits Linux user `user` to run only `/usr/local/sbin/smart-vending-camera-reset` without a password. This Task does not change the helper or its privilege model.
 
@@ -44,7 +44,7 @@ Install or update the existing kiosk autostart files and its `curl` dependency:
 ```bash
 cd /home/user/smart-vending
 sudo apt update
-sudo apt install curl
+sudo apt install curl procps
 mkdir -p /home/user/.local/bin /home/user/.config/autostart
 install -m 0755 edge/kiosk/launch-chromium-kiosk.sh \
   /home/user/.local/bin/smart-vending-kiosk
@@ -75,6 +75,8 @@ systemctl status smart-vending-pi-unlock.service
 curl --fail http://localhost:5173/
 curl --fail http://localhost:5000/health
 ```
+
+The Pi hardware service now starts even when the ESP32 is temporarily absent. Treat `systemctl is-active` as process status only: `/health` returns `503` until the service has verified fresh ESP32 `PONG` and complete sensor status. It retries the configured stable Serial path automatically without restarting Chromium or the frontend. A failed or stale probe clears readiness; hardware status and unlock requests fail closed while unavailable. Reconnect never replays an unlock.
 
 Follow or inspect logs:
 
