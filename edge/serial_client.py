@@ -36,6 +36,7 @@ class Esp32SerialClient:
                 port=self.port,
                 baudrate=self.baud_rate,
                 timeout=self.timeout,
+                write_timeout=self.timeout,
             )
         except Exception as error:
             self._connection = None

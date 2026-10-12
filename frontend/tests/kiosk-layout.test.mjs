@@ -59,7 +59,10 @@ test("Pi systemd units supervise independent local services", async () => {
   assert.doesNotMatch(frontendUnit, /smart-vending-pi-unlock/);
   assert.doesNotMatch(piUnit, /smart-vending-frontend/);
 
-  assert.match(piEnvironment, /^ESP32_SERIAL_PORT=\/dev\/ttyUSB0$/m);
+  assert.match(
+    piEnvironment,
+    /^ESP32_SERIAL_PORT=\/dev\/serial\/by-id\/REPLACE_WITH_VERIFIED_DEVICE_ID$/m,
+  );
   assert.match(
     piEnvironment,
     /^AUDIO_ALSA_DEVICE=plughw:CARD=UACDemoV10,DEV=0$/m,

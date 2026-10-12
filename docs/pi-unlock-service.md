@@ -2,7 +2,7 @@
 
 The Pi local service exposes HTTP APIs for ESP32 vending hardware, employee face authentication, prototype employee face registration, and local audio feedback. It translates unlock requests into commands sent over USB Serial, runs the local YuNet/SFace engine without sending biometric data off the Pi, and plays fixed voice assets through the Pi audio output.
 
-The customer frontend calls this service after a backend purchase succeeds. A successful response means the command was sent; it does not synchronously wait for the ESP32 `ACK` or `ERROR:BUSY` response.
+The customer frontend calls this service after a backend purchase succeeds. A successful unlock response means the command was sent; it does not synchronously wait for the ESP32 `ACK` or `ERROR:BUSY` response. USB reconnect does not replay an unlock.
 
 ## Install
 
@@ -22,7 +22,7 @@ sudo apt install alsa-utils
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `ESP32_SERIAL_PORT` | In real mode | None | ESP32 serial port, such as `COM8`, `/dev/ttyUSB0`, or `/dev/ttyACM0`. |
+| `ESP32_SERIAL_PORT` | In real mode | None | ESP32 serial port. On the Pi, use the unique, verified `/dev/serial/by-id/...` symlink; `/dev/ttyUSB0` can be renumbered after reconnect. |
 | `ESP32_BAUD_RATE` | No | `115200` | Serial baud rate. |
 | `MOCK_HARDWARE` | No | `false` | When `true`, simulate successful unlocks without opening Serial. |
 | `MOCK_AUDIO` | No | `false` | When `true`, explicitly simulate successful audio responses without an asset, player, or speaker. Responses include `mockAudio: true`. |
@@ -36,6 +36,8 @@ sudo apt install alsa-utils
 | `PI_UNLOCK_PORT` | No | `5000` | HTTP service port. |
 
 The default host accepts requests only from the same machine. Set `PI_UNLOCK_HOST=0.0.0.0` only when LAN access is intentionally required and protected by the local network.
+
+For the Pi service, list `/dev/serial/by-id/`, verify which symlink disappears when the ESP32 alone is disconnected, and put that exact path in the installed `/home/user/.config/smart-vending/pi-unlock-service.env`. The tracked example contains a placeholder, **not** a universal device ID. If the USB adapter is replaced, verify its new by-id path before changing the installed setting. Do not copy a machine identifier from another cabinet.
 
 ## Mock mode
 
@@ -66,10 +68,10 @@ python edge/pi_unlock_service.py
 Raspberry Pi:
 
 ```bash
-ESP32_SERIAL_PORT=/dev/ttyUSB0 python3 edge/pi_unlock_service.py
+ESP32_SERIAL_PORT=/dev/serial/by-id/REPLACE_WITH_VERIFIED_DEVICE_ID python3 edge/pi_unlock_service.py
 ```
 
-For a board exposed as a USB CDC device, use `/dev/ttyACM0` instead.
+For a board exposed as a USB CDC device, also prefer its unique by-id symlink when available.
 
 Only one program can normally own the Serial port. Close Arduino Serial Monitor and `serial_test.py` before starting this service.
 
@@ -80,6 +82,8 @@ Health check:
 ```bash
 curl http://localhost:5000/health
 ```
+
+In real hardware mode, startup and reconnect are asynchronous. The service can be running while `/health` returns HTTP `503` with `hardware: "disconnected"`. It retries the configured path with capped backoff (0.5 seconds increasing to 5 seconds). Serial reads and writes use a one-second timeout. Readiness requires a fresh `PING`/`PONG` and a complete three-slot `GET_STATUS` after each connection; subsequent read-only probes refresh readiness every two seconds. A successful response retains `status: "ok"`, `hardware: "connected"`, and `mockHardware: false`, and adds `readyAgeSeconds`. A stale or failed probe clears readiness. `is_open` alone is insufficient. Mock mode remains explicitly identified by `hardware: "mock"` and `mockHardware: true`.
 
 Read the current IR product-presence and reed-switch door state:
 
@@ -101,6 +105,10 @@ Successful response:
 ```
 
 In real mode, the service sends `GET_STATUS` and waits up to three seconds for both `IR` and `DOOR` state for all three slots. Unrelated Serial lines are ignored. Missing, incomplete, timed-out, or disconnected hardware status returns HTTP `503`; the service never invents missing sensor values.
+
+Status and reconnect probes share one Serial operation lock. A concurrent request may return HTTP `503` with a busy message rather than waiting for a probe. While disconnected, `/unlock` returns HTTP `503` promptly; no unlock request is queued or retried by reconnect. The existing per-process transaction deduplication and write-only `UNLOCK_COMMAND_SENT` contract remain unchanged. A Serial write can still have an uncertain physical outcome, and deduplication still does not survive a service restart.
+
+The current firmware protocol has no request IDs or `GET_STATUS` snapshot marker. The service clears old input before a probe and accepts the subsequent `PONG`/six sensor lines as fresh communication, but it cannot prove perfect response correlation under every delayed or unsolicited Serial sequence. `/health` is a recent communication check, not proof of relay, lid, or dispensing state. Confirm the automatic reconnect behavior on the cabinet before calling 56-B.2 physically passed.
 
 In mock mode, all three slots deterministically report `productPresent: true` and `doorClosed: true`.
 

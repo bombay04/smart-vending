@@ -35,6 +35,7 @@ if __package__:
         CameraUsbPowerRecovery,
     )
     from .serial_client import Esp32SerialClient, SerialClientError
+    from .serial_recovery import SerialRecoveryManager
 else:
     # Keep direct `python edge/pi_unlock_service.py` execution working on the Pi.
     from face.camera import capture_frame
@@ -57,6 +58,7 @@ else:
         CameraUsbPowerRecovery,
     )
     from serial_client import Esp32SerialClient, SerialClientError
+    from serial_recovery import SerialRecoveryManager
 
 
 DEFAULT_BAUD_RATE = 115200
@@ -89,6 +91,7 @@ logger = logging.getLogger("pi-unlock-service")
 
 app = Flask(__name__)
 serial_client: Esp32SerialClient | None = None
+serial_recovery: SerialRecoveryManager | None = None
 serial_operation_lock = threading.Lock()
 unlock_idempotency_lock = threading.Lock()
 face_authentication_lock = threading.Lock()
@@ -277,28 +280,50 @@ def health() -> tuple[Response, int] | Response:
     if MOCK_HARDWARE:
         return jsonify(status="ok", hardware="mock", mockHardware=True)
 
-    if serial_client is None or not serial_client.is_connected:
+    if serial_recovery is not None:
+        ready, age = serial_recovery.readiness()
+    else:
+        ready = serial_client is not None and serial_client.is_connected
+        age = None
+    if not ready:
         return jsonify(status="error", hardware="disconnected", mockHardware=False), 503
 
-    return jsonify(status="ok", hardware="connected", mockHardware=False)
+    return jsonify(
+        status="ok",
+        hardware="connected",
+        mockHardware=False,
+        readyAgeSeconds=round(age, 2) if age is not None else None,
+    )
 
 
-def collect_hardware_status() -> list[dict[str, int | bool]]:
-    if serial_client is None or not serial_client.is_connected:
+def hardware_ready() -> bool:
+    if serial_client is None:
+        return False
+    if serial_recovery is not None:
+        return serial_recovery.readiness()[0]
+    # Existing test clients inject a connected fake without starting main().
+    return serial_client.is_connected
+
+
+def collect_hardware_status(
+    client: Esp32SerialClient | None = None,
+) -> list[dict[str, int | bool]]:
+    client = client or serial_client
+    if client is None or not client.is_connected:
         raise SerialClientError("Serial connection unavailable.")
 
     status_by_slot: dict[int, dict[str, bool]] = {1: {}, 2: {}, 3: {}}
     deadline = time.monotonic() + HARDWARE_STATUS_TIMEOUT_SECONDS
 
-    serial_client.clear_input_buffer()
-    serial_client.get_status()
+    client.clear_input_buffer()
+    client.get_status()
 
     while time.monotonic() < deadline:
-        line = serial_client.read_line()
+        line = client.read_line()
         if line is None:
             continue
 
-        parsed = serial_client.parse_status_line(line)
+        parsed = client.parse_status_line(line)
         if parsed is None:
             logger.debug("Ignoring unrelated ESP32 line: %s", line)
             continue
@@ -344,20 +369,31 @@ def hardware_status() -> tuple[Response, int] | Response:
             ],
         )
 
-    if serial_client is None or not serial_client.is_connected:
+    if not hardware_ready():
         return jsonify(error="Hardware status unavailable."), 503
 
+    if not serial_operation_lock.acquire(timeout=0.25):
+        return jsonify(error="Hardware status busy."), 503
     try:
-        with serial_operation_lock:
-            slots = collect_hardware_status()
+        if not hardware_ready():
+            return jsonify(error="Hardware status unavailable."), 503
+        slots = collect_hardware_status()
+        if serial_recovery is not None:
+            serial_recovery.note_status_success_locked()
         logger.info("Complete ESP32 hardware status collected")
         return jsonify(status="ok", slots=slots)
     except SerialClientError as error:
         logger.error("Hardware status collection failed: %s", error)
+        if serial_recovery is not None:
+            serial_recovery.invalidate_locked(str(error))
         return jsonify(error="Unable to collect complete hardware status."), 503
     except Exception:
         logger.exception("Unexpected hardware status error")
+        if serial_recovery is not None:
+            serial_recovery.invalidate_locked("Unexpected status error")
         return jsonify(error="Internal server error."), 500
+    finally:
+        serial_operation_lock.release()
 
 
 def get_face_engine() -> FaceRecognizer:
@@ -799,19 +835,16 @@ def unlock() -> tuple[Response, int] | Response:
                 }
             )
 
-        if not MOCK_HARDWARE and (
-            serial_client is None or not serial_client.is_connected
-        ):
+        if not MOCK_HARDWARE and not hardware_ready():
             logger.error("Serial connection is unavailable")
             return jsonify(error="Serial connection unavailable."), 503
 
-        unlock_transaction_outcomes[transaction_id] = (
-            slot_number,
-            "ATTEMPTING",
-            MOCK_HARDWARE,
-        )
-
         if MOCK_HARDWARE:
+            unlock_transaction_outcomes[transaction_id] = (
+                slot_number,
+                "ATTEMPTING",
+                True,
+            )
             unlock_transaction_outcomes[transaction_id] = (
                 slot_number,
                 "UNLOCKED",
@@ -833,8 +866,23 @@ def unlock() -> tuple[Response, int] | Response:
             )
 
         try:
-            with serial_operation_lock:
+            if not serial_operation_lock.acquire(timeout=0.25):
+                return jsonify(error="Serial connection busy."), 503
+            try:
+                if not hardware_ready():
+                    return jsonify(error="Serial connection unavailable."), 503
+                unlock_transaction_outcomes[transaction_id] = (
+                    slot_number,
+                    "ATTEMPTING",
+                    False,
+                )
                 serial_client.open_slot(slot_number)
+            except Exception as error:
+                if serial_recovery is not None:
+                    serial_recovery.invalidate_locked(str(error))
+                raise
+            finally:
+                serial_operation_lock.release()
             unlock_transaction_outcomes[transaction_id] = (
                 slot_number,
                 "UNLOCKED",
@@ -980,7 +1028,14 @@ def play_audio() -> tuple[Response, int] | Response:
 
 
 def close_serial_connection() -> None:
-    global serial_client
+    global serial_client, serial_recovery
+
+    if serial_recovery is not None:
+        serial_recovery.stop()
+        serial_recovery = None
+        serial_client = None
+        logger.info("ESP32 Serial recovery stopped")
+        return
 
     if serial_client is None:
         return
@@ -995,7 +1050,7 @@ def close_serial_connection() -> None:
 
 
 def main() -> int:
-    global serial_client
+    global serial_client, serial_recovery
 
     try:
         host = os.getenv("PI_UNLOCK_HOST", DEFAULT_HOST)
@@ -1015,8 +1070,14 @@ def main() -> int:
 
             logger.info("Connecting to ESP32 on %s at %s baud", serial_port, baud_rate)
             serial_client = Esp32SerialClient(serial_port, baud_rate)
-            serial_client.connect()
-            logger.info("ESP32 serial connection established")
+            serial_recovery = SerialRecoveryManager(
+                serial_client,
+                serial_operation_lock,
+                collect_hardware_status,
+                logger=logger,
+            )
+            serial_recovery.start()
+            logger.info("ESP32 Serial recovery started; awaiting verified readiness")
 
         atexit.register(close_serial_connection)
         logger.info("Service listening on http://%s:%s", host, service_port)
