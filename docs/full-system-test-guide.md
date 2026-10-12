@@ -236,7 +236,7 @@ OPEN:3
 ตัวอย่าง response:
 
 ```text
-ESP32> [UNKNOWN] PONG
+ESP32> [PONG] PONG
 ESP32> [DOOR] DOOR:1:CLOSED
 ESP32> [IR] IR:1:EMPTY
 ESP32> [ACK] ACK:OPEN:1
@@ -244,7 +244,7 @@ ESP32> [LOCK] LOCK:1:OPENED
 ESP32> [LOCK] LOCK:1:CLOSED
 ```
 
-> ใน `serial_test.py` เวอร์ชันปัจจุบัน `PONG` ยังถูกจัดประเภทเป็น `UNKNOWN` แต่ข้อความ `PONG` จาก ESP32 ยังถือว่าถูกต้อง
+> `serial_test.py` ใช้ `Esp32SerialClient.classify_message()` จัดประเภทข้อความ `PONG` เป็น `PONG`
 
 ออกจาก CLI:
 
