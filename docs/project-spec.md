@@ -235,7 +235,7 @@ The supported events are `PAYMENT_SUCCESS`, `UNLOCK_FAILED`, `EMPLOYEE_AUTH_SUCC
 
 Playback is feedback only and is not business-state authority. Missing assets, an unavailable player/device, timeout, and concurrent playback rejection do not change payment, inventory, unlock, authentication, or restock outcomes. The service rejects a second request with `409 BUSY` while one clip is active; it does not maintain an audio queue.
 
-The architecture and automated failure-isolation tests are **implemented**. The cabinet USB speaker route has been physically validated with an ALSA test WAV by explicitly selecting `plughw:CARD=UACDemoV10,DEV=0`; relying on the ALSA default was inaudible. The four real Thai WAV recordings are not included, so event-by-event production prompt validation remains **required/pending** after the recordings are installed on the Raspberry Pi.
+The architecture and automated failure-isolation tests are **implemented**. The cabinet USB speaker route has been physically validated with an ALSA test WAV by explicitly selecting `plughw:CARD=UACDemoV10,DEV=0`; relying on the ALSA default was inaudible. The four Thai WAV prompts are tracked under `edge/audio/assets/`, but event-by-event playback through the cabinet speaker remains **required/pending**.
 
 ## Phase 1 exclusions
 
@@ -272,15 +272,14 @@ The following are out of scope for Phase 1:
 | Three-failure, three-minute face-auth lockout                              | Implemented                                                                             |
 | LINE notification after sale                                               | Required/pending                                                                        |
 | LINE notification after restock                                            | Required/pending                                                                        |
-| Raspberry Pi audio/voice                                                   | Implemented architecture/tests; real WAV assets and physical speaker validation pending |
+| Raspberry Pi audio/voice                                                   | Implemented architecture/tests with tracked WAV assets; event-by-event physical validation pending |
 | PCB-noise mitigation and hardware regression                               | Completed/externally hardware-validated; tracked evidence unavailable                   |
 
 ## Known technical debt and implementation discrepancies
 
 1. **Legacy backend biometric field:** `backend/prisma/schema.prisma` still defines an optional `Employee.faceEmbedding` JSON field. The current architecture must neither use nor populate it; new employee creation leaves it `NULL`, API selects omit it, and biometric templates and embeddings remain exclusively local to the Pi. Removing it is deferred to a separate schema/migration task. The separate `faceRegistered` Boolean is privacy-safe workflow metadata and is not biometric template authority.
-2. **Stale threshold documentation:** [pi-face-recognition.md](pi-face-recognition.md) still describes `1.128` only as an upstream reference that is uncalibrated for this project. Task 34 later validated it for the limited prototype dataset described above. The technical document is stale; the Task 34 result is not a business-rule conflict.
-3. **Delayed authentication clearing:** after a successful restock is committed, the current frontend retains the authenticated employee in memory during the approximately 3.5-second success screen. It clears authentication when returning to Customer Home, while the target behavior is immediate clearing at successful commit.
-4. **Portal authentication:** `/staff`, `/admin`, and their session mutation endpoints have no real authentication/authorization middleware in the current pilot. Route separation is not an access-control system; production deployment requires staff/admin identity and authorization to be added at this isolated API boundary.
+2. **Delayed authentication clearing:** after a successful restock is committed, the current frontend retains the authenticated employee in memory during the approximately 3.5-second success screen. It clears authentication when returning to Customer Home, while the target behavior is immediate clearing at successful commit.
+3. **Portal authentication:** `/staff`, `/admin`, and their session mutation endpoints have no real authentication/authorization middleware in the current pilot. Route separation is not an access-control system; production deployment requires staff/admin identity and authorization to be added at this isolated API boundary.
 
 ## Technical references
 

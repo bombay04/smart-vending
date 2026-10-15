@@ -14,7 +14,7 @@
 
 - PC IP: `172.25.1.52`
 - Pi IP: `172.25.1.58`
-- ESP32 Serial: `/dev/ttyUSB0`
+- ESP32 Serial service: `/dev/serial/by-id/REPLACE_WITH_VERIFIED_DEVICE_ID`
 
 ให้เปลี่ยน IP และ Serial port ให้ตรงกับเครื่องจริง
 
@@ -101,7 +101,7 @@ curl -X POST http://localhost:3000/api/v1/restocks/mock \
   -d '{"sessionId":1,"employeeId":1}'
 ```
 
-> Restock API ใช้ได้เมื่อมี Employee ID `1` และ Employee ยัง active เท่านั้น แต่ seed ปัจจุบันไม่ได้สร้าง Employee หากได้รับ `Employee not found.` ให้ใช้ `npm run seed` สำหรับ reset demo แทน
+> `npm run seed` จะสร้างหรืออัปเดตพนักงานตัวอย่าง `EMP001` ให้ active และ reset ข้อมูลสินค้าสำหรับ demo หากข้อมูลตัวอย่างหาย ให้รันคำสั่งนี้อีกครั้ง
 
 ตรวจผล:
 
@@ -162,12 +162,15 @@ Raspberry Pi → USB → ESP32
 ```bash
 ls /dev/ttyUSB* 2>/dev/null || echo "No ttyUSB"
 ls /dev/ttyACM* 2>/dev/null || echo "No ttyACM"
+ls -l /dev/serial/by-id/ 2>/dev/null || echo "No stable serial symlink"
 ```
 
 ค่าที่พบบ่อย:
 
 - `/dev/ttyUSB0`
 - `/dev/ttyACM0`
+
+ชื่อ `/dev/ttyUSB*` และ `/dev/ttyACM*` ใช้สำหรับค้นหาและแก้ปัญหาเท่านั้น เพราะอาจเปลี่ยนหลัง reconnect สำหรับ service และการทดสอบปกติ ให้ใช้ symlink เฉพาะอุปกรณ์จาก `/dev/serial/by-id/...` ที่ตรวจสอบแล้ว
 
 หากพบ Permission denied ภายหลัง ให้เพิ่ม user เข้า group `dialout` แล้ว logout/login ใหม่:
 
@@ -208,10 +211,10 @@ python -m pip install -r edge/requirements.txt
 ```bash
 cd ~/smart-vending
 source .venv/bin/activate
-python edge/serial_test.py --port /dev/ttyUSB0
+python edge/serial_test.py --port /dev/serial/by-id/REPLACE_WITH_VERIFIED_DEVICE_ID
 ```
 
-ถ้าเป็น `/dev/ttyACM0`:
+หากกำลังแก้ปัญหาและเครื่องไม่มี stable symlink สามารถทดสอบ raw port ชั่วคราว เช่น `/dev/ttyACM0`:
 
 ```bash
 python edge/serial_test.py --port /dev/ttyACM0
@@ -271,19 +274,15 @@ python edge/serial_test.py --self-test
 ```bash
 cd ~/smart-vending
 source .venv/bin/activate
-ESP32_SERIAL_PORT=/dev/ttyUSB0 python edge/pi_unlock_service.py
+ESP32_SERIAL_PORT=/dev/serial/by-id/REPLACE_WITH_VERIFIED_DEVICE_ID python edge/pi_unlock_service.py
 ```
 
-ถ้าใช้ `/dev/ttyACM0`:
-
-```bash
-ESP32_SERIAL_PORT=/dev/ttyACM0 python edge/pi_unlock_service.py
-```
+แทนที่ placeholder ด้วย symlink เฉพาะอุปกรณ์ที่ตรวจสอบจาก `/dev/serial/by-id/` ห้ามใช้ raw port ใน service ที่ติดตั้ง เพราะเลขอุปกรณ์อาจเปลี่ยนหลัง reconnect
 
 Expected log:
 
 ```text
-Connecting to ESP32 on /dev/ttyUSB0 at 115200 baud
+Connecting to ESP32 on /dev/serial/by-id/<verified-device-id> at 115200 baud
 ESP32 serial connection established
 Service listening on http://127.0.0.1:5000
 ```
@@ -468,7 +467,7 @@ npm run dev
 ```bash
 cd ~/smart-vending
 source .venv/bin/activate
-ESP32_SERIAL_PORT=/dev/ttyUSB0 python edge/pi_unlock_service.py
+ESP32_SERIAL_PORT=/dev/serial/by-id/REPLACE_WITH_VERIFIED_DEVICE_ID python edge/pi_unlock_service.py
 ```
 
 ### Pi Terminal 2: Frontend
@@ -625,7 +624,7 @@ Browser บน PC จะเห็น `localhost:5000` ผ่าน SSH tunnel �
 
 ### Raspberry Pi
 
-- [ ] พบ ESP32 ที่ `/dev/ttyUSB0` หรือ `/dev/ttyACM0`
+- [ ] พบ ESP32 จาก raw port และยืนยัน stable symlink ที่ `/dev/serial/by-id/...`
 - [ ] Activate `.venv` แล้ว
 - [ ] Pi Unlock Service ทำงาน
 - [ ] `curl localhost:5000/health` ผ่าน

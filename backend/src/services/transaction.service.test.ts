@@ -116,9 +116,7 @@ class MemoryStore implements PaymentStore {
       ...this.record,
       paymentStatus,
       providerStatus: payment.status,
-      expiresAt: payment.expiresAt
-        ? new Date(payment.expiresAt)
-        : this.record.expiresAt,
+      expiresAt: payment.expiresAt ? new Date(payment.expiresAt) : this.record.expiresAt,
       slotStatus:
         paymentStatus === "SUCCESS" && this.record.customerCancelledAt === null
           ? "SOLD_OUT"
@@ -136,11 +134,7 @@ class MemoryStore implements PaymentStore {
       return { ...this.record };
     }
     if (this.record.paymentStatus === "SUCCESS") {
-      throw new HttpError(
-        "Payment has already been confirmed.",
-        409,
-        "PAYMENT_ALREADY_CONFIRMED",
-      );
+      throw new HttpError("Payment has already been confirmed.", 409, "PAYMENT_ALREADY_CONFIRMED");
     }
     this.record = {
       ...this.record,
@@ -262,14 +256,8 @@ test("provider pending status remains pending and does not sell out the slot", a
 });
 
 test("pending payment cancellation persists abandonment without changing slot state", async () => {
-  const store = new MemoryStore(
-    baseRecord({ providerChargeId: providerPending.chargeId }),
-  );
-  const result = await cancelPaymentWithDependencies(
-    91,
-    store,
-    new MockProvider(),
-  );
+  const store = new MemoryStore(baseRecord({ providerChargeId: providerPending.chargeId }));
+  const result = await cancelPaymentWithDependencies(91, store, new MockProvider());
 
   assert.equal(result.customerCancelled, true);
   assert.ok(store.record?.customerCancelledAt);
@@ -278,9 +266,7 @@ test("pending payment cancellation persists abandonment without changing slot st
 });
 
 test("repeated payment cancellation is idempotent", async () => {
-  const store = new MemoryStore(
-    baseRecord({ providerChargeId: providerPending.chargeId }),
-  );
+  const store = new MemoryStore(baseRecord({ providerChargeId: providerPending.chargeId }));
   const provider = new MockProvider();
 
   const first = await cancelPaymentWithDependencies(91, store, provider);
@@ -295,11 +281,7 @@ test("repeated payment cancellation is idempotent", async () => {
 
 test("unknown payment cannot be cancelled", async () => {
   await assert.rejects(
-    cancelPaymentWithDependencies(
-      404,
-      new MemoryStore(null),
-      new MockProvider(),
-    ),
+    cancelPaymentWithDependencies(404, new MemoryStore(null), new MockProvider()),
     (error: unknown) => error instanceof HttpError && error.statusCode === 404,
   );
 });
@@ -329,16 +311,10 @@ test("provider success observed during cancellation wins and completes the exist
     status: "successful",
     paid: true,
   };
-  const store = new MemoryStore(
-    baseRecord({ providerChargeId: success.chargeId }),
-  );
+  const store = new MemoryStore(baseRecord({ providerChargeId: success.chargeId }));
 
   await assert.rejects(
-    cancelPaymentWithDependencies(
-      91,
-      store,
-      new MockProvider(providerPending, success),
-    ),
+    cancelPaymentWithDependencies(91, store, new MockProvider(providerPending, success)),
     (error: unknown) =>
       error instanceof HttpError &&
       error.statusCode === 409 &&
@@ -355,9 +331,7 @@ test("late provider success remains recorded but an abandoned sale is never fulf
     status: "successful",
     paid: true,
   };
-  const store = new MemoryStore(
-    baseRecord({ providerChargeId: success.chargeId }),
-  );
+  const store = new MemoryStore(baseRecord({ providerChargeId: success.chargeId }));
   const notificationProvider = new MockNotificationProvider();
 
   await cancelPaymentWithDependencies(91, store, new MockProvider());
