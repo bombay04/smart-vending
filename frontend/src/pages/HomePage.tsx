@@ -59,7 +59,6 @@ interface PurchaseSuccess {
 export const PAYMENT_FAILURE_RETURN_MS = 2000;
 export const UNLOCK_FAILURE_RETURN_MS = 5000;
 export const SLOT_REFRESH_INTERVAL_MS = 7000;
-export const PROMPTPAY_PAYMENT_DURATION_SECONDS = 180;
 
 function formatPaymentTime(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
@@ -906,13 +905,6 @@ function HomePage() {
               (new Date(payment.expiresAt).getTime() - paymentNow) / 1000,
             ),
           );
-    const paymentProgress =
-      paymentSecondsRemaining === null
-        ? 0
-        : Math.min(
-            100,
-            (paymentSecondsRemaining / PROMPTPAY_PAYMENT_DURATION_SECONDS) * 100,
-          );
     return (
       <main
         className={`home-page payment-page customer-kiosk-page${
@@ -962,21 +954,9 @@ function HomePage() {
                 รอการชำระเงิน
               </p>
               {paymentSecondsRemaining !== null && (
-                <>
-                  <p className="payment-expiry" role="timer" aria-live="off">
-                    เหลือเวลา {formatPaymentTime(paymentSecondsRemaining)} นาที
-                  </p>
-                  <div
-                    className="payment-progress"
-                    role="progressbar"
-                    aria-label="เวลาที่เหลือสำหรับชำระเงิน"
-                    aria-valuemin={0}
-                    aria-valuemax={PROMPTPAY_PAYMENT_DURATION_SECONDS}
-                    aria-valuenow={paymentSecondsRemaining}
-                  >
-                    <span style={{ width: `${paymentProgress}%` }} />
-                  </div>
-                </>
+                <p className="payment-expiry" role="timer" aria-live="off">
+                  เหลือเวลา {formatPaymentTime(paymentSecondsRemaining)} นาที
+                </p>
               )}
               {paymentScreen.pollError && (
                 <p className="payment-message payment-message--warning">

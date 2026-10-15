@@ -396,7 +396,7 @@ test("customer UI uses provider QR, backend polling, waiting state, and no fake 
   assert.doesNotMatch(css, /\.payment-page--waiting\s*\{/);
   assert.doesNotMatch(home, /THAI QR PAYMENT · PromptPay|payment-qr-card/);
   assert.match(home, /เหลือเวลา \{formatPaymentTime\(paymentSecondsRemaining\)\} นาที/);
-  assert.match(home, /className="payment-progress"/);
+  assert.doesNotMatch(home, /className="payment-progress"|role="progressbar"/);
   assert.doesNotMatch(home, /Doritoss?|Doritos/i);
   assert.match(home, /fetchPaymentStatus\(\s*transactionId/);
   assert.match(home, /handleConfirmedPaymentOnce/);

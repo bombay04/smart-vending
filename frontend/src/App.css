@@ -284,23 +284,6 @@
   line-height: 1.45;
 }
 
-.payment-progress {
-  width: min(74vw, 280px);
-  height: 5px;
-  margin-top: 13px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #dbe5f0;
-}
-
-.payment-progress > span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: #3478de;
-  transition: width 1s linear;
-}
-
 .payment-page--waiting .payment-cancel-button {
   width: min(74vw, 280px);
   min-width: 0;
