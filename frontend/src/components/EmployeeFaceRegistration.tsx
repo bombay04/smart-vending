@@ -34,9 +34,7 @@ const CONTENT: Record<
   },
   READY: { instruction: "กรุณามองตรงไปที่กล้อง" },
   CAPTURING: {
-    title: "กำลังบันทึกใบหน้า",
-    instruction:
-      "กรุณามองตรงไปที่กล้องและอยู่ในตำแหน่งเดิม ขณะระบบกำลังบันทึกใบหน้า",
+    instruction: "กรุณามองตรงไปที่กล้องและอยู่นิ่ง",
   },
   SYNC_REQUIRED: {
     title: "ต้องซิงค์สถานะ",
@@ -53,13 +51,10 @@ const CONTENT: Record<
       "บันทึกข้อมูลใบหน้าแล้ว กรุณาลองซิงค์สถานะอีกครั้งโดยไม่ต้องสแกนใหม่",
   },
   SUCCESS: {
-    title: "ลงทะเบียนสำเร็จ",
-    instruction: "บันทึกข้อมูลใบหน้าและลงทะเบียนเรียบร้อยแล้ว",
+    instruction: "บันทึกข้อมูลใบหน้าเรียบร้อยแล้ว",
   },
   NO_FACE: {
-    title: "ไม่พบใบหน้า",
-    instruction:
-      "กรุณาจัดใบหน้าให้อยู่ในตำแหน่งที่กล้องมองเห็น ปรับแสงให้เหมาะสม แล้วลองอีกครั้ง",
+    instruction: "กรุณามองตรงไปที่กล้องและปรับแสงให้เหมาะสม",
   },
   MULTIPLE_FACES: {
     title: "ตรวจพบหลายใบหน้า",
@@ -209,11 +204,23 @@ function EmployeeFaceRegistration({
         ].includes(state)
         ? "error"
         : "ready";
+  const pageTitle = state === "CAPTURING"
+    ? "กำลังบันทึกใบหน้า"
+    : state === "SUCCESS"
+      ? "ลงทะเบียนใบหน้าสำเร็จ"
+      : state === "NO_FACE"
+        ? "ไม่พบใบหน้า"
+        : "ลงทะเบียนใบหน้า";
+  const showActions =
+    state === "READY" ||
+    retryCapture ||
+    state === "SYNC_REQUIRED" ||
+    state === "SYNC_ERROR";
 
   return (
     <main className="home-page employee-registration-page">
       <section
-        className="employee-registration-card"
+        className={`employee-registration-card employee-registration-card--${state.toLowerCase()}`}
         aria-labelledby="registration-title"
       >
         <div
@@ -224,7 +231,7 @@ function EmployeeFaceRegistration({
         >
           {state === "SUCCESS" ? <SuccessCheckIcon /> : <span>◎</span>}
         </div>
-        <h1 id="registration-title">ลงทะเบียนใบหน้า</h1>
+        <h1 id="registration-title">{pageTitle}</h1>
         <div
           className={`employee-registration-status face-flow-status face-flow-status--${statusTone}`}
           aria-live="polite"
@@ -232,8 +239,17 @@ function EmployeeFaceRegistration({
         >
           {CONTENT[state].title && <h2>{CONTENT[state].title}</h2>}
           {CONTENT[state].instruction && <p>{CONTENT[state].instruction}</p>}
+          {state === "CAPTURING" && (
+            <div className="employee-registration-loading" role="status">
+              <span
+                className="employee-registration-loading-spinner"
+                aria-hidden="true"
+              />
+              <span>กำลังดำเนินการ...</span>
+            </div>
+          )}
           <p className="employee-registration-identity">
-            {employee.employeeCode} {employee.name}
+            {employee.employeeCode}-{employee.name}
           </p>
           {cancelError && (
             <p className="employee-registration-error" role="alert">
@@ -241,28 +257,30 @@ function EmployeeFaceRegistration({
             </p>
           )}
         </div>
-        <div className="employee-registration-actions">
-          {(state === "READY" || retryCapture) && (
-            <button
-              className="employee-registration-submit"
-              type="button"
-              onClick={() => void capture()}
-            >
-              {retryCapture ? "ลองสแกนอีกครั้ง" : "เริ่มสแกนใบหน้า"}
-            </button>
-          )}
-          {(state === "SYNC_REQUIRED" || state === "SYNC_ERROR") && (
-            <button
-              className="employee-registration-submit"
-              type="button"
-              onClick={() => void syncCompletion()}
-            >
-              {state === "SYNC_ERROR"
-                ? "ลองซิงค์สถานะอีกครั้ง"
-                : "ซิงค์สถานะการลงทะเบียน"}
-            </button>
-          )}
-        </div>
+        {showActions && (
+          <div className="employee-registration-actions">
+            {(state === "READY" || retryCapture) && (
+              <button
+                className="employee-registration-submit"
+                type="button"
+                onClick={() => void capture()}
+              >
+                {retryCapture ? "ลองสแกนอีกครั้ง" : "เริ่มสแกนใบหน้า"}
+              </button>
+            )}
+            {(state === "SYNC_REQUIRED" || state === "SYNC_ERROR") && (
+              <button
+                className="employee-registration-submit"
+                type="button"
+                onClick={() => void syncCompletion()}
+              >
+                {state === "SYNC_ERROR"
+                  ? "ลองซิงค์สถานะอีกครั้ง"
+                  : "ซิงค์สถานะการลงทะเบียน"}
+              </button>
+            )}
+          </div>
+        )}
         {canCancelFaceRegistration(state) && (
           <button
             className="employee-registration-back"

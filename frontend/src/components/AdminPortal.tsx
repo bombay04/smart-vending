@@ -1092,7 +1092,7 @@ function AdminPortal() {
               </h2>
               <p className="admin-feedback-modal-identity">
                 {session.employee?.employeeCode}
-                {session.employee?.name ? ` ${session.employee.name}` : ""}
+                {session.employee?.name ? `-${session.employee.name}` : ""}
               </p>
               <p className="admin-face-registration-countdown" role="timer">
                 หมดอายุใน {secondsRemaining} วินาที

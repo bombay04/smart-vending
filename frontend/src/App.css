@@ -622,18 +622,40 @@
 .employee-registration-status p {
   margin: 12px auto 0;
   color: #52627a;
-  font-size: clamp(1.05rem, 2.5vw, 1.2rem);
+  font-size: clamp(1.1rem, 2.6vw, 1.3rem);
   line-height: 1.5;
 }
 
 .employee-registration-status .employee-registration-identity {
   color: #166534;
+  font-size: clamp(1.12rem, 2.7vw, 1.3rem);
   font-weight: 850;
 }
 
 .employee-registration-status .employee-registration-error {
   color: #991b1b;
   font-weight: 800;
+}
+
+.employee-registration-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 10px;
+  color: #4c1d95;
+  font-size: 1.05rem;
+  font-weight: 850;
+}
+
+.employee-registration-loading-spinner {
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border: 2px solid #ddd6fe;
+  border-top-color: #6d28d9;
+  border-radius: 50%;
+  animation: payment-spin 800ms linear infinite;
 }
 
 .face-flow-status > p:first-child {
@@ -677,6 +699,8 @@
   border: 0;
   color: #ffffff;
   background: #7c3aed;
+  font-size: 1.1rem;
+  font-weight: 900;
 }
 
 .employee-registration-secondary:disabled {
@@ -2378,7 +2402,7 @@
 
   .employee-registration-status p {
     margin-top: 6px;
-    font-size: 0.98rem;
+    font-size: 1.08rem;
     line-height: 1.3;
   }
 
@@ -2445,6 +2469,7 @@
   .buy-button,
   .face-scan-indicator--scanning,
   .employee-auth-loading-spinner,
+  .employee-registration-loading-spinner,
   .payment-spinner {
     transition: none;
     animation: none;
