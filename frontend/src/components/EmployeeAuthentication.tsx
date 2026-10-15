@@ -43,13 +43,10 @@ const STATE_CONTENT: Record<
   },
   SUCCESS: {},
   NO_MATCH: {
-    title: "ยืนยันตัวตนไม่สำเร็จ",
-    instruction: "ไม่สามารถยืนยันตัวตนได้ กรุณาลองอีกครั้ง",
+    instruction: "กรุณาลองสแกนใบหน้าอีกครั้ง",
   },
   NO_FACE: {
-    title: "ไม่พบใบหน้า",
-    instruction:
-      "กรุณาจัดใบหน้าให้อยู่ในตำแหน่งที่กล้องมองเห็น แล้วลองอีกครั้ง",
+    instruction: "กรุณามองตรงไปที่กล้อง แล้วลองอีกครั้ง",
   },
   MULTIPLE_FACES: {
     title: "ตรวจพบหลายใบหน้า",
@@ -64,9 +61,7 @@ const STATE_CONTENT: Record<
     instruction: "กรุณาตรวจสอบบริการสแกนใบหน้าบนเครื่อง แล้วลองอีกครั้ง",
   },
   LOCKED: {
-    title: "ระบบยืนยันตัวตนถูกล็อกชั่วคราว",
-    instruction:
-      "มีการยืนยันตัวตนไม่สำเร็จหลายครั้ง ระบบสแกนใบหน้าจึงถูกปิดใช้งานชั่วคราว",
+    instruction: "ยืนยันตัวตนไม่สำเร็จหลายครั้ง",
   },
 };
 
@@ -309,7 +304,13 @@ function EmployeeAuthentication({
     ? "กำลังยืนยันตัวตน"
     : isSuccessful
       ? "ยืนยันตัวตนสำเร็จ"
-      : "ยืนยันตัวตนพนักงาน";
+      : authenticationState === "NO_FACE"
+        ? "ไม่พบใบหน้า"
+        : authenticationState === "NO_MATCH"
+          ? "ยืนยันตัวตนไม่สำเร็จ"
+          : isLocked
+            ? "ระบบถูกล็อกชั่วคราว"
+            : "ยืนยันตัวตนพนักงาน";
 
   return (
     <main className="home-page employee-auth-page">
@@ -336,15 +337,20 @@ function EmployeeAuthentication({
             </p>
           )}
           {content.instruction && <p>{content.instruction}</p>}
-          {remainingAttempts !== null && remainingAttempts > 0 && isFailure && (
-            <p className="employee-auth-attempts">
-              เหลืออีก {remainingAttempts} ครั้งก่อนระบบล็อกชั่วคราว
-            </p>
-          )}
+          {remainingAttempts !== null &&
+            remainingAttempts > 0 &&
+            authenticationState === "NO_FACE" && (
+              <p className="employee-auth-attempts">
+                เหลือโอกาสอีก {remainingAttempts} ครั้ง
+              </p>
+            )}
           {isLocked && lockoutSeconds !== null && (
-            <p className="employee-auth-countdown">
-              ลองอีกครั้งใน {formatCountdown(lockoutSeconds)}
-            </p>
+            <>
+              <p>ลองอีกครั้งใน</p>
+              <p className="employee-auth-countdown">
+                {formatCountdown(lockoutSeconds)}
+              </p>
+            </>
           )}
           {cancelError && (
             <p className="employee-auth-attempts">{cancelError}</p>
@@ -377,7 +383,7 @@ function EmployeeAuthentication({
               {isChecking
                 ? "กำลังตรวจสอบ..."
                 : isLocked
-                  ? "ระบบถูกล็อกชั่วคราว"
+                  ? "ยังไม่สามารถสแกนได้"
                   : isFailure
                     ? "ลองอีกครั้ง"
                     : "สแกนใบหน้า"}

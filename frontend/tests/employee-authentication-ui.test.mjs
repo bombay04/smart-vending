@@ -44,7 +44,8 @@ test("face authentication translates scanning, errors, attempts, lockout, and su
     "กรุณามองตรงไปที่กล้องและอยู่นิ่ง",
     "กำลังสแกนใบหน้า...",
     "ไม่พบใบหน้า",
-    "กรุณาจัดใบหน้าให้อยู่ในตำแหน่งที่กล้องมองเห็น แล้วลองอีกครั้ง",
+    "กรุณามองตรงไปที่กล้อง แล้วลองอีกครั้ง",
+    "เหลือโอกาสอีก {remainingAttempts} ครั้ง",
     "ตรวจพบหลายใบหน้า",
     "กรุณาให้พนักงานอยู่หน้ากล้องเพียงคนเดียว",
     "กล้องกำลังถูกใช้งาน",
@@ -52,10 +53,12 @@ test("face authentication translates scanning, errors, attempts, lockout, and su
     "ไม่สามารถใช้งานเครื่องสแกนได้",
     "กรุณาตรวจสอบบริการสแกนใบหน้าบนเครื่อง แล้วลองอีกครั้ง",
     "ยืนยันตัวตนไม่สำเร็จ",
-    "ไม่สามารถยืนยันตัวตนได้ กรุณาลองอีกครั้ง",
-    "ระบบยืนยันตัวตนถูกล็อกชั่วคราว",
-    "เหลืออีก {remainingAttempts} ครั้งก่อนระบบล็อกชั่วคราว",
-    "ลองอีกครั้งใน {formatCountdown(lockoutSeconds)}",
+    "กรุณาลองสแกนใบหน้าอีกครั้ง",
+    "ระบบถูกล็อกชั่วคราว",
+    "ยืนยันตัวตนไม่สำเร็จหลายครั้ง",
+    "ยังไม่สามารถสแกนได้",
+    "ลองอีกครั้งใน",
+    "{formatCountdown(lockoutSeconds)}",
     "ยืนยันตัวตนสำเร็จ",
     "กำลังเข้าสู่โหมดเติมสินค้า...",
     "ยินดีต้อนรับ {authenticatedEmployee.name}",
@@ -98,6 +101,14 @@ test("face authentication translates scanning, errors, attempts, lockout, and su
     ),
     false,
   );
+  for (const removedCopy of [
+    "กรุณาจัดใบหน้าให้อยู่ในตำแหน่งที่กล้องมองเห็น แล้วลองอีกครั้ง",
+    "ไม่สามารถยืนยันตัวตนได้ กรุณาลองอีกครั้ง",
+    "ระบบยืนยันตัวตนถูกล็อกชั่วคราว",
+    "เหลืออีก {remainingAttempts} ครั้งก่อนระบบล็อกชั่วคราว",
+  ]) {
+    assert.equal(authentication.includes(removedCopy), false);
+  }
   assert.match(
     authentication,
     /\{\(isScanning \|\| isSuccessful\) && \([\s\S]*?className=\{`employee-auth-loading/,
