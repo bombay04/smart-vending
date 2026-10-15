@@ -390,8 +390,9 @@ test("customer UI uses provider QR, backend polling, waiting state, and no fake 
   assert.match(home, /getProductDisplayName\(payment\.productName\)/);
   assert.match(home, /<p className="payment-amount">฿\{payment\.amount\}<\/p>/);
   assert.match(home, /className="payment-qr-frame"/);
-  assert.match(css, /\.payment-page--waiting\s*{[\s\S]*?background: #ffffff;/);
-  assert.match(css, /\.payment-page--waiting \.payment-card--waiting\s*{[\s\S]*?background: #ffffff;/);
+  assert.match(css, /\.payment-page\s*{[\s\S]*?linear-gradient\(145deg, #f8fbff 0%, #e8eef8 100%\);/);
+  assert.match(css, /\.payment-card\s*{[\s\S]*?background: rgba\(255, 255, 255, 0\.98\);[\s\S]*?box-shadow:/);
+  assert.doesNotMatch(css, /\.payment-page--waiting\s*\{/);
   assert.doesNotMatch(home, /THAI QR PAYMENT · PromptPay|payment-qr-card/);
   assert.match(home, /เหลือเวลา \{formatPaymentTime\(paymentSecondsRemaining\)\} นาที/);
   assert.match(home, /className="payment-progress"/);
