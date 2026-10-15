@@ -249,7 +249,7 @@ function EmployeeFaceRegistration({
             </div>
           )}
           <p className="employee-registration-identity">
-            {employee.employeeCode}-{employee.name}
+            {employee.employeeCode} - {employee.name}
           </p>
           {cancelError && (
             <p className="employee-registration-error" role="alert">

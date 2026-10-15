@@ -124,7 +124,7 @@ test("authoritative FACE_REGISTRATION state drives the accessible active modal",
     /className="staff-restock-modal-icon"[\s\S]*?>\s*◉\s*</,
   );
   assert.equal(
-    admin.includes('{session.employee?.name ? `-${session.employee.name}` : ""}'),
+    admin.includes('{session.employee?.name ? ` - ${session.employee.name}` : ""}'),
     true,
   );
   assert.equal(admin.includes('` ${session.employee.name}`'), false);
@@ -277,7 +277,7 @@ test("Pi face setup presents registration states clearly and preserves safe canc
   assert.match(registration, /READY: \{ instruction: "กรุณามองตรงไปที่กล้อง" \}/);
   assert.match(
     registration,
-    /\{employee\.employeeCode\}-\{employee\.name\}/,
+    /\{employee\.employeeCode\} - \{employee\.name\}/,
   );
   assert.doesNotMatch(
     registration,
@@ -316,7 +316,7 @@ test("Pi face setup presents registration states clearly and preserves safe canc
     css,
     /\.employee-registration-submit \{[\s\S]*?font-size: 1\.1rem;[\s\S]*?font-weight: 900;/,
   );
-  assert.match(admin, /`-\$\{session\.employee\.name\}`/);
+  assert.match(admin, /` - \$\{session\.employee\.name\}`/);
   assert.doesNotMatch(
     registration,
     /A local template already exists\. Sync its status without capturing again\./,
