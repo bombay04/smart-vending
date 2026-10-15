@@ -1,8 +1,31 @@
+# JavaScript / TypeScript dependencies and generated output
 node_modules/
 dist/
 backend/generated/
+*.tsbuildinfo
+
+# Local environment files (tracked examples remain allowed)
 .env
+.env.*
+!.env.example
+/edge/kiosk/kiosk.env
+
+# Python environments, bytecode, and test caches
+.venv/
+venv/
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Test coverage and temporary artifacts
+.coverage
+.coverage.*
+coverage/
+htmlcov/
+.tmp/
+
+# Local biometric data and project context
 /edge/face/data/
-/edge/kiosk/kiosk.env
+/PROJECT_CONTEXT.md

@@ -1,6 +1,6 @@
 # Raspberry Pi Prototype Face Recognition
 
-This isolated Pi-side tool registers and compares prototype employee face templates. It is not connected to frontend authentication, the backend, PostgreSQL, Restock Mode, or the ESP32 serial service. It is not production biometric security.
+The reusable Pi-side face engine registers and compares prototype employee face templates. The Pi hardware service uses it for kiosk authentication and session-bound registration; the frontend then asks the backend to validate the matched active employee before entering Restock Mode. Templates and embeddings remain local to the Pi, while PostgreSQL stores only non-biometric workflow metadata. The CLI documented below remains available for isolated diagnostics and maintenance. This is not production biometric security.
 
 ## Dependency installation
 
@@ -87,9 +87,9 @@ The camera index can also be set with `FACE_CAMERA_INDEX`. The storage location 
 - Embedding: the aligned face is passed to SFace `feature()`. Output must be one floating 128-value feature row with finite values and a non-zero finite norm. The algorithm identifier is `opencv-yunet-2023mar-sface-2021dec`.
 - Enrollment aggregation: each live embedding is compared with every enrolled embedding using OpenCV `FaceRecognizerSF` `FR_NORM_L2`. The median of all enrollment distances is the live-sample score; minimum distance is never used.
 - Live consensus: all required live-sample median scores must be at or below the threshold. The reported decision distance is the maximum live-sample score because it is the value governing this all-pass rule. Multiple qualifying employees are rejected as ambiguous.
-- Threshold: `DEFAULT_SFACE_L2_DISTANCE_THRESHOLD = 1.128`. This is the upstream OpenCV LFW reference, not a calibrated project threshold. Override it with `--sface-l2-threshold` or `FACE_SFACE_L2_THRESHOLD`; values must be finite, greater than 0.0, and less than 2.0.
+- Threshold: `DEFAULT_SFACE_L2_DISTANCE_THRESHOLD = 1.128`. Task 34 accepted this value for the limited prototype dataset described in the [project specification](project-spec.md); that result is not production biometric calibration or a general security guarantee. Override it with `--sface-l2-threshold` or `FACE_SFACE_L2_THRESHOLD`; values must be finite, greater than 0.0, and less than 2.0.
 
-The threshold remains uncalibrated. Record same-person and different-person distances under the deployed lighting and camera position before accepting or changing it.
+Record same-person and different-person distances under the deployed lighting and camera position before changing the accepted prototype threshold or claiming broader calibration.
 
 ## Template compatibility
 

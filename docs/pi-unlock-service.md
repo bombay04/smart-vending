@@ -183,7 +183,7 @@ Both command forms use a subprocess argument array without a shell and have a te
 
 Playback uses one non-blocking mutex. When a clip is active, a second request returns HTTP `409` with `status: "BUSY"`; there is no queue. Every frontend call is fire-and-forget and failure is deliberately ignored, so sound cannot alter payment state, slot state, unlock attempts, employee authorization, restock completion, or navigation.
 
-Task 39 does not fabricate binary recordings. Supply the four named production Thai PCM WAV files before event-by-event physical validation. Automated tests mock the player boundary, and the explicit `MOCK_AUDIO=true` mode supports development without a speaker. The cabinet USB speaker route has been physically validated with `/usr/share/sounds/alsa/Front_Center.wav` and the device configuration above; the four production voice assets still require physical validation.
+Task 39 did not fabricate binary recordings; later work added the four named Thai PCM WAV files under `edge/audio/assets/`. Automated tests mock the player boundary, and the explicit `MOCK_AUDIO=true` mode supports development without a speaker. The cabinet USB speaker route has been physically validated with `/usr/share/sounds/alsa/Front_Center.wav` and the device configuration above; event-by-event playback of the four tracked prompts still requires physical validation.
 
 ## Face authentication
 

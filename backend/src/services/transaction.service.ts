@@ -466,11 +466,7 @@ export async function cancelPaymentWithDependencies(
     return toSafePaymentResponse(payment);
   }
   if (payment.paymentStatus === "SUCCESS") {
-    throw new HttpError(
-      "Payment has already been confirmed.",
-      409,
-      PAYMENT_ALREADY_CONFIRMED_CODE,
-    );
+    throw new HttpError("Payment has already been confirmed.", 409, PAYMENT_ALREADY_CONFIRMED_CODE);
   }
 
   let current = payment;
@@ -489,23 +485,16 @@ export async function cancelPaymentWithDependencies(
   }
 
   if (current.paymentStatus === "SUCCESS") {
-    throw new HttpError(
-      "Payment has already been confirmed.",
-      409,
-      PAYMENT_ALREADY_CONFIRMED_CODE,
-    );
+    throw new HttpError("Payment has already been confirmed.", 409, PAYMENT_ALREADY_CONFIRMED_CODE);
   }
 
   return toSafePaymentResponse(await store.abandonPayment(transactionId));
 }
 
 export function cancelPayment(transactionId: number) {
-  return cancelPaymentWithDependencies(
-    transactionId,
-    prismaPaymentStore,
-    getPaymentProvider(),
-    { provider: getNotificationProvider() },
-  );
+  return cancelPaymentWithDependencies(transactionId, prismaPaymentStore, getPaymentProvider(), {
+    provider: getNotificationProvider(),
+  });
 }
 
 export async function reconcileWebhookChargeWithDependencies(
