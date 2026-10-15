@@ -372,10 +372,10 @@ test("restock audio occurs after commit and audio failure preserves the result",
 });
 
 test("customer UI uses provider QR, backend polling, waiting state, and no fake success path", async () => {
-  const home = await readFile(
-    new URL("../src/pages/HomePage.tsx", import.meta.url),
-    "utf8",
-  );
+  const [home, css] = await Promise.all([
+    readFile(new URL("../src/pages/HomePage.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/App.css", import.meta.url), "utf8"),
+  ]);
   const api = await readFile(
     new URL("../src/api/transaction.ts", import.meta.url),
     "utf8",
@@ -390,6 +390,8 @@ test("customer UI uses provider QR, backend polling, waiting state, and no fake 
   assert.match(home, /getProductDisplayName\(payment\.productName\)/);
   assert.match(home, /<p className="payment-amount">฿\{payment\.amount\}<\/p>/);
   assert.match(home, /className="payment-qr-frame"/);
+  assert.match(css, /\.payment-page--waiting\s*{[\s\S]*?background: #ffffff;/);
+  assert.match(css, /\.payment-page--waiting \.payment-card--waiting\s*{[\s\S]*?background: #ffffff;/);
   assert.doesNotMatch(home, /THAI QR PAYMENT · PromptPay|payment-qr-card/);
   assert.match(home, /เหลือเวลา \{formatPaymentTime\(paymentSecondsRemaining\)\} นาที/);
   assert.match(home, /className="payment-progress"/);

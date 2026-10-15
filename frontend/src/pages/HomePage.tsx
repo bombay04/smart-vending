@@ -1124,9 +1124,7 @@ function HomePage() {
                       <h2 className="product-name">
                         {getProductDisplayName(slot.product.name)}
                       </h2>
-                      <p className="product-price">
-                        {slot.product.price} <span>บาท</span>
-                      </p>
+                      <p className="product-price">฿{slot.product.price}</p>
                     </>
                   ) : (
                     <div className="empty-product">

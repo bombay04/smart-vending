@@ -17,7 +17,6 @@ test("product selection uses Thai presentation copy and a centered minimal heade
     "พร้อมจำหน่าย",
     "สินค้าหมด",
     '"ซื้อ"',
-    "บาท",
   ]) {
     assert.ok(home.includes(copy), `missing customer copy: ${copy}`);
   }
@@ -39,7 +38,8 @@ test("product selection uses Thai presentation copy and a centered minimal heade
     css,
     /\.customer-page-header \{[\s\S]*?text-align: center;/,
   );
-  assert.match(css, /\.product-price span \{[\s\S]*?font-size: 1em;/);
+  assert.match(home, /<p className="product-price">฿\{slot\.product\.price\}<\/p>/);
+  assert.doesNotMatch(home, /className="product-price"[\s\S]*?บาท/);
   assert.match(productDisplay, /THAI_PRODUCT_NAMES\[productName\] \?\? productName/);
 });
 

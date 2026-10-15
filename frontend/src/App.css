@@ -206,7 +206,7 @@
 
 .payment-page--waiting {
   padding: 10px 4px;
-  background: #101010;
+  background: #ffffff;
 }
 
 .payment-page--waiting .payment-card--waiting {
@@ -221,13 +221,13 @@
   overflow-y: auto;
   border: 0;
   border-radius: 12px;
-  color: #e5e5e5;
-  background: #303030;
+  color: #172033;
+  background: #ffffff;
   box-shadow: none;
 }
 
 .payment-page--waiting .payment-card--waiting h1 {
-  color: #e5e5e5;
+  color: #12213d;
   font-size: 1.05rem;
   line-height: 1.45;
   letter-spacing: 0;
@@ -235,7 +235,7 @@
 
 .payment-page--waiting .payment-card--waiting .payment-product {
   margin: 14px 0 0;
-  color: #cfcfcf;
+  color: #52627a;
   font-size: 1rem;
   font-weight: 700;
   line-height: 1.5;
@@ -243,7 +243,7 @@
 
 .payment-page--waiting .payment-card--waiting .payment-amount {
   margin: 8px 0 10px;
-  color: #e8e8e8;
+  color: #1d4ed8;
   font-size: 1.55rem;
   line-height: 1.25;
   font-weight: 800;
@@ -272,7 +272,7 @@
   align-items: center;
   gap: 9px;
   margin: 15px 0 0;
-  color: #d7d7d7;
+  color: #172033;
   font-size: 0.9rem;
   line-height: 1.4;
   font-weight: 700;
@@ -290,7 +290,7 @@
 
 .payment-page--waiting .payment-card .payment-expiry {
   margin: 12px 0 0;
-  color: #d0d0d0;
+  color: #64748b;
   font-size: 0.95rem;
   line-height: 1.45;
 }
@@ -301,7 +301,7 @@
   margin-top: 13px;
   overflow: hidden;
   border-radius: 999px;
-  background: #202020;
+  background: #dbe5f0;
 }
 
 .payment-progress > span {
@@ -318,17 +318,17 @@
   min-height: 37px;
   margin-top: 12px;
   padding: 0 20px;
-  border-color: #424242;
+  border-color: #cbd5e1;
   border-radius: 999px;
-  color: #bdbdbd;
+  color: #52627a;
   background: transparent;
   font-size: 0.82rem;
   font-weight: 600;
 }
 
 .payment-page--waiting .payment-cancel-button:disabled {
-  border-color: #3a3a3a;
-  color: #777777;
+  border-color: #e2e8f0;
+  color: #94a3b8;
   background: transparent;
 }
 
@@ -1877,11 +1877,6 @@
   font-size: 2rem;
   font-weight: 900;
   text-align: center;
-}
-
-.product-price span {
-  font-size: 1em;
-  letter-spacing: 0;
 }
 
 .empty-product {
