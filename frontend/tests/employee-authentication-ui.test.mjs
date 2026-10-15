@@ -40,9 +40,9 @@ test("face authentication translates scanning, errors, attempts, lockout, and su
   );
 
   for (const copy of [
-    "กำลังสแกนใบหน้า",
-    "กรุณามองตรงไปที่กล้องและอยู่นิ่ง ขณะระบบกำลังสแกนใบหน้า",
-    "กำลังสแกน...",
+    "กำลังยืนยันตัวตน",
+    "กรุณามองตรงไปที่กล้องและอยู่นิ่ง",
+    "กำลังสแกนใบหน้า...",
     "ไม่พบใบหน้า",
     "กรุณาจัดใบหน้าให้อยู่ในตำแหน่งที่กล้องมองเห็น แล้วลองอีกครั้ง",
     "ตรวจพบหลายใบหน้า",
@@ -57,7 +57,7 @@ test("face authentication translates scanning, errors, attempts, lockout, and su
     "เหลืออีก {remainingAttempts} ครั้งก่อนระบบล็อกชั่วคราว",
     "ลองอีกครั้งใน {formatCountdown(lockoutSeconds)}",
     "ยืนยันตัวตนสำเร็จ",
-    "ยืนยันตัวตนพนักงานเรียบร้อยแล้ว กำลังเข้าสู่โหมดเติมสินค้า...",
+    "กำลังเข้าสู่โหมดเติมสินค้า...",
     "ยินดีต้อนรับ {authenticatedEmployee.name}",
     "ลองอีกครั้ง",
   ]) {
@@ -85,6 +85,27 @@ test("face authentication translates scanning, errors, attempts, lockout, and su
   ]) {
     assert.equal(authentication.includes(copy), false, `found English copy: ${copy}`);
   }
+
+  assert.equal(
+    authentication.includes(
+      "กรุณามองตรงไปที่กล้องและอยู่นิ่ง ขณะระบบกำลังสแกนใบหน้า",
+    ),
+    false,
+  );
+  assert.equal(
+    authentication.includes(
+      "ยืนยันตัวตนพนักงานเรียบร้อยแล้ว กำลังเข้าสู่โหมดเติมสินค้า...",
+    ),
+    false,
+  );
+  assert.match(
+    authentication,
+    /\{\(isScanning \|\| isSuccessful\) && \([\s\S]*?className=\{`employee-auth-loading/,
+  );
+  assert.match(
+    authentication,
+    /\{!isScanning && !isSuccessful && \([\s\S]*?<div className="employee-auth-actions">/,
+  );
 });
 
 test("authentication and registration share face state and success visuals", async () => {

@@ -524,6 +524,41 @@
   font-variant-numeric: tabular-nums;
 }
 
+.employee-auth-card--scanning .employee-auth-status,
+.employee-auth-card--success .employee-auth-status {
+  min-height: 0;
+}
+
+.employee-auth-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 22px;
+  color: #164e63;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.employee-auth-loading-spinner {
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border: 2px solid #bae6fd;
+  border-top-color: #0284c7;
+  border-radius: 50%;
+  animation: payment-spin 800ms linear infinite;
+}
+
+.employee-auth-loading--success {
+  color: #52627a;
+}
+
+.employee-auth-loading--success .employee-auth-loading-spinner {
+  border-color: #bbf7d0;
+  border-top-color: #16a34a;
+}
+
 .employee-auth-actions {
   display: grid;
   gap: 16px;
@@ -2409,6 +2444,7 @@
 @media (prefers-reduced-motion: reduce) {
   .buy-button,
   .face-scan-indicator--scanning,
+  .employee-auth-loading-spinner,
   .payment-spinner {
     transition: none;
     animation: none;
