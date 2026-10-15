@@ -124,10 +124,10 @@ test("authoritative FACE_REGISTRATION state drives the accessible active modal",
     /className="staff-restock-modal-icon"[\s\S]*?>\s*◉\s*</,
   );
   assert.equal(
-    admin.includes('{session.employee?.name ? ` ${session.employee.name}` : ""}'),
+    admin.includes('{session.employee?.name ? ` - ${session.employee.name}` : ""}'),
     true,
   );
-  assert.equal(admin.includes('` - ${session.employee.name}`'), false);
+  assert.equal(admin.includes('` ${session.employee.name}`'), false);
   assert.match(admin, /หมดอายุใน \{secondsRemaining\} วินาที/);
   assert.match(admin, /handleCancelFaceRegistration/);
   assert.doesNotMatch(admin, /Face registration status/);
@@ -255,15 +255,17 @@ test("draft and offboard completion use authoritative two-second success modals"
   assert.doesNotMatch(admin, /lifecycleMessage/);
 });
 
-test("Pi face setup hides Back during capture and sync while preserving safe cancellation", async () => {
-  const [registration, home] = await Promise.all([
+test("Pi face setup presents registration states clearly and preserves safe cancellation", async () => {
+  const [registration, home, admin, css] = await Promise.all([
     source("src/components/EmployeeFaceRegistration.tsx"),
     source("src/pages/HomePage.tsx"),
+    source("src/components/AdminPortal.tsx"),
+    source("src/App.css"),
   ]);
 
   assert.match(registration, /className=\{`face-scan-indicator/);
   assert.match(registration, /state === "CAPTURING" \? "scanning"/);
-  assert.match(registration, />ลงทะเบียนใบหน้า<\/h1>/);
+  assert.match(registration, /<h1 id="registration-title">\{pageTitle\}<\/h1>/);
   assert.doesNotMatch(registration, /Authorized Staff Session/i);
   assert.doesNotMatch(registration, /Employee Face Setup/);
   assert.match(registration, /title: "กำลังตรวจสอบการลงทะเบียน"/);
@@ -275,7 +277,7 @@ test("Pi face setup hides Back during capture and sync while preserving safe can
   assert.match(registration, /READY: \{ instruction: "กรุณามองตรงไปที่กล้อง" \}/);
   assert.match(
     registration,
-    /\{employee\.employeeCode\} \{employee\.name\}/,
+    /\{employee\.employeeCode\} - \{employee\.name\}/,
   );
   assert.doesNotMatch(
     registration,
@@ -285,11 +287,13 @@ test("Pi face setup hides Back during capture and sync while preserving safe can
     registration,
     /\{employee\.name\} - \{employee\.employeeCode\}/,
   );
-  assert.match(registration, /title: "กำลังบันทึกใบหน้า"/);
+  assert.match(registration, /state === "CAPTURING"[\s\S]*?"กำลังบันทึกใบหน้า"/);
   assert.match(
     registration,
-    /กรุณามองตรงไปที่กล้องและอยู่ในตำแหน่งเดิม ขณะระบบกำลังบันทึกใบหน้า/,
+    /กรุณามองตรงไปที่กล้องและอยู่นิ่ง/,
   );
+  assert.match(registration, /className="employee-registration-loading"/);
+  assert.match(registration, /กำลังดำเนินการ\.\.\./);
   assert.match(
     registration,
     /พบข้อมูลใบหน้าที่บันทึกไว้แล้ว กรุณาซิงค์สถานะโดยไม่ต้องสแกนใหม่/,
@@ -297,12 +301,22 @@ test("Pi face setup hides Back during capture and sync while preserving safe can
   assert.match(registration, /"ซิงค์สถานะการลงทะเบียน"/);
   assert.match(
     registration,
-    /กรุณาจัดใบหน้าให้อยู่ในตำแหน่งที่กล้องมองเห็น ปรับแสงให้เหมาะสม แล้วลองอีกครั้ง/,
+    /กรุณามองตรงไปที่กล้องและปรับแสงให้เหมาะสม/,
   );
   assert.match(registration, /"ลองสแกนอีกครั้ง"/);
-  assert.match(registration, /title: "ลงทะเบียนสำเร็จ"/);
+  assert.match(registration, /"ลงทะเบียนใบหน้าสำเร็จ"/);
+  assert.match(registration, /"บันทึกข้อมูลใบหน้าเรียบร้อยแล้ว"/);
   assert.match(registration, /"เริ่มสแกนใบหน้า"/);
   assert.match(registration, /"กลับสู่หน้าหลัก"/);
+  assert.match(
+    css,
+    /\.employee-registration-status p \{[\s\S]*?font-size: clamp\(1\.1rem, 2\.6vw, 1\.3rem\);/,
+  );
+  assert.match(
+    css,
+    /\.employee-registration-submit \{[\s\S]*?font-size: 1\.1rem;[\s\S]*?font-weight: 900;/,
+  );
+  assert.match(admin, /` - \$\{session\.employee\.name\}`/);
   assert.doesNotMatch(
     registration,
     /A local template already exists\. Sync its status without capturing again\./,
@@ -323,6 +337,7 @@ test("Pi face setup hides Back during capture and sync while preserving safe can
   assert.match(registration, /\{canCancelFaceRegistration\(state\) && \(/);
   assert.equal(canCancelFaceRegistration("CAPTURING"), false);
   assert.equal(canCancelFaceRegistration("SYNCING"), false);
+  assert.equal(canCancelFaceRegistration("SUCCESS"), false);
   for (const state of ["READY", "NO_FACE", "MULTIPLE_FACES", "SYNC_ERROR"]) {
     assert.equal(canCancelFaceRegistration(state), true);
   }
@@ -361,14 +376,24 @@ test("Add Employee validates supported Unicode name characters while typing", as
   for (const name of [
     "Jimmy",
     "สมชาย ใจดี",
-    "Task50Face1",
-    "Test3",
     "Anne-Marie",
     "O'Neil",
   ]) {
     assert.equal(isEmployeeNameCharacterValid(name), true);
   }
-  for (const name of ["*Jimmy", "Jimmy@", "#abc", "abc_", "Jimmy!", "😀Jimmy"]) {
+  for (const name of [
+    "Jimmy1",
+    "สมชาย2",
+    "Task50Face1",
+    "Test3",
+    "１２３",
+    "*Jimmy",
+    "Jimmy@",
+    "#abc",
+    "abc_",
+    "Jimmy!",
+    "😀Jimmy",
+  ]) {
     assert.equal(isEmployeeNameCharacterValid(name), false);
   }
 
@@ -390,6 +415,33 @@ test("Add Employee validates supported Unicode name characters while typing", as
   assert.match(
     css,
     /\.staff-portal-header,[\s\S]*\.staff-add-row,[\s\S]*align-items: center;/,
+  );
+});
+
+test("Edit Employee renders the same inline validation for invalid and duplicate names", async () => {
+  const admin = await source("src/components/AdminPortal.tsx");
+  const saveHandler = admin.match(
+    /async function handleSaveName[\s\S]*?\r?\n  }\r?\n\r?\n  async function handleActiveChange/,
+  )?.[0];
+
+  assert.ok(saveHandler);
+  assert.match(admin, /const editEmployeeNameError = editHasInvalidCharacters/);
+  assert.match(
+    admin,
+    /employees\.filter\(\(employee\) => employee\.id !== editingEmployeeId\)/,
+  );
+  assert.match(admin, /aria-invalid=\{editEmployeeNameError !== null\}/);
+  assert.match(
+    admin,
+    /handleEditNameChange\(\s*employee\.id,\s*event\.target\.value,?\s*\)/,
+  );
+  assert.match(saveHandler, /error\.code === EMPLOYEE_NAME_INVALID_CODE/);
+  assert.match(saveHandler, /setInvalidCharacterEditName/);
+  assert.match(saveHandler, /error\.code === EMPLOYEE_NAME_CONFLICT_CODE/);
+  assert.match(saveHandler, /setConflictingEditName/);
+  assert.match(
+    admin,
+    /!editName\.trim\(\) \|\|[\s\S]*editEmployeeNameError !== null/,
   );
 });
 

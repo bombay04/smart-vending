@@ -60,6 +60,14 @@ export const PAYMENT_FAILURE_RETURN_MS = 2000;
 export const UNLOCK_FAILURE_RETURN_MS = 5000;
 export const SLOT_REFRESH_INTERVAL_MS = 7000;
 
+function formatPaymentTime(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes.toString().padStart(2, "0")}:${remainingSeconds
+    .toString()
+    .padStart(2, "0")}`;
+}
+
 type PaymentScreen =
   | { phase: "creating"; slotNumber: number; productName: string }
   | {
@@ -89,6 +97,7 @@ function HomePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(false);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
+  const [paymentNow, setPaymentNow] = useState(Date.now());
   const [paymentScreen, setPaymentScreen] = useState<PaymentScreen | null>(
     null,
   );
@@ -112,6 +121,15 @@ function HomePage() {
     paymentScreen?.phase === "waiting" && !paymentScreen.isCancelling
       ? paymentScreen.payment.transactionId
       : null;
+  const waitingPaymentExpiry =
+    paymentScreen?.phase === "waiting" ? paymentScreen.payment.expiresAt : null;
+
+  useEffect(() => {
+    if (waitingPaymentExpiry === null) return undefined;
+    setPaymentNow(Date.now());
+    const interval = window.setInterval(() => setPaymentNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [waitingPaymentExpiry]);
 
   const markSlotAsSoldOut = useCallback((slotNumber: number) => {
     setSlots((currentSlots) =>
@@ -878,8 +896,21 @@ function HomePage() {
 
   if (paymentScreen !== null) {
     const payment = "payment" in paymentScreen ? paymentScreen.payment : null;
+    const paymentSecondsRemaining =
+      payment?.expiresAt === null || payment?.expiresAt === undefined
+        ? null
+        : Math.max(
+            0,
+            Math.ceil(
+              (new Date(payment.expiresAt).getTime() - paymentNow) / 1000,
+            ),
+          );
     return (
-      <main className="home-page payment-page customer-kiosk-page">
+      <main
+        className={`home-page payment-page customer-kiosk-page${
+          paymentScreen.phase === "waiting" ? " payment-page--waiting" : ""
+        }`}
+      >
         <section
           className={`payment-card payment-card--${paymentScreen.phase}`}
           aria-live="polite"
@@ -901,25 +932,30 @@ function HomePage() {
               <p className="payment-product">
                 {getProductDisplayName(payment.productName)}
               </p>
-              <p className="payment-amount">{payment.amount} บาท</p>
+              <p className="payment-amount">฿{payment.amount}</p>
               {payment.qrImageUrl ? (
-                <img
-                  className="payment-qr"
-                  src={payment.qrImageUrl}
-                  alt="QR สำหรับชำระเงินพร้อมเพย์"
-                />
+                <div className="payment-qr-frame">
+                  <img
+                    className="payment-qr"
+                    src={payment.qrImageUrl}
+                    alt="QR สำหรับชำระเงินพร้อมเพย์"
+                  />
+                </div>
               ) : (
                 <p className="payment-message payment-message--error">
                   ไม่สามารถแสดง QR ได้
                 </p>
               )}
               <p className="payment-waiting">
-                กำลังรอยืนยันการชำระเงิน...
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="8.5" />
+                  <path d="M12 7.5v5l3 1.75" />
+                </svg>
+                รอการชำระเงิน
               </p>
-              {payment.expiresAt && (
-                <p className="payment-expiry">
-                  กรุณาชำระเงินก่อน{" "}
-                  {new Date(payment.expiresAt).toLocaleTimeString("th-TH")} น.
+              {paymentSecondsRemaining !== null && (
+                <p className="payment-expiry" role="timer" aria-live="off">
+                  เหลือเวลา {formatPaymentTime(paymentSecondsRemaining)} นาที
                 </p>
               )}
               {paymentScreen.pollError && (
@@ -1010,7 +1046,7 @@ function HomePage() {
   }
 
   return (
-    <main className="home-page customer-kiosk-page">
+    <main className="home-page customer-kiosk-page customer-selection-page">
       <div className="customer-container">
         <header className="page-header customer-page-header">
           <h1>Smart Vending Machine</h1>
@@ -1068,9 +1104,7 @@ function HomePage() {
                       <h2 className="product-name">
                         {getProductDisplayName(slot.product.name)}
                       </h2>
-                      <p className="product-price">
-                        {slot.product.price} <span>บาท</span>
-                      </p>
+                      <p className="product-price">฿{slot.product.price}</p>
                     </>
                   ) : (
                     <div className="empty-product">

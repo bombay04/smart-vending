@@ -372,10 +372,10 @@ test("restock audio occurs after commit and audio failure preserves the result",
 });
 
 test("customer UI uses provider QR, backend polling, waiting state, and no fake success path", async () => {
-  const home = await readFile(
-    new URL("../src/pages/HomePage.tsx", import.meta.url),
-    "utf8",
-  );
+  const [home, css] = await Promise.all([
+    readFile(new URL("../src/pages/HomePage.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/App.css", import.meta.url), "utf8"),
+  ]);
   const api = await readFile(
     new URL("../src/api/transaction.ts", import.meta.url),
     "utf8",
@@ -386,7 +386,18 @@ test("customer UI uses provider QR, backend polling, waiting state, and no fake 
   );
 
   assert.match(home, /src=\{payment\.qrImageUrl\}/);
-  assert.match(home, /กำลังรอยืนยันการชำระเงิน/);
+  assert.match(home, /รอการชำระเงิน/);
+  assert.match(home, /getProductDisplayName\(payment\.productName\)/);
+  assert.match(home, /<p className="payment-amount">฿\{payment\.amount\}<\/p>/);
+  assert.match(home, /className="payment-qr-frame"/);
+  assert.match(css, /\.payment-qr-frame\s*{[\s\S]*?border-radius: 18px;[\s\S]*?box-shadow: 0 8px 28px/);
+  assert.match(css, /\.payment-page\s*{[\s\S]*?linear-gradient\(145deg, #f8fbff 0%, #e8eef8 100%\);/);
+  assert.match(css, /\.payment-card\s*{[\s\S]*?background: rgba\(255, 255, 255, 0\.98\);[\s\S]*?box-shadow:/);
+  assert.doesNotMatch(css, /\.payment-page--waiting\s*\{/);
+  assert.doesNotMatch(home, /THAI QR PAYMENT · PromptPay|payment-qr-card/);
+  assert.match(home, /เหลือเวลา \{formatPaymentTime\(paymentSecondsRemaining\)\} นาที/);
+  assert.doesNotMatch(home, /className="payment-progress"|role="progressbar"/);
+  assert.doesNotMatch(home, /Doritoss?|Doritos/i);
   assert.match(home, /fetchPaymentStatus\(\s*transactionId/);
   assert.match(home, /handleConfirmedPaymentOnce/);
   assert.match(home, /ชำระเงินสำเร็จ/);
@@ -423,8 +434,14 @@ test("QR cancellation is backend-authoritative, guarded, retryable, and race-saf
   assert.match(api, /\$\{transactionId\}\/cancel/);
   assert.match(api, /method: "POST"/);
   assert.match(flow, /payment\.customerCancelled === true/);
-  assert.match(css, /\.payment-cancel-button \{[\s\S]*?color: #ffffff;[\s\S]*?background: #2563eb;/);
-  assert.match(css, /\.payment-cancel-button:disabled \{[\s\S]*?background: #93c5fd;/);
+  assert.match(
+    css,
+    /\.payment-page--waiting \.payment-cancel-button \{[\s\S]*?border-radius: 999px;[\s\S]*?color: #ffffff;[\s\S]*?background: #2563eb;/,
+  );
+  assert.match(
+    css,
+    /\.payment-page--waiting \.payment-cancel-button:disabled \{[\s\S]*?background: #93c5fd;/,
+  );
 });
 
 test("payment failures and unlock failure use their distinct auto-return delays", async () => {

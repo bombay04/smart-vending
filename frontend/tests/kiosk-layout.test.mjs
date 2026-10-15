@@ -89,10 +89,17 @@ test("touch hardening preserves selection for editable controls", async () => {
 });
 
 test("short landscape layout covers each Pi-facing surface", async () => {
-  const appCss = await frontendSource("src/App.css");
+  const [appCss, homePage] = await Promise.all([
+    frontendSource("src/App.css"),
+    frontendSource("src/pages/HomePage.tsx"),
+  ]);
 
   assert.match(appCss, /@media \(min-width: 901px\) and \(max-height: 700px\)/);
   assert.match(appCss, /\.home-page:not\(\.remote-portal-page\)/);
+  assert.match(
+    homePage,
+    /className="home-page customer-kiosk-page customer-selection-page"/,
+  );
   for (const selector of [
     ".slot-grid",
     ".payment-card",
@@ -104,4 +111,14 @@ test("short landscape layout covers each Pi-facing surface", async () => {
   ]) {
     assert.ok(appCss.lastIndexOf(selector) > appCss.indexOf("max-height: 700px"));
   }
+});
+
+test("Pi product selection keeps its original layout with larger product media", async () => {
+  const appCss = await frontendSource("src/App.css");
+  const piLayout = appCss.slice(appCss.indexOf("max-height: 700px"));
+
+  assert.match(piLayout, /\.customer-selection-page \.product-media,[\s\S]*?width: 160px;[\s\S]*?height: 170px;/);
+  assert.doesNotMatch(piLayout, /\.customer-selection-page \.slot-card/);
+  assert.doesNotMatch(piLayout, /\.customer-selection-page \.slot-grid/);
+  assert.doesNotMatch(piLayout, /\.customer-selection-page \.status-badge/);
 });

@@ -204,6 +204,106 @@
   cursor: not-allowed;
 }
 
+.payment-page--waiting .payment-card--waiting {
+  display: flex;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: center;
+  overflow-y: auto;
+  color: #172033;
+}
+
+.payment-page--waiting .payment-card--waiting h1 {
+  color: #12213d;
+  font-size: 1.05rem;
+  line-height: 1.45;
+  letter-spacing: 0;
+}
+
+.payment-page--waiting .payment-card--waiting .payment-product {
+  margin: 14px 0 0;
+  color: #52627a;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.payment-page--waiting .payment-card--waiting .payment-amount {
+  margin: 8px 0 10px;
+  color: #1d4ed8;
+  font-size: 1.55rem;
+  line-height: 1.25;
+  font-weight: 800;
+}
+
+.payment-qr-frame {
+  width: min(68vw, 235px);
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.14);
+}
+
+.payment-page--waiting .payment-qr-frame .payment-qr {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  margin: 0 auto;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.payment-page--waiting .payment-card .payment-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin: 15px 0 0;
+  color: #172033;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  font-weight: 700;
+}
+
+.payment-waiting svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.payment-page--waiting .payment-card .payment-expiry {
+  margin: 12px 0 0;
+  color: #64748b;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.payment-page--waiting .payment-cancel-button {
+  width: min(74vw, 280px);
+  min-width: 0;
+  min-height: 37px;
+  margin-top: 12px;
+  padding: 0 20px;
+  border-color: #2563eb;
+  border-radius: 999px;
+  color: #ffffff;
+  background: #2563eb;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.payment-page--waiting .payment-cancel-button:disabled {
+  border-color: #93c5fd;
+  color: #eff6ff;
+  background: #93c5fd;
+}
+
 .page-header {
   margin-bottom: clamp(32px, 5vw, 52px);
   text-align: center;
@@ -424,6 +524,41 @@
   font-variant-numeric: tabular-nums;
 }
 
+.employee-auth-card--scanning .employee-auth-status,
+.employee-auth-card--success .employee-auth-status {
+  min-height: 0;
+}
+
+.employee-auth-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 22px;
+  color: #164e63;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.employee-auth-loading-spinner {
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border: 2px solid #bae6fd;
+  border-top-color: #0284c7;
+  border-radius: 50%;
+  animation: payment-spin 800ms linear infinite;
+}
+
+.employee-auth-loading--success {
+  color: #52627a;
+}
+
+.employee-auth-loading--success .employee-auth-loading-spinner {
+  border-color: #bbf7d0;
+  border-top-color: #16a34a;
+}
+
 .employee-auth-actions {
   display: grid;
   gap: 16px;
@@ -487,18 +622,40 @@
 .employee-registration-status p {
   margin: 12px auto 0;
   color: #52627a;
-  font-size: clamp(1.05rem, 2.5vw, 1.2rem);
+  font-size: clamp(1.1rem, 2.6vw, 1.3rem);
   line-height: 1.5;
 }
 
 .employee-registration-status .employee-registration-identity {
   color: #166534;
+  font-size: clamp(1.12rem, 2.7vw, 1.3rem);
   font-weight: 850;
 }
 
 .employee-registration-status .employee-registration-error {
   color: #991b1b;
   font-weight: 800;
+}
+
+.employee-registration-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 10px;
+  color: #4c1d95;
+  font-size: 1.05rem;
+  font-weight: 850;
+}
+
+.employee-registration-loading-spinner {
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border: 2px solid #ddd6fe;
+  border-top-color: #6d28d9;
+  border-radius: 50%;
+  animation: payment-spin 800ms linear infinite;
 }
 
 .face-flow-status > p:first-child {
@@ -542,6 +699,8 @@
   border: 0;
   color: #ffffff;
   background: #7c3aed;
+  font-size: 1.1rem;
+  font-weight: 900;
 }
 
 .employee-registration-secondary:disabled {
@@ -896,14 +1055,9 @@
   cursor: not-allowed;
 }
 
-.admin-slot-form .staff-inline-error,
-.admin-slot-restock-note {
+.admin-slot-form .staff-inline-error {
   color: #b91c1c;
   font-weight: 700;
-}
-
-.admin-slot-restock-note {
-  margin: 22px 0 0;
 }
 
 .staff-portal-header button,
@@ -969,7 +1123,8 @@
   width: 100%;
 }
 
-.staff-add-employee .staff-inline-error {
+.staff-add-employee .staff-inline-error,
+.admin-edit-name .staff-inline-error {
   margin: 6px 0 0;
   color: #b91c1c;
   font-size: 0.875rem;
@@ -1755,11 +1910,6 @@
   text-align: center;
 }
 
-.product-price span {
-  font-size: 1em;
-  letter-spacing: 0;
-}
-
 .empty-product {
   margin-bottom: 28px;
 }
@@ -1990,6 +2140,12 @@
 
   .buy-button {
     min-height: 58px;
+  }
+
+  .customer-selection-page .product-media,
+  .customer-selection-page .empty-product > span {
+    width: 160px;
+    height: 170px;
   }
 
   .state-message {
@@ -2246,7 +2402,7 @@
 
   .employee-registration-status p {
     margin-top: 6px;
-    font-size: 0.98rem;
+    font-size: 1.08rem;
     line-height: 1.3;
   }
 
@@ -2312,6 +2468,8 @@
 @media (prefers-reduced-motion: reduce) {
   .buy-button,
   .face-scan-indicator--scanning,
+  .employee-auth-loading-spinner,
+  .employee-registration-loading-spinner,
   .payment-spinner {
     transition: none;
     animation: none;

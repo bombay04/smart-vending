@@ -2,7 +2,7 @@ export function normalizeEmployeeNameForComparison(name) {
   return name.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
 }
 
-const EMPLOYEE_NAME_CHARACTERS = /^[\p{L}\p{M}\p{N} '-]+$/u;
+const EMPLOYEE_NAME_CHARACTERS = /^[\p{L}\p{M} '-]+$/u;
 
 export function isEmployeeNameCharacterValid(name) {
   const normalizedName = name.normalize("NFKC");

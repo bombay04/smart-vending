@@ -8,5 +8,5 @@ export async function cancelFaceRegistrationSessionAndCleanup({
 }
 
 export function canCancelFaceRegistration(state) {
-  return state !== "CAPTURING" && state !== "SYNCING";
+  return !["CAPTURING", "SYNCING", "SUCCESS"].includes(state);
 }

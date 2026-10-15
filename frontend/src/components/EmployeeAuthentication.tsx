@@ -29,7 +29,7 @@ type AuthenticationState =
 
 const STATE_CONTENT: Record<
   AuthenticationState,
-  { title?: string; instruction: string }
+  { title?: string; instruction?: string }
 > = {
   CHECKING: {
     title: "กำลังตรวจสอบเครื่องสแกน",
@@ -39,23 +39,14 @@ const STATE_CONTENT: Record<
     instruction: "กรุณามองตรงไปที่กล้อง",
   },
   SCANNING: {
-    title: "กำลังสแกนใบหน้า",
-    instruction:
-      "กรุณามองตรงไปที่กล้องและอยู่นิ่ง ขณะระบบกำลังสแกนใบหน้า",
+    instruction: "กรุณามองตรงไปที่กล้องและอยู่นิ่ง",
   },
-  SUCCESS: {
-    title: "ยืนยันตัวตนสำเร็จ",
-    instruction:
-      "ยืนยันตัวตนพนักงานเรียบร้อยแล้ว กำลังเข้าสู่โหมดเติมสินค้า...",
-  },
+  SUCCESS: {},
   NO_MATCH: {
-    title: "ยืนยันตัวตนไม่สำเร็จ",
-    instruction: "ไม่สามารถยืนยันตัวตนได้ กรุณาลองอีกครั้ง",
+    instruction: "กรุณาลองสแกนใบหน้าอีกครั้ง",
   },
   NO_FACE: {
-    title: "ไม่พบใบหน้า",
-    instruction:
-      "กรุณาจัดใบหน้าให้อยู่ในตำแหน่งที่กล้องมองเห็น แล้วลองอีกครั้ง",
+    instruction: "กรุณามองตรงไปที่กล้อง แล้วลองอีกครั้ง",
   },
   MULTIPLE_FACES: {
     title: "ตรวจพบหลายใบหน้า",
@@ -70,9 +61,7 @@ const STATE_CONTENT: Record<
     instruction: "กรุณาตรวจสอบบริการสแกนใบหน้าบนเครื่อง แล้วลองอีกครั้ง",
   },
   LOCKED: {
-    title: "ระบบยืนยันตัวตนถูกล็อกชั่วคราว",
-    instruction:
-      "มีการยืนยันตัวตนไม่สำเร็จหลายครั้ง ระบบสแกนใบหน้าจึงถูกปิดใช้งานชั่วคราว",
+    instruction: "ยืนยันตัวตนไม่สำเร็จหลายครั้ง",
   },
 };
 
@@ -311,11 +300,22 @@ function EmployeeAuthentication({
       : isFailure || isLocked
         ? "error"
         : "ready";
+  const pageTitle = isScanning
+    ? "กำลังยืนยันตัวตน"
+    : isSuccessful
+      ? "ยืนยันตัวตนสำเร็จ"
+      : authenticationState === "NO_FACE"
+        ? "ไม่พบใบหน้า"
+        : authenticationState === "NO_MATCH"
+          ? "ยืนยันตัวตนไม่สำเร็จ"
+          : isLocked
+            ? "ระบบถูกล็อกชั่วคราว"
+            : "ยืนยันตัวตนพนักงาน";
 
   return (
     <main className="home-page employee-auth-page">
       <section
-        className="employee-auth-card"
+        className={`employee-auth-card employee-auth-card--${authenticationState.toLowerCase()}`}
         aria-labelledby="employee-auth-title"
       >
         <div
@@ -324,62 +324,80 @@ function EmployeeAuthentication({
         >
           {isSuccessful ? <SuccessCheckIcon /> : <span>◎</span>}
         </div>
-        <h1 id="employee-auth-title">ยืนยันตัวตนพนักงาน</h1>
+        <h1 id="employee-auth-title">{pageTitle}</h1>
         <div
           className={`employee-auth-status face-flow-status face-flow-status--${statusTone}`}
           aria-live="polite"
           aria-busy={isScanning}
         >
           {content.title && <h2>{content.title}</h2>}
-          <p>{content.instruction}</p>
-          {remainingAttempts !== null && remainingAttempts > 0 && isFailure && (
-            <p className="employee-auth-attempts">
-              เหลืออีก {remainingAttempts} ครั้งก่อนระบบล็อกชั่วคราว
-            </p>
-          )}
-          {isLocked && lockoutSeconds !== null && (
-            <p className="employee-auth-countdown">
-              ลองอีกครั้งใน {formatCountdown(lockoutSeconds)}
-            </p>
-          )}
           {authenticatedEmployee && (
             <p className="employee-auth-identity">
               ยินดีต้อนรับ {authenticatedEmployee.name}
             </p>
+          )}
+          {content.instruction && <p>{content.instruction}</p>}
+          {remainingAttempts !== null &&
+            remainingAttempts > 0 &&
+            authenticationState === "NO_FACE" && (
+              <p className="employee-auth-attempts">
+                เหลือโอกาสอีก {remainingAttempts} ครั้ง
+              </p>
+            )}
+          {isLocked && lockoutSeconds !== null && (
+            <>
+              <p>ลองอีกครั้งใน</p>
+              <p className="employee-auth-countdown">
+                {formatCountdown(lockoutSeconds)}
+              </p>
+            </>
           )}
           {cancelError && (
             <p className="employee-auth-attempts">{cancelError}</p>
           )}
         </div>
 
-        <div className="employee-auth-actions">
-          <button
-            className="employee-auth-submit"
-            type="button"
-            disabled={
-              isChecking || isScanning || isSuccessful || isLocked || isCancelling
-            }
-            onClick={() => void handleScan()}
+        {(isScanning || isSuccessful) && (
+          <div
+            className={`employee-auth-loading employee-auth-loading--${isSuccessful ? "success" : "scanning"}`}
+            role="status"
+            aria-live="polite"
           >
-            {isChecking
-              ? "กำลังตรวจสอบ..."
-              : isScanning
-                ? "กำลังสแกน..."
+            <span className="employee-auth-loading-spinner" aria-hidden="true" />
+            <span>
+              {isSuccessful
+                ? "กำลังเข้าสู่โหมดเติมสินค้า..."
+                : "กำลังสแกนใบหน้า..."}
+            </span>
+          </div>
+        )}
+
+        {!isScanning && !isSuccessful && (
+          <div className="employee-auth-actions">
+            <button
+              className="employee-auth-submit"
+              type="button"
+              disabled={isChecking || isLocked || isCancelling}
+              onClick={() => void handleScan()}
+            >
+              {isChecking
+                ? "กำลังตรวจสอบ..."
                 : isLocked
-                  ? "ระบบถูกล็อกชั่วคราว"
+                  ? "ยังไม่สามารถสแกนได้"
                   : isFailure
                     ? "ลองอีกครั้ง"
                     : "สแกนใบหน้า"}
-          </button>
-          <button
-            className="employee-auth-cancel"
-            type="button"
-            disabled={isCancelling}
-            onClick={() => void handleCancel()}
-          >
-            {isCancelling ? "กำลังกลับสู่หน้าหลัก..." : "กลับสู่หน้าหลัก"}
-          </button>
-        </div>
+            </button>
+            <button
+              className="employee-auth-cancel"
+              type="button"
+              disabled={isCancelling}
+              onClick={() => void handleCancel()}
+            >
+              {isCancelling ? "กำลังกลับสู่หน้าหลัก..." : "กลับสู่หน้าหลัก"}
+            </button>
+          </div>
+        )}
       </section>
     </main>
   );

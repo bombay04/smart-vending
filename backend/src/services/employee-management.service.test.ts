@@ -48,8 +48,8 @@ test("employee-name comparison uses NFKC, collapsed whitespace, and case folding
   assert.equal(normalizeEmployeeNameForComparison("Ｊｉｍｍｙ"), "jimmy");
 });
 
-test("employee creation accepts Unicode letters, marks, numbers, spaces, hyphens, and apostrophes", async () => {
-  for (const name of ["Jimmy", "สมชาย ใจดี", "Task50Face1", "Test3", "Anne-Marie", "O'Neil"]) {
+test("employee creation accepts Unicode letters, marks, spaces, hyphens, and apostrophes", async () => {
+  for (const name of ["Jimmy", "สมชาย ใจดี", "Anne-Marie", "O'Neil"]) {
     assert.equal(isEmployeeNameCharacterValid(name), true);
     assert.equal(parseCreateEmployeeRequest({ name }), name);
     const created = await createEmployeeWithRetry(name, async (validatedName) => ({
@@ -61,7 +61,19 @@ test("employee creation accepts Unicode letters, marks, numbers, spaces, hyphens
 });
 
 test("employee creation rejects unsupported characters before calling create", async () => {
-  for (const name of ["*Jimmy", "Jimmy@", "#abc", "abc_", "Jimmy!", "😀Jimmy"]) {
+  for (const name of [
+    "Jimmy1",
+    "สมชาย2",
+    "Task50Face1",
+    "Test3",
+    "１２３",
+    "*Jimmy",
+    "Jimmy@",
+    "#abc",
+    "abc_",
+    "Jimmy!",
+    "😀Jimmy",
+  ]) {
     assert.equal(isEmployeeNameCharacterValid(name), false);
     assert.throws(
       () => parseCreateEmployeeRequest({ name }),
@@ -260,6 +272,9 @@ test("employee update trims names and changes only allowed fields", async () => 
     async findEmployee() {
       return employee;
     },
+    async findOtherCurrentEmployeeNames() {
+      return [];
+    },
     async countActiveFaceRegistrationSessions() {
       return 0;
     },
@@ -275,10 +290,51 @@ test("employee update trims names and changes only allowed fields", async () => 
   assert.equal((await updateEmployeeWithStore(2, { isActive: true }, store)).isActive, true);
 });
 
+test("employee update rejects a normalized duplicate name before writing", async () => {
+  let updateCalls = 0;
+  await assert.rejects(
+    updateEmployeeWithStore(
+      2,
+      { name: "  MALI  " },
+      {
+        async findEmployee() {
+          return newEmployee;
+        },
+        async findOtherCurrentEmployeeNames() {
+          return ["Mali"];
+        },
+        async countActiveFaceRegistrationSessions() {
+          return 0;
+        },
+        async updateEmployee() {
+          updateCalls += 1;
+          return newEmployee;
+        },
+      },
+    ),
+    (error: unknown) =>
+      error instanceof HttpError &&
+      error.statusCode === 409 &&
+      error.code === EMPLOYEE_NAME_CONFLICT_CODE,
+  );
+  assert.equal(updateCalls, 0);
+});
+
+test("employee update rejects unsupported name characters with a stable code", () => {
+  assert.throws(
+    () => parseUpdateEmployeeRequest({ name: "Mali@" }),
+    (error: unknown) =>
+      error instanceof HttpError &&
+      error.statusCode === 400 &&
+      error.code === EMPLOYEE_NAME_INVALID_CODE,
+  );
+});
+
 test("employee update rejects invalid and immutable fields", () => {
   for (const body of [
     {},
     { name: "   " },
+    { name: "Mali@" },
     { name: 42 },
     { isActive: "false" },
     { employeeCode: "EMP999" },
@@ -302,6 +358,9 @@ test("employee update returns 404 for an unknown employee", async () => {
         async findEmployee() {
           return null;
         },
+        async findOtherCurrentEmployeeNames() {
+          return [];
+        },
         async countActiveFaceRegistrationSessions() {
           return 0;
         },
@@ -323,6 +382,9 @@ test("active face-registration session blocks deactivation", async () => {
       {
         async findEmployee() {
           return newEmployee;
+        },
+        async findOtherCurrentEmployeeNames() {
+          return [];
         },
         async countActiveFaceRegistrationSessions() {
           return 1;
@@ -347,6 +409,9 @@ test("active biometric cleanup blocks reactivation", async () => {
       {
         async findEmployee() {
           return { ...newEmployee, isActive: false };
+        },
+        async findOtherCurrentEmployeeNames() {
+          return [];
         },
         async countActiveFaceRegistrationSessions() {
           return 0;
@@ -376,6 +441,9 @@ test("terminal offboarded employee rejects stale reactivation and remains unchan
       {
         async findEmployee() {
           return employee;
+        },
+        async findOtherCurrentEmployeeNames() {
+          return [];
         },
         async countActiveFaceRegistrationSessions() {
           return 0;

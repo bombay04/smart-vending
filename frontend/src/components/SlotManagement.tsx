@@ -113,8 +113,7 @@ function SlotManagement() {
     <section className="slot-management" aria-labelledby="slot-management-title">
       <div className="staff-section-heading">
         <div>
-          <h2 id="slot-management-title">จัดการช่องสินค้า</h2>
-          <p>การแก้ไขข้อมูลไม่ใช่การเติมสินค้า สินค้าจริงในตู้ต้องตรงกับข้อมูลที่ตั้งค่า</p>
+          <h2 id="slot-management-title">จัดการสินค้า</h2>
         </div>
       </div>
       {loading && <p className="staff-message">กำลังโหลดข้อมูลช่องสินค้า...</p>}
@@ -164,10 +163,9 @@ function SlotManagement() {
                     />
                   </label>
                   <label>
-                    URL รูปภาพ (ไม่บังคับ)
+                    URL รูปภาพ
                     <input
                       type="url"
-                      placeholder="https://..."
                       value={edit.imageUrl ?? ""}
                       onChange={(event) =>
                         setEdit({ ...edit, imageUrl: event.target.value })
@@ -257,9 +255,6 @@ function SlotManagement() {
           ))}
         </div>
       )}
-      <p className="admin-slot-restock-note">
-        หากช่องมีสถานะสินค้าหมด ให้ใช้ขั้นตอนเติมสินค้าที่หน้า Staff เท่านั้น
-      </p>
     </section>
   );
 }
