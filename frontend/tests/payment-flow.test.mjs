@@ -390,6 +390,7 @@ test("customer UI uses provider QR, backend polling, waiting state, and no fake 
   assert.match(home, /getProductDisplayName\(payment\.productName\)/);
   assert.match(home, /<p className="payment-amount">฿\{payment\.amount\}<\/p>/);
   assert.match(home, /className="payment-qr-frame"/);
+  assert.match(css, /\.payment-qr-frame\s*{[\s\S]*?border-radius: 18px;[\s\S]*?box-shadow: 0 8px 28px/);
   assert.match(css, /\.payment-page\s*{[\s\S]*?linear-gradient\(145deg, #f8fbff 0%, #e8eef8 100%\);/);
   assert.match(css, /\.payment-card\s*{[\s\S]*?background: rgba\(255, 255, 255, 0\.98\);[\s\S]*?box-shadow:/);
   assert.doesNotMatch(css, /\.payment-page--waiting\s*\{/);
@@ -435,11 +436,11 @@ test("QR cancellation is backend-authoritative, guarded, retryable, and race-saf
   assert.match(flow, /payment\.customerCancelled === true/);
   assert.match(
     css,
-    /\.payment-page--waiting \.payment-cancel-button \{[\s\S]*?border-radius: 999px;[\s\S]*?background: transparent;/,
+    /\.payment-page--waiting \.payment-cancel-button \{[\s\S]*?border-radius: 999px;[\s\S]*?color: #ffffff;[\s\S]*?background: #2563eb;/,
   );
   assert.match(
     css,
-    /\.payment-page--waiting \.payment-cancel-button:disabled \{[\s\S]*?background: transparent;/,
+    /\.payment-page--waiting \.payment-cancel-button:disabled \{[\s\S]*?background: #93c5fd;/,
   );
 });
 

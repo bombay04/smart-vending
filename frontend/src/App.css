@@ -240,8 +240,10 @@
   width: min(68vw, 235px);
   box-sizing: border-box;
   padding: 12px;
-  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 18px;
   background: #ffffff;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.14);
 }
 
 .payment-page--waiting .payment-qr-frame .payment-qr {
@@ -305,18 +307,18 @@
   min-height: 37px;
   margin-top: 12px;
   padding: 0 20px;
-  border-color: #cbd5e1;
+  border-color: #2563eb;
   border-radius: 999px;
-  color: #52627a;
-  background: transparent;
+  color: #ffffff;
+  background: #2563eb;
   font-size: 0.82rem;
   font-weight: 600;
 }
 
 .payment-page--waiting .payment-cancel-button:disabled {
-  border-color: #e2e8f0;
-  color: #94a3b8;
-  background: transparent;
+  border-color: #93c5fd;
+  color: #eff6ff;
+  background: #93c5fd;
 }
 
 .page-header {
