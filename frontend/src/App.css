@@ -204,6 +204,134 @@
   cursor: not-allowed;
 }
 
+.payment-page--waiting {
+  padding: 10px 4px;
+  background: #101010;
+}
+
+.payment-page--waiting .payment-card--waiting {
+  display: flex;
+  width: 100%;
+  min-height: calc(100dvh - 20px);
+  max-height: none;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: center;
+  padding: 18px 24px 16px;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 12px;
+  color: #e5e5e5;
+  background: #303030;
+  box-shadow: none;
+}
+
+.payment-page--waiting .payment-card--waiting h1 {
+  color: #e5e5e5;
+  font-size: 1.05rem;
+  line-height: 1.45;
+  letter-spacing: 0;
+}
+
+.payment-page--waiting .payment-card--waiting .payment-product {
+  margin: 14px 0 0;
+  color: #cfcfcf;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.payment-page--waiting .payment-card--waiting .payment-amount {
+  margin: 8px 0 10px;
+  color: #e8e8e8;
+  font-size: 1.55rem;
+  line-height: 1.25;
+  font-weight: 800;
+}
+
+.payment-qr-frame {
+  width: min(68vw, 235px);
+  box-sizing: border-box;
+  padding: 12px;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.payment-page--waiting .payment-qr-frame .payment-qr {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  margin: 0 auto;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.payment-page--waiting .payment-card .payment-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin: 15px 0 0;
+  color: #d7d7d7;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  font-weight: 700;
+}
+
+.payment-waiting svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.payment-page--waiting .payment-card .payment-expiry {
+  margin: 12px 0 0;
+  color: #d0d0d0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.payment-progress {
+  width: min(74vw, 280px);
+  height: 5px;
+  margin-top: 13px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #202020;
+}
+
+.payment-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #3478de;
+  transition: width 1s linear;
+}
+
+.payment-page--waiting .payment-cancel-button {
+  width: min(74vw, 280px);
+  min-width: 0;
+  min-height: 37px;
+  margin-top: 12px;
+  padding: 0 20px;
+  border-color: #424242;
+  border-radius: 999px;
+  color: #bdbdbd;
+  background: transparent;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.payment-page--waiting .payment-cancel-button:disabled {
+  border-color: #3a3a3a;
+  color: #777777;
+  background: transparent;
+}
+
 .page-header {
   margin-bottom: clamp(32px, 5vw, 52px);
   text-align: center;
@@ -896,14 +1024,9 @@
   cursor: not-allowed;
 }
 
-.admin-slot-form .staff-inline-error,
-.admin-slot-restock-note {
+.admin-slot-form .staff-inline-error {
   color: #b91c1c;
   font-weight: 700;
-}
-
-.admin-slot-restock-note {
-  margin: 22px 0 0;
 }
 
 .staff-portal-header button,
@@ -969,7 +1092,8 @@
   width: 100%;
 }
 
-.staff-add-employee .staff-inline-error {
+.staff-add-employee .staff-inline-error,
+.admin-edit-name .staff-inline-error {
   margin: 6px 0 0;
   color: #b91c1c;
   font-size: 0.875rem;
@@ -1990,6 +2114,92 @@
 
   .buy-button {
     min-height: 58px;
+  }
+
+  .home-page.customer-selection-page {
+    padding: 18px 32px;
+    background: #0b0b0b;
+  }
+
+  .home-page.customer-selection-page .customer-container {
+    width: min(100%, 960px);
+    height: auto;
+  }
+
+  .customer-selection-page .page-header.customer-page-header {
+    margin-bottom: 16px;
+  }
+
+  .customer-selection-page .page-header.customer-page-header h1 {
+    color: #f8fafc;
+    font-size: 30px;
+    line-height: 1.2;
+  }
+
+  .customer-selection-page .slot-grid {
+    grid-template-columns: repeat(3, minmax(310px, 320px));
+    justify-content: center;
+    flex: none;
+    gap: 10px;
+  }
+
+  .customer-selection-page .slot-card,
+  .customer-selection-page .slot-card--sold-out {
+    width: 100%;
+    height: 420px;
+    min-height: 0;
+    padding: 10px;
+    border: 0;
+    border-radius: 8px;
+    color: #f8fafc;
+    background: #2f2f2f;
+    box-shadow: none;
+  }
+
+  .customer-selection-page .slot-card__header {
+    min-height: 24px;
+    justify-content: center;
+  }
+
+  .customer-selection-page .slot-number {
+    color: #f8fafc;
+    font-size: 0.9rem;
+  }
+
+  .customer-selection-page .status-badge {
+    display: none;
+  }
+
+  .customer-selection-page .product-media,
+  .customer-selection-page .empty-product > span {
+    width: 160px;
+    height: 170px;
+    margin: 10px auto;
+    border-radius: 6px;
+    color: #dbe3ec;
+    background: #202020;
+  }
+
+  .customer-selection-page .product-name {
+    color: #ffffff;
+    font-size: 24px;
+  }
+
+  .customer-selection-page .product-price {
+    margin: 6px 0 12px;
+    color: #ffffff;
+    font-size: 32px;
+  }
+
+  .customer-selection-page .buy-button {
+    min-height: 60px;
+    border-radius: 6px;
+    box-shadow: none;
+  }
+
+  .customer-selection-page .buy-button:disabled {
+    color: #a3a3a3;
+    background: #444444;
   }
 
   .state-message {

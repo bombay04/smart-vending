@@ -43,6 +43,19 @@ const EMPLOYEE_NAME_CONFLICT_CODE = "EMPLOYEE_NAME_CONFLICT";
 const EMPLOYEE_OFFBOARDED_CODE = "EMPLOYEE_OFFBOARDED";
 const INVALID_EMPLOYEE_NAME_MESSAGE = "ชื่อพนักงานมีอักขระที่ไม่รองรับ";
 const DUPLICATE_EMPLOYEE_NAME_MESSAGE = "มีชื่อพนักงานนี้อยู่ในระบบแล้ว";
+const ACTIVE_ADMIN_SECTION_STORAGE_KEY = "smart-vending:admin-section";
+
+type AdminSection = "employees" | "slots";
+
+function readInitialAdminSection(): AdminSection {
+  try {
+    return window.sessionStorage.getItem(ACTIVE_ADMIN_SECTION_STORAGE_KEY) === "slots"
+      ? "slots"
+      : "employees";
+  } catch {
+    return "employees";
+  }
+}
 
 type TimedModal =
   | { type: "EMPLOYEE_CREATED" }
@@ -56,9 +69,7 @@ type TimedModal =
     };
 
 function AdminPortal() {
-  const [activeSection, setActiveSection] = useState<"employees" | "slots">(
-    "employees",
-  );
+  const [activeSection, setActiveSection] = useState<AdminSection>(readInitialAdminSection);
   const [employees, setEmployees] = useState<RegistrationEmployee[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -72,6 +83,8 @@ function AdminPortal() {
     null,
   );
   const [editName, setEditName] = useState("");
+  const [invalidCharacterEditName, setInvalidCharacterEditName] = useState<string | null>(null);
+  const [conflictingEditName, setConflictingEditName] = useState<string | null>(null);
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<
     number | null
   >(null);
@@ -260,6 +273,14 @@ function AdminPortal() {
     return () => window.clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(ACTIVE_ADMIN_SECTION_STORAGE_KEY, activeSection);
+    } catch {
+      // Keep navigation working when browser storage is unavailable.
+    }
+  }, [activeSection]);
+
   const normalizedInputName = normalizeEmployeeNameForComparison(name);
   const hasInvalidCharacters =
     (normalizedInputName.length > 0 && !isEmployeeNameCharacterValid(name)) ||
@@ -270,6 +291,22 @@ function AdminPortal() {
   const employeeNameError = hasInvalidCharacters
     ? INVALID_EMPLOYEE_NAME_MESSAGE
     : hasDuplicateName
+      ? DUPLICATE_EMPLOYEE_NAME_MESSAGE
+      : null;
+
+  const normalizedEditName = normalizeEmployeeNameForComparison(editName);
+  const editHasInvalidCharacters =
+    (normalizedEditName.length > 0 && !isEmployeeNameCharacterValid(editName)) ||
+    (normalizedEditName.length > 0 && invalidCharacterEditName === normalizedEditName);
+  const editHasDuplicateName =
+    isDuplicateEmployeeName(
+      editName,
+      employees.filter((employee) => employee.id !== editingEmployeeId),
+    ) ||
+    (normalizedEditName.length > 0 && conflictingEditName === normalizedEditName);
+  const editEmployeeNameError = editHasInvalidCharacters
+    ? INVALID_EMPLOYEE_NAME_MESSAGE
+    : editHasDuplicateName
       ? DUPLICATE_EMPLOYEE_NAME_MESSAGE
       : null;
 
@@ -374,16 +411,36 @@ function AdminPortal() {
     setRowError(employee.id, null);
     setEditingEmployeeId(employee.id);
     setEditName(employee.name);
+    setInvalidCharacterEditName(null);
+    setConflictingEditName(null);
   }
 
   function cancelEdit() {
     setEditingEmployeeId(null);
     setEditName("");
+    setInvalidCharacterEditName(null);
+    setConflictingEditName(null);
+  }
+
+  function handleEditNameChange(employeeId: number, nextName: string) {
+    setEditName(nextName);
+    setRowError(employeeId, null);
+    const normalizedNextName = normalizeEmployeeNameForComparison(nextName);
+    if (normalizedNextName !== invalidCharacterEditName) {
+      setInvalidCharacterEditName(null);
+    }
+    if (normalizedNextName !== conflictingEditName) {
+      setConflictingEditName(null);
+    }
   }
 
   async function handleSaveName(employee: RegistrationEmployee) {
     const normalizedName = editName.trim();
-    if (!normalizedName || busyEmployeeIds.has(employee.id)) return;
+    if (
+      !normalizedName ||
+      busyEmployeeIds.has(employee.id) ||
+      editEmployeeNameError !== null
+    ) return;
     setEmployeeBusy(employee.id, true);
     setRowError(employee.id, null);
     try {
@@ -399,6 +456,18 @@ function AdminPortal() {
     } catch (error) {
       if (isAuthoritativeStaleEmployeeError(error)) {
         await reconcileStaleEmployee(employee.id);
+      } else if (
+        error instanceof EmployeeManagementError &&
+        error.status === 400 &&
+        error.code === EMPLOYEE_NAME_INVALID_CODE
+      ) {
+        setInvalidCharacterEditName(normalizeEmployeeNameForComparison(editName));
+      } else if (
+        error instanceof EmployeeManagementError &&
+        error.status === 409 &&
+        error.code === EMPLOYEE_NAME_CONFLICT_CODE
+      ) {
+        setConflictingEditName(normalizeEmployeeNameForComparison(editName));
       } else {
         setRowError(
           employee.id,
@@ -554,7 +623,11 @@ function AdminPortal() {
       <div className="staff-portal-container">
         <header className="staff-portal-header">
           <div>
-            <h1>ระบบจัดการพนักงาน</h1>
+            {activeSection === "employees" ? (
+              <h1>ระบบจัดการพนักงาน</h1>
+            ) : (
+              <h1>ระบบจัดการสินค้า</h1>
+            )}
           </div>
         </header>
 
@@ -573,7 +646,7 @@ function AdminPortal() {
             aria-current={activeSection === "slots" ? "page" : undefined}
             onClick={() => setActiveSection("slots")}
           >
-            จัดการช่องสินค้า
+            จัดการสินค้า
           </button>
         </nav>
 
@@ -674,22 +747,43 @@ function AdminPortal() {
                   key={employee.id}
                 >
                   <strong>{employee.employeeCode}</strong>
-                  <span>
+                  <div>
                     {editingEmployeeId === employee.id ? (
-                      <label className="admin-edit-name">
-                        <span className="sr-only">กรอกชื่อพนักงาน</span>
+                      <div className="admin-edit-name">
+                        <label
+                          className="sr-only"
+                          htmlFor={`admin-employee-edit-name-${employee.id}`}
+                        >กรอกชื่อพนักงาน</label>
                         <input
+                          id={`admin-employee-edit-name-${employee.id}`}
                           type="text"
                           maxLength={120}
                           value={editName}
                           disabled={busyEmployeeIds.has(employee.id)}
-                          onChange={(event) => setEditName(event.target.value)}
+                          aria-invalid={editEmployeeNameError !== null}
+                          aria-describedby={
+                            editEmployeeNameError !== null
+                              ? `admin-employee-edit-name-error-${employee.id}`
+                              : undefined
+                          }
+                          onChange={(event) =>
+                            handleEditNameChange(employee.id, event.target.value)
+                          }
                         />
-                      </label>
+                        {editEmployeeNameError !== null && (
+                          <p
+                            id={`admin-employee-edit-name-error-${employee.id}`}
+                            className="staff-inline-error"
+                            role="alert"
+                          >
+                            {editEmployeeNameError}
+                          </p>
+                        )}
+                      </div>
                     ) : (
                       employee.name
                     )}
-                  </span>
+                  </div>
                   <span
                     className={
                       employee.isActive ? "staff-active" : "staff-inactive"
@@ -714,7 +808,9 @@ function AdminPortal() {
                         <button
                           type="button"
                           disabled={
-                            busyEmployeeIds.has(employee.id) || !editName.trim()
+                            busyEmployeeIds.has(employee.id) ||
+                            !editName.trim() ||
+                            editEmployeeNameError !== null
                           }
                           onClick={() => void handleSaveName(employee)}
                         >

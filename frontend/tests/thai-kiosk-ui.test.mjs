@@ -87,9 +87,8 @@ test("payment and customer completion states use Thai copy and the shared succes
 
   for (const copy of [
     "สแกน QR เพื่อชำระเงิน",
-    "กำลังรอยืนยันการชำระเงิน...",
-    "กรุณาชำระเงินก่อน",
-    "บาท",
+    "รอการชำระเงิน",
+    "เหลือเวลา",
     "ชำระเงินสำเร็จ",
     "กำลังปลดล็อกช่อง {payment.slotNumber}",
     "ขอบคุณค่ะ",

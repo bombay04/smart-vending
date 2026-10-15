@@ -386,7 +386,14 @@ test("customer UI uses provider QR, backend polling, waiting state, and no fake 
   );
 
   assert.match(home, /src=\{payment\.qrImageUrl\}/);
-  assert.match(home, /กำลังรอยืนยันการชำระเงิน/);
+  assert.match(home, /รอการชำระเงิน/);
+  assert.match(home, /getProductDisplayName\(payment\.productName\)/);
+  assert.match(home, /<p className="payment-amount">฿\{payment\.amount\}<\/p>/);
+  assert.match(home, /className="payment-qr-frame"/);
+  assert.doesNotMatch(home, /THAI QR PAYMENT · PromptPay|payment-qr-card/);
+  assert.match(home, /เหลือเวลา \{formatPaymentTime\(paymentSecondsRemaining\)\} นาที/);
+  assert.match(home, /className="payment-progress"/);
+  assert.doesNotMatch(home, /Doritoss?|Doritos/i);
   assert.match(home, /fetchPaymentStatus\(\s*transactionId/);
   assert.match(home, /handleConfirmedPaymentOnce/);
   assert.match(home, /ชำระเงินสำเร็จ/);
@@ -423,8 +430,14 @@ test("QR cancellation is backend-authoritative, guarded, retryable, and race-saf
   assert.match(api, /\$\{transactionId\}\/cancel/);
   assert.match(api, /method: "POST"/);
   assert.match(flow, /payment\.customerCancelled === true/);
-  assert.match(css, /\.payment-cancel-button \{[\s\S]*?color: #ffffff;[\s\S]*?background: #2563eb;/);
-  assert.match(css, /\.payment-cancel-button:disabled \{[\s\S]*?background: #93c5fd;/);
+  assert.match(
+    css,
+    /\.payment-page--waiting \.payment-cancel-button \{[\s\S]*?border-radius: 999px;[\s\S]*?background: transparent;/,
+  );
+  assert.match(
+    css,
+    /\.payment-page--waiting \.payment-cancel-button:disabled \{[\s\S]*?background: transparent;/,
+  );
 });
 
 test("payment failures and unlock failure use their distinct auto-return delays", async () => {

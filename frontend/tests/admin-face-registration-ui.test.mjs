@@ -393,6 +393,33 @@ test("Add Employee validates supported Unicode name characters while typing", as
   );
 });
 
+test("Edit Employee renders the same inline validation for invalid and duplicate names", async () => {
+  const admin = await source("src/components/AdminPortal.tsx");
+  const saveHandler = admin.match(
+    /async function handleSaveName[\s\S]*?\r?\n  }\r?\n\r?\n  async function handleActiveChange/,
+  )?.[0];
+
+  assert.ok(saveHandler);
+  assert.match(admin, /const editEmployeeNameError = editHasInvalidCharacters/);
+  assert.match(
+    admin,
+    /employees\.filter\(\(employee\) => employee\.id !== editingEmployeeId\)/,
+  );
+  assert.match(admin, /aria-invalid=\{editEmployeeNameError !== null\}/);
+  assert.match(
+    admin,
+    /handleEditNameChange\(\s*employee\.id,\s*event\.target\.value,?\s*\)/,
+  );
+  assert.match(saveHandler, /error\.code === EMPLOYEE_NAME_INVALID_CODE/);
+  assert.match(saveHandler, /setInvalidCharacterEditName/);
+  assert.match(saveHandler, /error\.code === EMPLOYEE_NAME_CONFLICT_CODE/);
+  assert.match(saveHandler, /setConflictingEditName/);
+  assert.match(
+    admin,
+    /!editName\.trim\(\) \|\|[\s\S]*editEmployeeNameError !== null/,
+  );
+});
+
 test("backend duplicate conflict maps to inline validation without clearing input", async () => {
   const [admin, employeeApi] = await Promise.all([
     source("src/components/AdminPortal.tsx"),

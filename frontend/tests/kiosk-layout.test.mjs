@@ -89,10 +89,17 @@ test("touch hardening preserves selection for editable controls", async () => {
 });
 
 test("short landscape layout covers each Pi-facing surface", async () => {
-  const appCss = await frontendSource("src/App.css");
+  const [appCss, homePage] = await Promise.all([
+    frontendSource("src/App.css"),
+    frontendSource("src/pages/HomePage.tsx"),
+  ]);
 
   assert.match(appCss, /@media \(min-width: 901px\) and \(max-height: 700px\)/);
   assert.match(appCss, /\.home-page:not\(\.remote-portal-page\)/);
+  assert.match(
+    homePage,
+    /className="home-page customer-kiosk-page customer-selection-page"/,
+  );
   for (const selector of [
     ".slot-grid",
     ".payment-card",
@@ -104,4 +111,18 @@ test("short landscape layout covers each Pi-facing surface", async () => {
   ]) {
     assert.ok(appCss.lastIndexOf(selector) > appCss.indexOf("max-height: 700px"));
   }
+});
+
+test("Pi product selection follows the 1024x600 reference dimensions", async () => {
+  const appCss = await frontendSource("src/App.css");
+  const piLayout = appCss.slice(appCss.indexOf("max-height: 700px"));
+
+  assert.match(piLayout, /\.home-page\.customer-selection-page\s*{[\s\S]*?padding: 18px 32px;[\s\S]*?background: #0b0b0b;/);
+  assert.match(piLayout, /\.customer-selection-page \.page-header\.customer-page-header h1\s*{[\s\S]*?font-size: 30px;/);
+  assert.match(piLayout, /\.customer-selection-page \.slot-grid\s*{[\s\S]*?grid-template-columns: repeat\(3, minmax\(310px, 320px\)\);/);
+  assert.match(piLayout, /\.customer-selection-page \.product-media,[\s\S]*?width: 160px;[\s\S]*?height: 170px;/);
+  assert.match(piLayout, /\.customer-selection-page \.product-name\s*{[\s\S]*?font-size: 24px;/);
+  assert.match(piLayout, /\.customer-selection-page \.product-price\s*{[\s\S]*?font-size: 32px;/);
+  assert.match(piLayout, /\.customer-selection-page \.buy-button\s*{[\s\S]*?min-height: 60px;/);
+  assert.match(piLayout, /\.customer-selection-page \.status-badge\s*{[\s\S]*?display: none;/);
 });

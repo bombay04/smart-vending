@@ -7,12 +7,30 @@ const source = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8"
 test("admin keeps employee management and adds slot navigation", async () => {
   const admin = await source("src/components/AdminPortal.tsx");
   assert.match(admin, /จัดการพนักงาน/);
-  assert.match(admin, /จัดการช่องสินค้า/);
+  assert.match(admin, /<h1>ระบบจัดการสินค้า<\/h1>/);
+  assert.match(admin, />\s*จัดการสินค้า\s*<\/button>/);
+  assert.doesNotMatch(admin, />\s*จัดการช่องสินค้า\s*<\/button>/);
   assert.match(admin, /activeSection === "employees"/);
   assert.match(admin, /<SlotManagement \/>/);
   assert.match(admin, /fetchEmployeesForFaceRegistration/);
   assert.match(admin, /startFaceRegistrationSession/);
   assert.match(admin, /offboardEmployee/);
+});
+
+test("admin restores the selected product section after a refresh", async () => {
+  const admin = await source("src/components/AdminPortal.tsx");
+
+  assert.match(admin, /ACTIVE_ADMIN_SECTION_STORAGE_KEY/);
+  assert.match(admin, /window\.sessionStorage\.getItem\(ACTIVE_ADMIN_SECTION_STORAGE_KEY\)/);
+  assert.match(
+    admin,
+    /useState<AdminSection>\(readInitialAdminSection\)/,
+  );
+  assert.match(
+    admin,
+    /window\.sessionStorage\.setItem\(ACTIVE_ADMIN_SECTION_STORAGE_KEY, activeSection\)/,
+  );
+  assert.match(admin, /}, \[activeSection\]\);/);
 });
 
 test("slot management renders backend slots and supports validated save feedback", async () => {
@@ -26,7 +44,11 @@ test("slot management renders backend slots and supports validated save feedback
   assert.match(api, /slot\.slotNumber !== index \+ 1/);
   assert.match(management, /ชื่อสินค้า/);
   assert.match(management, /ราคาขาย \(บาท\)/);
-  assert.match(management, /URL รูปภาพ \(ไม่บังคับ\)/);
+  assert.match(management, /URL รูปภาพ/);
+  assert.doesNotMatch(management, /URL รูปภาพ \(ไม่บังคับ\)/);
+  assert.doesNotMatch(management, /placeholder="https:\/\/\.\.\."/);
+  assert.doesNotMatch(management, /admin-slot-restock-note/);
+  assert.doesNotMatch(management, /การแก้ไขข้อมูลไม่ใช่การเติมสินค้า/);
   assert.match(management, /เปิดจำหน่ายสินค้า/);
   assert.match(management, /URL รูปภาพต้องเป็น HTTPS/);
   assert.match(management, /SLOT_PAYMENT_ACTIVE/);
