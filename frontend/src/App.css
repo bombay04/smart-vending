@@ -2116,95 +2116,10 @@
     min-height: 58px;
   }
 
-  .home-page.customer-selection-page {
-    padding: 18px 32px;
-    background: #ffffff;
-  }
-
-  .home-page.customer-selection-page .customer-container {
-    width: min(100%, 960px);
-    height: auto;
-  }
-
-  .customer-selection-page .page-header.customer-page-header {
-    margin-bottom: 16px;
-  }
-
-  .customer-selection-page .page-header.customer-page-header h1 {
-    color: #12213d;
-    font-size: 30px;
-    line-height: 1.2;
-  }
-
-  .customer-selection-page .slot-grid {
-    grid-template-columns: repeat(3, minmax(310px, 320px));
-    justify-content: center;
-    flex: none;
-    gap: 10px;
-  }
-
-  .customer-selection-page .slot-card,
-  .customer-selection-page .slot-card--sold-out {
-    width: 100%;
-    height: 420px;
-    min-height: 0;
-    padding: 10px;
-    border: 1px solid rgba(203, 213, 225, 0.85);
-    border-radius: 8px;
-    color: #172033;
-    background: #ffffff;
-    box-shadow: 0 18px 45px rgba(30, 55, 90, 0.1);
-  }
-
-  .customer-selection-page .slot-card__header {
-    min-height: 24px;
-    justify-content: center;
-  }
-
-  .customer-selection-page .slot-number {
-    color: #334155;
-    font-size: 0.9rem;
-  }
-
-  .customer-selection-page .status-badge {
-    display: none;
-  }
-
   .customer-selection-page .product-media,
   .customer-selection-page .empty-product > span {
     width: 160px;
     height: 170px;
-    margin: 10px auto;
-    border-radius: 6px;
-    color: #1d4ed8;
-    background: #e8f1ff;
-  }
-
-  .customer-selection-page .empty-product > span {
-    color: #94a3b8;
-    background: #f1f5f9;
-  }
-
-  .customer-selection-page .product-name {
-    color: #172033;
-    font-size: 24px;
-  }
-
-  .customer-selection-page .product-price {
-    margin: 6px 0 12px;
-    color: #1d4ed8;
-    font-size: 32px;
-  }
-
-  .customer-selection-page .buy-button {
-    min-height: 60px;
-    border-radius: 6px;
-    box-shadow: none;
-  }
-
-  .customer-selection-page .buy-button:disabled {
-    color: #64748b;
-    background: #e2e8f0;
   }
 
   .state-message {

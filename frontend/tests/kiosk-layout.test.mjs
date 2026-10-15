@@ -113,17 +113,12 @@ test("short landscape layout covers each Pi-facing surface", async () => {
   }
 });
 
-test("Pi product selection follows the 1024x600 reference dimensions", async () => {
+test("Pi product selection keeps its original layout with larger product media", async () => {
   const appCss = await frontendSource("src/App.css");
   const piLayout = appCss.slice(appCss.indexOf("max-height: 700px"));
 
-  assert.match(piLayout, /\.home-page\.customer-selection-page\s*{[\s\S]*?padding: 18px 32px;[\s\S]*?background: #ffffff;/);
-  assert.match(piLayout, /\.customer-selection-page \.page-header\.customer-page-header h1\s*{[\s\S]*?font-size: 30px;/);
-  assert.match(piLayout, /\.customer-selection-page \.slot-grid\s*{[\s\S]*?grid-template-columns: repeat\(3, minmax\(310px, 320px\)\);/);
   assert.match(piLayout, /\.customer-selection-page \.product-media,[\s\S]*?width: 160px;[\s\S]*?height: 170px;/);
-  assert.match(piLayout, /\.customer-selection-page \.product-name\s*{[\s\S]*?font-size: 24px;/);
-  assert.match(piLayout, /\.customer-selection-page \.product-price\s*{[\s\S]*?font-size: 32px;/);
-  assert.match(piLayout, /\.customer-selection-page \.buy-button\s*{[\s\S]*?min-height: 60px;/);
-  assert.match(piLayout, /\.customer-selection-page \.status-badge\s*{[\s\S]*?display: none;/);
-  assert.match(piLayout, /\.customer-selection-page \.slot-card,[\s\S]*?background: #ffffff;/);
+  assert.doesNotMatch(piLayout, /\.customer-selection-page \.slot-card/);
+  assert.doesNotMatch(piLayout, /\.customer-selection-page \.slot-grid/);
+  assert.doesNotMatch(piLayout, /\.customer-selection-page \.status-badge/);
 });
