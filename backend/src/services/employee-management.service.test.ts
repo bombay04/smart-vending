@@ -48,8 +48,8 @@ test("employee-name comparison uses NFKC, collapsed whitespace, and case folding
   assert.equal(normalizeEmployeeNameForComparison("Ｊｉｍｍｙ"), "jimmy");
 });
 
-test("employee creation accepts Unicode letters, marks, numbers, spaces, hyphens, and apostrophes", async () => {
-  for (const name of ["Jimmy", "สมชาย ใจดี", "Task50Face1", "Test3", "Anne-Marie", "O'Neil"]) {
+test("employee creation accepts Unicode letters, marks, spaces, hyphens, and apostrophes", async () => {
+  for (const name of ["Jimmy", "สมชาย ใจดี", "Anne-Marie", "O'Neil"]) {
     assert.equal(isEmployeeNameCharacterValid(name), true);
     assert.equal(parseCreateEmployeeRequest({ name }), name);
     const created = await createEmployeeWithRetry(name, async (validatedName) => ({
@@ -61,7 +61,19 @@ test("employee creation accepts Unicode letters, marks, numbers, spaces, hyphens
 });
 
 test("employee creation rejects unsupported characters before calling create", async () => {
-  for (const name of ["*Jimmy", "Jimmy@", "#abc", "abc_", "Jimmy!", "😀Jimmy"]) {
+  for (const name of [
+    "Jimmy1",
+    "สมชาย2",
+    "Task50Face1",
+    "Test3",
+    "１２３",
+    "*Jimmy",
+    "Jimmy@",
+    "#abc",
+    "abc_",
+    "Jimmy!",
+    "😀Jimmy",
+  ]) {
     assert.equal(isEmployeeNameCharacterValid(name), false);
     assert.throws(
       () => parseCreateEmployeeRequest({ name }),

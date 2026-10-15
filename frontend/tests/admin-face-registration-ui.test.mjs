@@ -376,14 +376,24 @@ test("Add Employee validates supported Unicode name characters while typing", as
   for (const name of [
     "Jimmy",
     "สมชาย ใจดี",
-    "Task50Face1",
-    "Test3",
     "Anne-Marie",
     "O'Neil",
   ]) {
     assert.equal(isEmployeeNameCharacterValid(name), true);
   }
-  for (const name of ["*Jimmy", "Jimmy@", "#abc", "abc_", "Jimmy!", "😀Jimmy"]) {
+  for (const name of [
+    "Jimmy1",
+    "สมชาย2",
+    "Task50Face1",
+    "Test3",
+    "１２３",
+    "*Jimmy",
+    "Jimmy@",
+    "#abc",
+    "abc_",
+    "Jimmy!",
+    "😀Jimmy",
+  ]) {
     assert.equal(isEmployeeNameCharacterValid(name), false);
   }
 

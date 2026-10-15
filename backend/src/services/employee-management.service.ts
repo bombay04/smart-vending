@@ -10,7 +10,7 @@ export const EMPLOYEE_NAME_INVALID_CODE = "EMPLOYEE_NAME_INVALID";
 export const EMPLOYEE_NAME_CONFLICT_CODE = "EMPLOYEE_NAME_CONFLICT";
 const EMPLOYEE_NAME_INVALID_MESSAGE = "Employee name contains unsupported characters.";
 const EMPLOYEE_NAME_CONFLICT_MESSAGE = "An employee with this name already exists.";
-const EMPLOYEE_NAME_CHARACTERS = /^[\p{L}\p{M}\p{N} '-]+$/u;
+const EMPLOYEE_NAME_CHARACTERS = /^[\p{L}\p{M} '-]+$/u;
 const UNSAFE_DELETE_MESSAGE =
   "This employee has enrollment or usage history and cannot be deleted. Deactivate the employee instead.";
 
