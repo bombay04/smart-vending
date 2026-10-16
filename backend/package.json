@@ -4,12 +4,18 @@
   "private": true,
   "description": "Backend service for the Smart Vending Machine project",
   "main": "dist/server.js",
+  "engines": {
+    "node": "^20.19.0 || ^22.12.0 || >=24.0.0"
+  },
   "scripts": {
+    "build": "prisma generate && tsc",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "migrate:deploy": "prisma migrate deploy",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "start": "node dist/server.js",
     "test": "tsx --test src/**/*.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:studio": "prisma studio",
