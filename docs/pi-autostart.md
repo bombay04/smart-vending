@@ -4,6 +4,7 @@ Task 53 keeps the three local startup responsibilities separate:
 
 - `smart-vending-frontend.service` runs Vite on port 5173.
 - `smart-vending-pi-unlock.service` runs the local hardware, face, and audio API on port 5000.
+- `smart-vending-pi-cloud-relay.service` runs the allowlisted cloud API relay on loopback port 3000 once installed for Task 60. See [pi-cloud-relay.md](pi-cloud-relay.md); its credentials remain in a separate root-owned environment file.
 - The repository supplies an XDG desktop autostart entry for Chromium, but the installed graphical session may invoke the same launcher through labwc or another autostart mechanism. Confirm the installed command on the Pi. The launcher waits for stable frontend HTTP responses before opening Chromium.
 
 The two system services do not depend on one another. A camera, audio, or ESP32 failure can restart the Pi service without stopping the frontend. Both services use `Restart=on-failure` with a five-second delay. Their standard output and standard error go to journald.
