@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   AccessJwtVerificationError,
   createCloudflareAccessJwtVerifier,
+  type AccessJwtFailureCategory,
   type JwksProvider,
 } from "./cloudflare-access-jwt";
 
@@ -60,6 +61,18 @@ function verifier() {
   });
 }
 
+async function assertFailureCategory(
+  promise: Promise<unknown>,
+  category: AccessJwtFailureCategory,
+): Promise<void> {
+  await assert.rejects(promise, (error: unknown) => {
+    assert.ok(error instanceof AccessJwtVerificationError);
+    assert.equal(error.category, category);
+    assert.equal(error.message, "Cloudflare Access JWT verification failed.");
+    return true;
+  });
+}
+
 test("accepts a correctly signed Pi service-token application JWT", async () => {
   const claims = await verifier()(token());
   assert.equal(claims.common_name, CLIENT_ID);
@@ -69,37 +82,92 @@ test("accepts a correctly signed Pi service-token application JWT", async () => 
 
 test("rejects invalid signature, algorithm, key ID, and malformed tokens", async () => {
   const otherKey = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
-  const cases = [
+  const signatureCases = [
     token({}, { key: otherKey }),
     token({}, { header: { alg: "HS256" } }),
-    token({}, { header: { kid: "unknown" } }),
     "not-a-jwt",
     "a.b.c",
   ];
-  for (const value of cases) {
-    await assert.rejects(verifier()(value), AccessJwtVerificationError);
+  for (const value of signatureCases) {
+    await assertFailureCategory(verifier()(value), "invalid_jwt_signature_or_algorithm");
   }
+  await assertFailureCategory(
+    verifier()(token({}, { header: { kid: "unknown" } })),
+    "jwks_fetch_or_key_resolution_failure",
+  );
 });
 
-test("rejects expired, future, wrong-audience, wrong-issuer, and wrong-identity claims", async () => {
+test("categorizes claim and timestamp mismatches without exposing values", async () => {
   const cases = [
-    { exp: NOW },
-    { iat: NOW + 31 },
-    { nbf: NOW + 31 },
-    { aud: ["human-application-audience"] },
-    { iss: "https://attacker.cloudflareaccess.com" },
-    { common_name: "other-service-token.access" },
-    { sub: "identity-user" },
-    { type: "org" },
-  ];
-  for (const claims of cases) {
-    await assert.rejects(verifier()(token(claims)), AccessJwtVerificationError);
+    [{ exp: NOW }, "timestamp_validation_failure"],
+    [{ iat: NOW + 31 }, "timestamp_validation_failure"],
+    [{ nbf: NOW + 31 }, "timestamp_validation_failure"],
+    [{ aud: ["human-application-audience"] }, "audience_mismatch"],
+    [{ iss: "https://attacker.cloudflareaccess.com" }, "issuer_mismatch"],
+    [{ common_name: "other-service-token.access" }, "service_token_client_id_mismatch"],
+    [{ sub: "identity-user" }, "token_type_or_subject_mismatch"],
+    [{ type: "org" }, "token_type_or_subject_mismatch"],
+  ] as const;
+  for (const [claims, category] of cases) {
+    await assertFailureCategory(verifier()(token(claims)), category);
   }
 });
 
-test("rejects missing required claims", async () => {
-  const requiredClaims = ["exp", "iat", "iss", "aud", "common_name", "sub", "type"];
-  for (const claim of requiredClaims) {
-    await assert.rejects(verifier()(token({ [claim]: undefined })), AccessJwtVerificationError);
-  }
+test("categorizes missing required claims", async () => {
+  await assertFailureCategory(verifier()(token({ iss: undefined })), "issuer_mismatch");
+  await assertFailureCategory(verifier()(token({ aud: undefined })), "audience_mismatch");
+  await assertFailureCategory(
+    verifier()(token({ common_name: undefined })),
+    "service_token_client_id_mismatch",
+  );
+  await assertFailureCategory(
+    verifier()(token({ sub: undefined })),
+    "token_type_or_subject_mismatch",
+  );
+  await assertFailureCategory(
+    verifier()(token({ type: undefined })),
+    "token_type_or_subject_mismatch",
+  );
+  await assertFailureCategory(
+    verifier()(token({ exp: undefined })),
+    "timestamp_validation_failure",
+  );
+  await assertFailureCategory(
+    verifier()(token({ iat: undefined })),
+    "timestamp_validation_failure",
+  );
+});
+
+test("categorizes JWKS provider and verifier configuration failures", async () => {
+  const failingProvider: JwksProvider = {
+    async getKey() {
+      throw new Error("simulated network failure");
+    },
+  };
+  const verifyWithFailingProvider = createCloudflareAccessJwtVerifier({
+    issuer: ISSUER,
+    audience: AUDIENCE,
+    serviceTokenClientId: CLIENT_ID,
+    jwksProvider: failingProvider,
+    now: () => NOW,
+  });
+  await assertFailureCategory(
+    verifyWithFailingProvider(token()),
+    "jwks_fetch_or_key_resolution_failure",
+  );
+
+  assert.throws(
+    () =>
+      createCloudflareAccessJwtVerifier({
+        issuer: ISSUER,
+        audience: "",
+        serviceTokenClientId: CLIENT_ID,
+        jwksProvider: provider,
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof AccessJwtVerificationError);
+      assert.equal(error.category, "invalid_verifier_configuration");
+      return true;
+    },
+  );
 });
