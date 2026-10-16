@@ -8,6 +8,7 @@ import restockRouter from "./routes/restock.routes";
 import slotRouter from "./routes/slot.routes";
 import transactionRouter from "./routes/transaction.routes";
 import kioskSessionRouter from "./routes/kiosk-session.routes";
+import { createPiOriginGuardFromEnvironment } from "./security/pi-origin-guard";
 
 const app = express();
 const allowedOrigins = new Set(
@@ -16,6 +17,8 @@ const allowedOrigins = new Set(
     .map((origin) => origin.trim())
     .filter(Boolean),
 );
+
+app.use(createPiOriginGuardFromEnvironment());
 
 app.use((request, response, next) => {
   const origin = request.headers.origin;
