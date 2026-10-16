@@ -30,23 +30,33 @@ export interface CloudflareAccessVerifierConfig {
   clockSkewSeconds?: number;
 }
 
+export type AccessJwtFailureCategory =
+  | "jwks_fetch_or_key_resolution_failure"
+  | "invalid_jwt_signature_or_algorithm"
+  | "issuer_mismatch"
+  | "audience_mismatch"
+  | "service_token_client_id_mismatch"
+  | "token_type_or_subject_mismatch"
+  | "timestamp_validation_failure"
+  | "invalid_verifier_configuration";
+
 export class AccessJwtVerificationError extends Error {
-  constructor() {
+  constructor(readonly category: AccessJwtFailureCategory) {
     super("Cloudflare Access JWT verification failed.");
     this.name = "AccessJwtVerificationError";
   }
 }
 
-function fail(): never {
-  throw new AccessJwtVerificationError();
+function fail(category: AccessJwtFailureCategory): never {
+  throw new AccessJwtVerificationError(category);
 }
 
 function decodeJsonSegment(value: string): unknown {
-  if (!/^[A-Za-z0-9_-]+$/.test(value)) fail();
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) fail("invalid_jwt_signature_or_algorithm");
   try {
     return JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as unknown;
   } catch {
-    fail();
+    fail("invalid_jwt_signature_or_algorithm");
   }
 }
 
@@ -55,14 +65,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function readHeader(value: unknown): JwtHeader {
-  if (!isRecord(value)) fail();
+  if (!isRecord(value)) fail("invalid_jwt_signature_or_algorithm");
   if (
     value.alg !== "RS256" ||
     typeof value.kid !== "string" ||
     value.kid.length === 0 ||
     (value.typ !== undefined && value.typ !== "JWT")
   ) {
-    fail();
+    fail("invalid_jwt_signature_or_algorithm");
   }
   return {
     alg: "RS256",
@@ -75,26 +85,27 @@ function readClaims(
   value: unknown,
   config: CloudflareAccessVerifierConfig,
 ): CloudflareAccessClaims {
-  if (!isRecord(value)) fail();
+  if (!isRecord(value)) fail("invalid_jwt_signature_or_algorithm");
   const audience =
     Array.isArray(value.aud) && value.aud.every((entry) => typeof entry === "string")
       ? value.aud
       : typeof value.aud === "string"
         ? [value.aud]
         : [];
+  if (value.iss !== config.issuer) fail("issuer_mismatch");
+  if (!audience.includes(config.audience)) fail("audience_mismatch");
+  if (value.common_name !== config.serviceTokenClientId) {
+    fail("service_token_client_id_mismatch");
+  }
+  if (value.type !== "app" || value.sub !== "") fail("token_type_or_subject_mismatch");
   if (
-    value.type !== "app" ||
-    !audience.includes(config.audience) ||
-    value.iss !== config.issuer ||
-    value.common_name !== config.serviceTokenClientId ||
-    value.sub !== "" ||
     typeof value.exp !== "number" ||
     !Number.isSafeInteger(value.exp) ||
     typeof value.iat !== "number" ||
     !Number.isSafeInteger(value.iat) ||
     (value.nbf !== undefined && (typeof value.nbf !== "number" || !Number.isSafeInteger(value.nbf)))
   ) {
-    fail();
+    fail("timestamp_validation_failure");
   }
 
   const now = (config.now ?? (() => Math.floor(Date.now() / 1000)))();
@@ -104,7 +115,7 @@ function readClaims(
     value.iat > now + clockSkewSeconds ||
     (typeof value.nbf === "number" && value.nbf > now + clockSkewSeconds)
   ) {
-    fail();
+    fail("timestamp_validation_failure");
   }
 
   return {
@@ -122,23 +133,40 @@ function readClaims(
 export function createCloudflareAccessJwtVerifier(
   config: CloudflareAccessVerifierConfig,
 ): (token: string) => Promise<CloudflareAccessClaims> {
+  if (!config.issuer || !config.audience || !config.serviceTokenClientId) {
+    fail("invalid_verifier_configuration");
+  }
   return async (token: string) => {
     const parts = token.split(".");
-    if (parts.length !== 3 || parts.some((part) => part.length === 0)) fail();
+    if (parts.length !== 3 || parts.some((part) => part.length === 0)) {
+      fail("invalid_jwt_signature_or_algorithm");
+    }
     const [encodedHeader, encodedPayload, encodedSignature] = parts;
     const header = readHeader(decodeJsonSegment(encodedHeader));
     const claimsValue = decodeJsonSegment(encodedPayload);
-    if (!/^[A-Za-z0-9_-]+$/.test(encodedSignature)) fail();
+    if (!/^[A-Za-z0-9_-]+$/.test(encodedSignature)) {
+      fail("invalid_jwt_signature_or_algorithm");
+    }
 
-    const key = await config.jwksProvider.getKey(header.kid);
-    if (key === null) fail();
-    const valid = verifySignature(
-      "RSA-SHA256",
-      Buffer.from(`${encodedHeader}.${encodedPayload}`, "ascii"),
-      key,
-      Buffer.from(encodedSignature, "base64url"),
-    );
-    if (!valid) fail();
+    let key: KeyObject | null;
+    try {
+      key = await config.jwksProvider.getKey(header.kid);
+    } catch {
+      fail("jwks_fetch_or_key_resolution_failure");
+    }
+    if (key === null) fail("jwks_fetch_or_key_resolution_failure");
+    let valid: boolean;
+    try {
+      valid = verifySignature(
+        "RSA-SHA256",
+        Buffer.from(`${encodedHeader}.${encodedPayload}`, "ascii"),
+        key,
+        Buffer.from(encodedSignature, "base64url"),
+      );
+    } catch {
+      fail("invalid_jwt_signature_or_algorithm");
+    }
+    if (!valid) fail("invalid_jwt_signature_or_algorithm");
     return readClaims(claimsValue, config);
   };
 }

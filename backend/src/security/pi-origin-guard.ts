@@ -4,6 +4,7 @@ import {
   createCloudflareAccessJwtVerifier,
   createRemoteJwksProvider,
   normalizeCloudflareTeamDomain,
+  type AccessJwtFailureCategory,
   type CloudflareAccessClaims,
 } from "./cloudflare-access-jwt";
 
@@ -77,8 +78,14 @@ type AccessJwtVerifier = (token: string) => Promise<CloudflareAccessClaims>;
 export function createPiOriginGuard(options: {
   piApiHostname: string;
   verifyAccessJwt: AccessJwtVerifier;
+  logVerificationFailure?: (category: AccessJwtFailureCategory) => void;
 }): RequestHandler {
   const piApiHostname = options.piApiHostname.toLowerCase();
+  const logVerificationFailure =
+    options.logVerificationFailure ??
+    ((category: AccessJwtFailureCategory) => {
+      console.warn(`[pi-access-jwt] verification_failed category=${category}`);
+    });
   return async (request: Request, response: Response, next: NextFunction) => {
     // Deliberately ignore X-Forwarded-Host and all other forwarding headers.
     if (requestHost(request) !== piApiHostname) {
@@ -100,7 +107,12 @@ export function createPiOriginGuard(options: {
     try {
       await options.verifyAccessJwt(token);
       next();
-    } catch {
+    } catch (error) {
+      const category =
+        error instanceof AccessJwtVerificationError
+          ? error.category
+          : "jwks_fetch_or_key_resolution_failure";
+      logVerificationFailure(category);
       response.status(401).json({ error: "Machine authentication failed." });
     }
   };
@@ -116,15 +128,19 @@ export function createPiOriginGuardFromEnvironment(): RequestHandler {
     const audience = process.env.CLOUDFLARE_ACCESS_AUDIENCE?.trim();
     const serviceTokenClientId = process.env.CLOUDFLARE_ACCESS_SERVICE_TOKEN_CLIENT_ID?.trim();
     if (!teamDomainValue || !audience || !serviceTokenClientId) {
-      throw new AccessJwtVerificationError();
+      throw new AccessJwtVerificationError("invalid_verifier_configuration");
     }
-    const issuer = normalizeCloudflareTeamDomain(teamDomainValue);
-    verifier = createCloudflareAccessJwtVerifier({
-      issuer,
-      audience,
-      serviceTokenClientId,
-      jwksProvider: createRemoteJwksProvider(issuer),
-    });
+    try {
+      const issuer = normalizeCloudflareTeamDomain(teamDomainValue);
+      verifier = createCloudflareAccessJwtVerifier({
+        issuer,
+        audience,
+        serviceTokenClientId,
+        jwksProvider: createRemoteJwksProvider(issuer),
+      });
+    } catch {
+      throw new AccessJwtVerificationError("invalid_verifier_configuration");
+    }
     return verifier;
   };
 

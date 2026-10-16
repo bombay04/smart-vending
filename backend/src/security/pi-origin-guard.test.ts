@@ -3,6 +3,7 @@ import { request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import express from "express";
+import { AccessJwtVerificationError, type AccessJwtFailureCategory } from "./cloudflare-access-jwt";
 import { createPiOriginGuard, isAllowedPiApiRequest } from "./pi-origin-guard";
 
 const validClaims = {
@@ -22,6 +23,7 @@ async function request(options: {
   token?: string;
   forwardedHost?: string;
   verifier?: (token: string) => Promise<typeof validClaims>;
+  logVerificationFailure?: (category: AccessJwtFailureCategory) => void;
 }): Promise<Response> {
   const app = express();
   app.use(
@@ -33,6 +35,7 @@ async function request(options: {
           if (value !== "valid-token") throw new Error("invalid");
           return validClaims;
         }),
+      logVerificationFailure: options.logVerificationFailure ?? (() => undefined),
     }),
   );
   app.use((_request, response) => {
@@ -152,6 +155,24 @@ test("Pi hostname requires a verified JWT on allowed routes", async () => {
     ).status,
     200,
   );
+});
+
+test("logs only a fixed failure category and preserves the generic 401 response", async () => {
+  const categories: AccessJwtFailureCategory[] = [];
+  const response = await request({
+    host: "pi-api.smartvendingpt.com",
+    method: "GET",
+    path: "/api/v1/slots",
+    token: "opaque-token-value",
+    verifier: async () => {
+      throw new AccessJwtVerificationError("audience_mismatch");
+    },
+    logVerificationFailure: (category) => categories.push(category),
+  });
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "Machine authentication failed." });
+  assert.deepEqual(categories, ["audience_mismatch"]);
 });
 
 test("Pi hostname denies non-allowlisted routes even with a valid JWT", async () => {
