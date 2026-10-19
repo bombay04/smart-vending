@@ -86,6 +86,15 @@ class PiCloudRelayTests(unittest.TestCase):
             ("POST", "/api/v1/restocks/mock", {"sessionId": 8, "employeeId": 1}),
             (
                 "POST",
+                "/api/v1/restocks/unlock-grant",
+                {
+                    "sessionId": 8,
+                    "slotNumber": 2,
+                    "faceAuthorization": "signed-face-proof",
+                },
+            ),
+            (
+                "POST",
                 "/api/v1/employees/face-registration/complete",
                 {"sessionId": 8},
             ),
@@ -111,6 +120,32 @@ class PiCloudRelayTests(unittest.TestCase):
                     [(method, path)],
                 )
 
+    def test_restock_unlock_grant_uses_exact_path_and_service_token_forwarding(self) -> None:
+        body = (
+            b'{"sessionId":17,"slotNumber":2,'
+            b'"faceAuthorization":"signed-face-proof"}'
+        )
+        response = self.client.post(
+            "/api/v1/restocks/unlock-grant",
+            data=body,
+            content_type="application/json",
+            headers={
+                "Authorization": "Bearer attacker",
+                "CF-Access-Client-Id": "attacker-id",
+                "CF-Access-Client-Secret": "attacker-secret",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(self.transport.calls), 1)
+        method, path, headers, forwarded_body = self.transport.calls[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(path, "/api/v1/restocks/unlock-grant")
+        self.assertEqual(forwarded_body, body)
+        self.assertEqual(headers["CF-Access-Client-Id"], "test-client-id.access")
+        self.assertEqual(headers["CF-Access-Client-Secret"], "test-client-secret")
+        self.assertNotIn("Authorization", headers)
+
     def test_denies_backend_and_local_hardware_routes(self) -> None:
         cases = [
             ("GET", "/api/v1/admin/slots"),
@@ -133,10 +168,23 @@ class PiCloudRelayTests(unittest.TestCase):
             ("POST", "/api/v1/slots"),
             ("GET", "/api/v1/transactions/payments"),
             ("DELETE", "/api/v1/kiosk-sessions/8/cancel"),
+            ("GET", "/api/v1/restocks/unlock-grant"),
+            ("PUT", "/api/v1/restocks/unlock-grant"),
         ]:
             with self.subTest(method=method, path=path):
                 response = self.client.open(path, method=method)
                 self.assertEqual(response.status_code, 405)
+        self.assertEqual(self.transport.calls, [])
+
+    def test_restock_unlock_grant_does_not_widen_the_relay_path(self) -> None:
+        for path in [
+            "/api/v1/restocks/unlock-grant/1",
+            "/api/v1/restocks/unlock-grant/extra",
+            "/api/v1/restocks/unlock",
+        ]:
+            with self.subTest(path=path):
+                response = self.client.post(path, json={})
+                self.assertEqual(response.status_code, 404)
         self.assertEqual(self.transport.calls, [])
 
     def test_dynamic_identifiers_must_be_positive_decimal_integers(self) -> None:
