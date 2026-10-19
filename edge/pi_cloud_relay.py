@@ -420,6 +420,12 @@ def create_app(
         json_body="required",
     )
     register(
+        "/api/v1/restocks/unlock-grant",
+        "POST",
+        lambda: "/api/v1/restocks/unlock-grant",
+        json_body="required",
+    )
+    register(
         "/api/v1/employees/face-registration/complete",
         "POST",
         lambda: "/api/v1/employees/face-registration/complete",
