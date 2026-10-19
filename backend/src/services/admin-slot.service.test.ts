@@ -106,8 +106,29 @@ test("blank product names and invalid prices are rejected", () => {
   }
 });
 
+test("admin price must be strictly greater than 20 THB", () => {
+  for (const price of ["19", "20", "20.00", 20]) {
+    assert.throws(
+      () => parseSlotConfiguration({ name: "Water", price, imageUrl: null, isActive: true }),
+      (error: unknown) =>
+        error instanceof HttpError &&
+        error.statusCode === 400 &&
+        error.message === "ราคาสินค้าต้องมากกว่า 20 บาท",
+    );
+  }
+
+  assert.equal(
+    parseSlotConfiguration({ name: "Water", price: "20.01", imageUrl: null, isActive: true }).price,
+    "20.01",
+  );
+  assert.equal(
+    parseSlotConfiguration({ name: "Water", price: "21", imageUrl: null, isActive: true }).price,
+    "21.00",
+  );
+});
+
 test("optional image URL accepts empty or HTTPS and rejects unsafe schemes", () => {
-  const base = { name: "Water", price: "20", isActive: true };
+  const base = { name: "Water", price: "21", isActive: true };
   assert.equal(parseSlotConfiguration({ ...base, imageUrl: "" }).imageUrl, null);
   assert.equal(
     parseSlotConfiguration({ ...base, imageUrl: "https://cdn.example/water.png" }).imageUrl,

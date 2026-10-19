@@ -52,6 +52,9 @@ test("slot management renders backend slots and supports validated save feedback
   assert.match(management, /เปิดจำหน่ายสินค้า/);
   assert.match(management, /URL รูปภาพต้องเป็น HTTPS/);
   assert.match(management, /SLOT_PAYMENT_ACTIVE/);
+  assert.match(management, /ราคาสินค้าต้องมากกว่า 20 บาท/);
+  assert.match(management, /aria-invalid=\{priceError !== null\}/);
+  assert.match(management, /disabled=\{saving \|\| priceError !== null\}/);
   assert.match(management, /บันทึกไม่สำเร็จ/);
   assert.doesNotMatch(management, /status:\s*"AVAILABLE"/);
 });

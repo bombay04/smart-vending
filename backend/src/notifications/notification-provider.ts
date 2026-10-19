@@ -2,13 +2,16 @@ export interface SaleNotification {
   productName: string;
   slotNumber: number;
   priceThb: string;
+  slots: ProductStatusNotificationSlot[];
 }
 
-export interface RestockNotificationSlot {
+export interface ProductStatusNotificationSlot {
   productName: string | null;
   slotNumber: number;
-  status: "AVAILABLE";
+  status: "AVAILABLE" | "SOLD_OUT";
 }
+
+export type RestockNotificationSlot = ProductStatusNotificationSlot;
 
 export interface RestockNotification {
   slots: RestockNotificationSlot[];

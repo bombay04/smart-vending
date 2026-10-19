@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type {
   NotificationProvider,
+  ProductStatusNotificationSlot,
   RestockNotification,
   SaleNotification,
 } from "../notifications/notification-provider";
@@ -25,6 +26,9 @@ const committedRestock: RestockResult = {
 class MemoryRestockStore implements RestockStore {
   notificationClaimed = false;
   commitCount = 0;
+  listNotificationSlotsCount = 0;
+  committed = structuredClone(committedRestock);
+  databaseSlots: ProductStatusNotificationSlot[] = structuredClone(committedRestock.slots);
 
   constructor(private readonly failure: Error | null = null) {}
 
@@ -33,7 +37,7 @@ class MemoryRestockStore implements RestockStore {
     assert.equal(sessionId, 9);
     if (this.failure) throw this.failure;
     assert.equal(employeeId, committedRestock.employeeId);
-    return structuredClone(committedRestock);
+    return structuredClone(this.committed);
   }
 
   async claimRestockNotification(restockId: number) {
@@ -41,6 +45,14 @@ class MemoryRestockStore implements RestockStore {
     if (this.notificationClaimed) return false;
     this.notificationClaimed = true;
     return true;
+  }
+
+  async listRestockNotificationSlots() {
+    this.listNotificationSlotsCount += 1;
+    assert.ok(this.commitCount > 0);
+    return structuredClone(this.databaseSlots).sort(
+      (left, right) => left.slotNumber - right.slotNumber,
+    );
   }
 }
 
@@ -66,8 +78,33 @@ test("successful restock sends one notification with three authoritative mapping
   const result = await createMockRestockWithDependencies(9, 7, store, { provider });
 
   assert.deepEqual(result, committedRestock);
-  assert.deepEqual(provider.restockNotifications, [{ slots: committedRestock.slots }]);
+  assert.deepEqual(provider.restockNotifications, [{ slots: store.databaseSlots }]);
   assert.equal(store.notificationClaimed, true);
+});
+
+test("restock notification reads every configured slot after a partial restock result", async () => {
+  const store = new MemoryRestockStore();
+  store.committed.slots = [{ slotNumber: 1, productName: "Tissue", status: "AVAILABLE" }];
+  store.databaseSlots = [
+    { slotNumber: 3, productName: "Sanitary Pads", status: "AVAILABLE" },
+    { slotNumber: 1, productName: "Tissue", status: "AVAILABLE" },
+    { slotNumber: 2, productName: "Wet Wipes", status: "SOLD_OUT" },
+  ];
+  const provider = new MockNotificationProvider();
+
+  const result = await createMockRestockWithDependencies(9, 7, store, { provider });
+
+  assert.deepEqual(result.slots, [{ slotNumber: 1, productName: "Tissue", status: "AVAILABLE" }]);
+  assert.deepEqual(provider.restockNotifications, [
+    {
+      slots: [
+        { slotNumber: 1, productName: "Tissue", status: "AVAILABLE" },
+        { slotNumber: 2, productName: "Wet Wipes", status: "SOLD_OUT" },
+        { slotNumber: 3, productName: "Sanitary Pads", status: "AVAILABLE" },
+      ],
+    },
+  ]);
+  assert.equal(store.listNotificationSlotsCount, 1);
 });
 
 test("failed restock never claims or sends a notification", async () => {
@@ -79,6 +116,7 @@ test("failed restock never claims or sends a notification", async () => {
     (error: unknown) => error instanceof HttpError && error.statusCode === 403,
   );
   assert.equal(store.notificationClaimed, false);
+  assert.equal(store.listNotificationSlotsCount, 0);
   assert.equal(provider.restockNotifications.length, 0);
 });
 

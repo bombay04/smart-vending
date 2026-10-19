@@ -13,7 +13,15 @@ function readFilesRecursively(directory: string): string {
     .join("\n");
 }
 
-test("LINE provider uses its fixed server endpoint and formats sale data", async () => {
+function collectText(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(collectText);
+  if (typeof value !== "object" || value === null) return [];
+  return Object.entries(value).flatMap(([key, child]) =>
+    key === "text" && typeof child === "string" ? [child] : collectText(child),
+  );
+}
+
+test("LINE provider sends two ordered Thai Flex cards with authoritative sale data", async () => {
   let requestedUrl = "";
   let requestedInit: RequestInit | undefined;
   const provider = new LineNotificationProvider(
@@ -28,7 +36,12 @@ test("LINE provider uses its fixed server endpoint and formats sale data", async
   await provider.sendSaleNotification({
     productName: "Authoritative Tissue",
     slotNumber: 2,
-    priceThb: "20.00",
+    priceThb: "20.01",
+    slots: [
+      { slotNumber: 3, productName: "Sanitary Pads", status: "AVAILABLE" },
+      { slotNumber: 2, productName: "Authoritative Tissue", status: "SOLD_OUT" },
+      { slotNumber: 1, productName: "Tissue", status: "AVAILABLE" },
+    ],
   });
 
   assert.equal(requestedUrl, "https://api.line.me/v2/bot/message/push");
@@ -36,18 +49,45 @@ test("LINE provider uses its fixed server endpoint and formats sale data", async
     (requestedInit?.headers as Record<string, string>).Authorization,
     "Bearer server-only-token",
   );
-  assert.deepEqual(JSON.parse(String(requestedInit?.body)), {
-    to: "server-target",
-    messages: [
-      {
-        type: "text",
-        text: "Successful sale\nProduct: Authoritative Tissue\nSlot: 2\nPrice: THB 20.00",
-      },
+  const payload = JSON.parse(String(requestedInit?.body)) as {
+    to: string;
+    messages: Array<{ type: string; altText: string; contents: { type: string } }>;
+  };
+  assert.equal(payload.to, "server-target");
+  assert.equal(payload.messages.length, 2);
+  assert.deepEqual(
+    payload.messages.map((message) => [message.type, message.contents.type]),
+    [
+      ["flex", "bubble"],
+      ["flex", "bubble"],
     ],
-  });
+  );
+  assert.match(payload.messages[0].altText, /^จำหน่ายสินค้าสำเร็จ/);
+  assert.match(payload.messages[1].altText, /^สถานะสินค้าปัจจุบัน/);
+
+  const saleText = collectText(payload.messages[0]);
+  assert.deepEqual(saleText, [
+    "จำหน่ายสินค้าสำเร็จ",
+    "สินค้า",
+    "Authoritative Tissue",
+    "ช่อง",
+    "2",
+    "ราคา",
+    "20.01 บาท",
+  ]);
+  const statusText = collectText(payload.messages[1]);
+  assert.deepEqual(statusText, [
+    "สถานะสินค้าปัจจุบัน",
+    "ช่อง 1: Tissue",
+    "พร้อมจำหน่าย",
+    "ช่อง 2: Authoritative Tissue",
+    "สินค้าหมด",
+    "ช่อง 3: Sanitary Pads",
+    "พร้อมจำหน่าย",
+  ]);
 });
 
-test("LINE provider formats all three restocked slot mappings as available", async () => {
+test("LINE provider sends one compact Thai Flex card for restock", async () => {
   let body = "";
   const provider = new LineNotificationProvider(
     { channelAccessToken: "server-only-token", targetId: "server-target" },
@@ -59,17 +99,61 @@ test("LINE provider formats all three restocked slot mappings as available", asy
 
   await provider.sendRestockNotification({
     slots: [
-      { slotNumber: 1, productName: "Tissue", status: "AVAILABLE" },
-      { slotNumber: 2, productName: "Wet Wipes", status: "AVAILABLE" },
       { slotNumber: 3, productName: "Sanitary Pads", status: "AVAILABLE" },
+      { slotNumber: 1, productName: "Tissue", status: "AVAILABLE" },
+      { slotNumber: 2, productName: "Wet Wipes", status: "SOLD_OUT" },
     ],
   });
 
-  const message = JSON.parse(body).messages[0].text as string;
-  assert.match(message, /^Successful restock/m);
-  assert.match(message, /Slot 1: Tissue - AVAILABLE/);
-  assert.match(message, /Slot 2: Wet Wipes - AVAILABLE/);
-  assert.match(message, /Slot 3: Sanitary Pads - AVAILABLE/);
+  const payload = JSON.parse(body) as {
+    messages: Array<{ type: string; altText: string; contents: { type: string } }>;
+  };
+  assert.equal(payload.messages.length, 1);
+  assert.equal(payload.messages[0].type, "flex");
+  assert.equal(payload.messages[0].contents.type, "bubble");
+  assert.match(payload.messages[0].altText, /^เติมสินค้าสำเร็จ/);
+  assert.deepEqual(collectText(payload.messages[0]), [
+    "เติมสินค้าสำเร็จ",
+    "ช่อง 1: Tissue",
+    "พร้อมจำหน่าย",
+    "ช่อง 2: Wet Wipes",
+    "สินค้าหมด",
+    "ช่อง 3: Sanitary Pads",
+    "พร้อมจำหน่าย",
+  ]);
+});
+
+test("Flex payloads use LINE-compatible message, bubble, box, and text shapes", async () => {
+  let body = "";
+  const provider = new LineNotificationProvider(
+    { channelAccessToken: "server-only-token", targetId: "server-target" },
+    async (_input, init) => {
+      body = String(init?.body);
+      return new Response(null, { status: 200 });
+    },
+  );
+
+  await provider.sendSaleNotification({
+    productName: "Tissue",
+    slotNumber: 1,
+    priceThb: "21.00",
+    slots: [{ slotNumber: 1, productName: "Tissue", status: "SOLD_OUT" }],
+  });
+
+  const payload = JSON.parse(body) as { messages: unknown[] };
+  assert.ok(payload.messages.length > 0 && payload.messages.length <= 5);
+  for (const message of payload.messages) {
+    const flex = message as {
+      type: string;
+      altText: string;
+      contents: { type: string; header: { type: string }; body: { type: string } };
+    };
+    assert.equal(flex.type, "flex");
+    assert.ok(flex.altText.length > 0 && flex.altText.length <= 400);
+    assert.equal(flex.contents.type, "bubble");
+    assert.equal(flex.contents.header.type, "box");
+    assert.equal(flex.contents.body.type, "box");
+  }
 });
 
 test("LINE provider errors never contain credentials or response content", async () => {
@@ -85,6 +169,7 @@ test("LINE provider errors never contain credentials or response content", async
       productName: "Tissue",
       slotNumber: 1,
       priceThb: "20.00",
+      slots: [{ slotNumber: 1, productName: "Tissue", status: "SOLD_OUT" }],
     }),
     (error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);

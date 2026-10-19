@@ -58,8 +58,11 @@ function parsePrice(value: unknown): string {
     throw new HttpError("Price must be a positive THB amount with at most two decimals.", 400);
   }
   const amount = Number(raw);
-  if (!Number.isFinite(amount) || amount <= 0 || amount > 99_999_999.99) {
+  if (!Number.isFinite(amount) || amount > 99_999_999.99) {
     throw new HttpError("Price must be a positive THB amount.", 400);
+  }
+  if (amount <= 20) {
+    throw new HttpError("ราคาสินค้าต้องมากกว่า 20 บาท", 400);
   }
   return amount.toFixed(2);
 }
