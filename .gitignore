@@ -25,6 +25,11 @@ __pycache__/
 coverage/
 htmlcov/
 .tmp/
+/backend/ops/task60e2/work/
+/backend/ops/task60e2/*.csv
+/backend/ops/task60e2/*manifest*.json
+/backend/ops/task60e2/*.dump
+/backend/ops/task60e2/*.backup
 
 # Local biometric data and project context
 /edge/face/data/
