@@ -9,6 +9,8 @@ import ProductMedia from "./ProductMedia";
 
 type EditState = SlotConfigurationInput & { slotNumber: number };
 
+const PRICE_MINIMUM_ERROR = "ราคาสินค้าต้องมากกว่า 20 บาท";
+
 function toEditState(slot: Slot): EditState {
   if (!slot.product) {
     return {
@@ -28,17 +30,23 @@ function toEditState(slot: Slot): EditState {
   };
 }
 
-function validate(edit: EditState): string | null {
-  if (!edit.name.trim()) return "กรุณากรอกชื่อสินค้า";
-  const price = Number(edit.price);
+function validatePrice(value: string): string | null {
+  const price = Number(value);
   if (
-    !/^\d+(?:\.\d{1,2})?$/.test(edit.price.trim()) ||
+    !/^\d+(?:\.\d{1,2})?$/.test(value.trim()) ||
     !Number.isFinite(price) ||
-    price <= 0 ||
     price > 99_999_999.99
   ) {
     return "ราคาต้องเป็นจำนวนบวกและมีทศนิยมไม่เกิน 2 ตำแหน่ง";
   }
+  if (price <= 20) return PRICE_MINIMUM_ERROR;
+  return null;
+}
+
+function validate(edit: EditState): string | null {
+  if (!edit.name.trim()) return "กรุณากรอกชื่อสินค้า";
+  const priceError = validatePrice(edit.price);
+  if (priceError) return priceError;
   if (edit.imageUrl?.trim()) {
     try {
       if (new URL(edit.imageUrl.trim()).protocol !== "https:") throw new Error();
@@ -56,6 +64,7 @@ function SlotManagement() {
   const [edit, setEdit] = useState<EditState | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const priceError = edit ? validatePrice(edit.price) : null;
 
   async function load(signal?: AbortSignal) {
     setLoading(true);
@@ -157,10 +166,22 @@ function SlotManagement() {
                     <input
                       inputMode="decimal"
                       value={edit.price}
-                      onChange={(event) =>
-                        setEdit({ ...edit, price: event.target.value })
-                      }
+                      aria-invalid={priceError !== null}
+                      aria-describedby={priceError ? "admin-slot-price-error" : undefined}
+                      onChange={(event) => {
+                        setEdit({ ...edit, price: event.target.value });
+                        setSaveError(null);
+                      }}
                     />
+                    {priceError && (
+                      <span
+                        id="admin-slot-price-error"
+                        className="staff-inline-error"
+                        role="alert"
+                      >
+                        {priceError}
+                      </span>
+                    )}
                   </label>
                   <label>
                     URL รูปภาพ
@@ -188,7 +209,7 @@ function SlotManagement() {
                     </p>
                   )}
                   <div className="admin-slot-actions">
-                    <button type="submit" disabled={saving}>
+                    <button type="submit" disabled={saving || priceError !== null}>
                       {saving ? "กำลังบันทึก..." : "บันทึก"}
                     </button>
                     <button

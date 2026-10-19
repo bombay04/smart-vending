@@ -7,6 +7,7 @@ import type {
 } from "../payments/payment-provider";
 import type {
   NotificationProvider,
+  ProductStatusNotificationSlot,
   RestockNotification,
   SaleNotification,
 } from "../notifications/notification-provider";
@@ -58,6 +59,11 @@ class MemoryStore implements PaymentStore {
   saleNotificationClaimed = false;
   saleNotificationClaimCount = 0;
   createdSlotNumber: number | null = null;
+  notificationSlots: ProductStatusNotificationSlot[] = [
+    { slotNumber: 1, productName: "Authoritative Tissue", status: "AVAILABLE" },
+    { slotNumber: 2, productName: "Wet Wipes", status: "AVAILABLE" },
+    { slotNumber: 3, productName: "Sanitary Pads", status: "AVAILABLE" },
+  ];
 
   constructor(record: PaymentRecord | null = baseRecord()) {
     this.record = record;
@@ -123,6 +129,11 @@ class MemoryStore implements PaymentStore {
           : this.record.slotStatus,
       paidAt: paymentStatus === "SUCCESS" ? new Date("2026-09-23T09:00:00Z") : null,
     };
+    if (paymentStatus === "SUCCESS" && this.record.customerCancelledAt === null) {
+      this.notificationSlots = this.notificationSlots.map((slot) =>
+        slot.slotNumber === this.record?.slotNumber ? { ...slot, status: "SOLD_OUT" } : slot,
+      );
+    }
     return { ...this.record };
   }
 
@@ -155,6 +166,12 @@ class MemoryStore implements PaymentStore {
     this.saleNotificationClaimed = true;
     this.saleNotificationClaimCount += 1;
     return true;
+  }
+
+  async listSaleNotificationSlots() {
+    return structuredClone(this.notificationSlots).sort(
+      (left, right) => left.slotNumber - right.slotNumber,
+    );
   }
 }
 
@@ -367,7 +384,33 @@ test("provider success immediately completes the sale and marks the slot sold ou
       productName: "Authoritative Tissue",
       slotNumber: 1,
       priceThb: "20.00",
+      slots: [
+        { slotNumber: 1, productName: "Authoritative Tissue", status: "SOLD_OUT" },
+        { slotNumber: 2, productName: "Wet Wipes", status: "AVAILABLE" },
+        { slotNumber: 3, productName: "Sanitary Pads", status: "AVAILABLE" },
+      ],
     },
+  ]);
+});
+
+test("sale notification uses numerically ordered post-sale inventory data", async () => {
+  const success: ProviderPayment = { ...providerPending, status: "successful", paid: true };
+  const store = new MemoryStore(baseRecord({ providerChargeId: success.chargeId }));
+  store.notificationSlots = [
+    { slotNumber: 3, productName: "Another Product", status: "SOLD_OUT" },
+    { slotNumber: 1, productName: "Before Sale", status: "AVAILABLE" },
+    { slotNumber: 2, productName: "Database Product", status: "AVAILABLE" },
+  ];
+  const notificationProvider = new MockNotificationProvider();
+
+  await getPaymentStatusWithDependencies(91, store, new MockProvider(providerPending, success), {
+    provider: notificationProvider,
+  });
+
+  assert.deepEqual(notificationProvider.saleNotifications[0]?.slots, [
+    { slotNumber: 1, productName: "Before Sale", status: "SOLD_OUT" },
+    { slotNumber: 2, productName: "Database Product", status: "AVAILABLE" },
+    { slotNumber: 3, productName: "Another Product", status: "SOLD_OUT" },
   ]);
 });
 

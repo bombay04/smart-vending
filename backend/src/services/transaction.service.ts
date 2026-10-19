@@ -5,6 +5,7 @@ import {
   type NotificationDependencies,
 } from "../notifications/notification-dispatch";
 import { getNotificationProvider } from "../notifications/line-notification.provider";
+import type { ProductStatusNotificationSlot } from "../notifications/notification-provider";
 import { getPaymentProvider } from "../payments/omise-payment.provider";
 import {
   type PaymentProvider,
@@ -47,6 +48,7 @@ export interface PaymentStore {
   applyProviderStatus(transactionId: number, payment: ProviderPayment): Promise<PaymentRecord>;
   abandonPayment(transactionId: number): Promise<PaymentRecord>;
   claimSaleNotification(transactionId: number): Promise<boolean>;
+  listSaleNotificationSlots(): Promise<ProductStatusNotificationSlot[]>;
 }
 
 type TransactionWithRelations = Prisma.TransactionGetPayload<{
@@ -279,6 +281,18 @@ const prismaPaymentStore: PaymentStore = {
     });
     return result.count === 1;
   },
+
+  async listSaleNotificationSlots() {
+    const slots = await prisma.slot.findMany({
+      orderBy: { slotNumber: "asc" },
+      include: { product: true },
+    });
+    return slots.map((slot) => ({
+      slotNumber: slot.slotNumber,
+      productName: slot.product?.name ?? null,
+      status: slot.status,
+    }));
+  },
 };
 
 export function thbAmountToSatang(amount: string): number {
@@ -364,12 +378,27 @@ async function notifyCompletedSale(
     return;
   }
 
+  let slots: ProductStatusNotificationSlot[];
+  try {
+    slots = await store.listSaleNotificationSlots();
+  } catch {
+    (notifications.logger ?? console).error(
+      "Unable to read post-sale inventory for notification.",
+      {
+        entityId: payment.id,
+        event: "SALE",
+      },
+    );
+    return;
+  }
+
   await dispatchSaleNotification(
     payment.id,
     {
       productName: payment.productName,
       slotNumber: payment.slotNumber,
       priceThb: payment.amount,
+      slots,
     },
     () => store.claimSaleNotification(payment.id),
     notifications,

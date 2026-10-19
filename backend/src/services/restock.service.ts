@@ -4,6 +4,7 @@ import {
   type NotificationDependencies,
 } from "../notifications/notification-dispatch";
 import { getNotificationProvider } from "../notifications/line-notification.provider";
+import type { ProductStatusNotificationSlot } from "../notifications/notification-provider";
 import { HttpError } from "../utils/http-error";
 import { PILOT_KIOSK_MACHINE_ID } from "./kiosk-session.service";
 
@@ -24,6 +25,7 @@ export interface RestockResult {
 export interface RestockStore {
   commitRestock(sessionId: number, employeeId: number): Promise<RestockResult>;
   claimRestockNotification(restockId: number): Promise<boolean>;
+  listRestockNotificationSlots(): Promise<ProductStatusNotificationSlot[]>;
 }
 
 const prismaRestockStore: RestockStore = {
@@ -120,6 +122,18 @@ const prismaRestockStore: RestockStore = {
     });
     return result.count === 1;
   },
+
+  async listRestockNotificationSlots() {
+    const slots = await prisma.slot.findMany({
+      orderBy: { slotNumber: "asc" },
+      include: { product: true },
+    });
+    return slots.map((slot) => ({
+      slotNumber: slot.slotNumber,
+      productName: slot.product?.name ?? null,
+      status: slot.status,
+    }));
+  },
 };
 
 export async function createMockRestockWithDependencies(
@@ -131,9 +145,23 @@ export async function createMockRestockWithDependencies(
   const restock = await store.commitRestock(sessionId, employeeId);
 
   if (notifications) {
+    let slots: ProductStatusNotificationSlot[];
+    try {
+      slots = await store.listRestockNotificationSlots();
+    } catch {
+      (notifications.logger ?? console).error(
+        "Unable to read post-restock inventory for notification.",
+        {
+          entityId: restock.restockId,
+          event: "RESTOCK",
+        },
+      );
+      return restock;
+    }
+
     await dispatchRestockNotification(
       restock.restockId,
-      { slots: restock.slots },
+      { slots },
       () => store.claimRestockNotification(restock.restockId),
       notifications,
     );
