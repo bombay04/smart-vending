@@ -12,3 +12,12 @@ export interface UnlockResponse {
     deduplicated: boolean;
   };
 }
+
+export interface RestockUnlockResponse {
+  data: {
+    sessionId: number;
+    slotNumber: number;
+    status: string;
+    mockHardware: boolean;
+  };
+}

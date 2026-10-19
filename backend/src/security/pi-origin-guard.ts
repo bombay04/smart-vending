@@ -31,6 +31,7 @@ const PI_ROUTE_ALLOWLIST: ReadonlyArray<{
   },
   { method: "POST", path: /^\/api\/v1\/employees\/auth\/face$/ },
   { method: "POST", path: /^\/api\/v1\/restocks\/mock$/ },
+  { method: "POST", path: /^\/api\/v1\/restocks\/unlock-grant$/ },
   {
     method: "POST",
     path: /^\/api\/v1\/employees\/face-registration\/complete$/,

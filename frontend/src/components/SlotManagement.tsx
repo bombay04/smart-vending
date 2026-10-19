@@ -6,10 +6,9 @@ import {
 } from "../api/admin-slot";
 import type { Slot, SlotConfigurationInput } from "../types/slot";
 import ProductMedia from "./ProductMedia";
+import { validateProductPrice } from "../product-price-validation.mjs";
 
 type EditState = SlotConfigurationInput & { slotNumber: number };
-
-const PRICE_MINIMUM_ERROR = "ราคาสินค้าต้องมากกว่า 20 บาท";
 
 function toEditState(slot: Slot): EditState {
   if (!slot.product) {
@@ -30,22 +29,9 @@ function toEditState(slot: Slot): EditState {
   };
 }
 
-function validatePrice(value: string): string | null {
-  const price = Number(value);
-  if (
-    !/^\d+(?:\.\d{1,2})?$/.test(value.trim()) ||
-    !Number.isFinite(price) ||
-    price > 99_999_999.99
-  ) {
-    return "ราคาต้องเป็นจำนวนบวกและมีทศนิยมไม่เกิน 2 ตำแหน่ง";
-  }
-  if (price <= 20) return PRICE_MINIMUM_ERROR;
-  return null;
-}
-
 function validate(edit: EditState): string | null {
   if (!edit.name.trim()) return "กรุณากรอกชื่อสินค้า";
-  const priceError = validatePrice(edit.price);
+  const priceError = validateProductPrice(edit.price);
   if (priceError) return priceError;
   if (edit.imageUrl?.trim()) {
     try {
@@ -64,7 +50,7 @@ function SlotManagement() {
   const [edit, setEdit] = useState<EditState | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const priceError = edit ? validatePrice(edit.price) : null;
+  const priceError = edit ? validateProductPrice(edit.price) : null;
 
   async function load(signal?: AbortSignal) {
     setLoading(true);

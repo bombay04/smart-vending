@@ -13,6 +13,7 @@ export interface FaceAuthenticationMatch {
   employeeCode: string;
   distance: number;
   threshold: number;
+  authorization: string;
 }
 
 export type FaceAuthenticationServiceStatus =
@@ -97,10 +98,13 @@ export async function requestFaceAuthenticationStatus(
 }
 
 export async function requestFaceAuthentication(
+  sessionId: number,
   signal?: AbortSignal,
 ): Promise<FaceAuthenticationMatch> {
   const response = await fetch(faceAuthenticationUrl, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId }),
     signal,
   });
   const responseData = await readJson(response);
@@ -115,13 +119,16 @@ export async function requestFaceAuthentication(
       typeof responseData.distance === "number" &&
       Number.isFinite(responseData.distance) &&
       typeof responseData.threshold === "number" &&
-      Number.isFinite(responseData.threshold)
+      Number.isFinite(responseData.threshold) &&
+      typeof responseData.authorization === "string" &&
+      responseData.authorization.length > 0
     ) {
       return {
         status: "MATCH",
         employeeCode: responseData.employeeCode,
         distance: responseData.distance,
         threshold: responseData.threshold,
+        authorization: responseData.authorization,
       };
     }
 

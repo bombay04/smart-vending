@@ -6,6 +6,7 @@ import {
   type KioskSession,
 } from "../api/kiosk-session";
 import { getPortalSessionState } from "../portal-session-state.mjs";
+import { getKioskSessionSecondsRemaining } from "../kiosk-session-countdown.mjs";
 
 function StaffPortal() {
   const [session, setSession] = useState<KioskSession | null>(null);
@@ -13,7 +14,7 @@ function StaffPortal() {
   const [sessionBusy, setSessionBusy] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const [countdownNow, setCountdownNow] = useState(performance.now());
 
   useEffect(() => {
     let stopped = false;
@@ -46,7 +47,7 @@ function StaffPortal() {
   }, []);
 
   useEffect(() => {
-    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    const interval = window.setInterval(() => setCountdownNow(performance.now()), 1000);
     return () => window.clearInterval(interval);
   }, []);
 
@@ -95,12 +96,7 @@ function StaffPortal() {
   }
 
   const portalState = getPortalSessionState(session, "RESTOCK_AUTH");
-  const secondsRemaining = session
-    ? Math.max(
-        0,
-        Math.ceil((new Date(session.expiresAt).getTime() - now) / 1000),
-      )
-    : 0;
+  const secondsRemaining = getKioskSessionSecondsRemaining(session, countdownNow);
 
   return (
     <main className="home-page remote-portal-page staff-portal-page">

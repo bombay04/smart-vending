@@ -58,6 +58,7 @@ async function postEmployeeCode(
   employeeCode: string,
   sessionId?: number,
   signal?: AbortSignal,
+  faceAuthorization?: string,
 ): Promise<AuthenticatedEmployee> {
   const normalizedEmployeeCode = employeeCode.trim().toUpperCase();
 
@@ -69,7 +70,11 @@ async function postEmployeeCode(
     body: JSON.stringify(
       sessionId === undefined
         ? { employeeCode: normalizedEmployeeCode }
-        : { employeeCode: normalizedEmployeeCode, sessionId },
+        : {
+            employeeCode: normalizedEmployeeCode,
+            sessionId,
+            ...(faceAuthorization === undefined ? {} : { faceAuthorization }),
+          },
     ),
     signal,
   });
@@ -101,9 +106,16 @@ async function postEmployeeCode(
 export function validateFaceAuthenticatedEmployee(
   employeeCode: string,
   sessionId: number,
+  faceAuthorization: string,
   signal?: AbortSignal,
 ): Promise<AuthenticatedEmployee> {
-  return postEmployeeCode(faceEmployeeAuthUrl, employeeCode, sessionId, signal);
+  return postEmployeeCode(
+    faceEmployeeAuthUrl,
+    employeeCode,
+    sessionId,
+    signal,
+    faceAuthorization,
+  );
 }
 
 type BasicRegistrationEmployee = AuthenticatedEmployee & {

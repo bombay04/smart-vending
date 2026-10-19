@@ -93,6 +93,8 @@ function HomePage() {
     useState<KioskSession | null>(null);
   const [authenticatedEmployee, setAuthenticatedEmployee] =
     useState<AuthenticatedEmployee | null>(null);
+  const [restockFaceAuthorization, setRestockFaceAuthorization] =
+    useState<string | null>(null);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -285,6 +287,7 @@ function HomePage() {
 
   const clearStaffWorkflowState = useCallback(() => {
     setAuthenticatedEmployee(null);
+    setRestockFaceAuthorization(null);
     setActiveStaffSession(null);
     staffWorkflowCompletedRef.current = false;
     setActiveMode("customer");
@@ -311,8 +314,9 @@ function HomePage() {
   }, [activeStaffSession, clearStaffWorkflowState]);
 
   const handleEmployeeAuthenticated = useCallback(
-    (employee: AuthenticatedEmployee) => {
+    (employee: AuthenticatedEmployee, faceAuthorization: string) => {
       setAuthenticatedEmployee(employee);
+      setRestockFaceAuthorization(faceAuthorization);
       setActiveMode("restock");
     },
     [],
@@ -739,6 +743,7 @@ function HomePage() {
         });
         if (action === "EXIT_STAFF") {
           setAuthenticatedEmployee(null);
+          setRestockFaceAuthorization(null);
           setActiveStaffSession(null);
           setActiveMode("customer");
         } else if (
@@ -750,6 +755,7 @@ function HomePage() {
           staffWorkflowCompletedRef.current = false;
           setActiveStaffSession(session);
           setAuthenticatedEmployee(null);
+          setRestockFaceAuthorization(null);
           setActiveMode(
             action === "START_RESTOCK_AUTH"
               ? "employee-auth"
@@ -832,12 +838,15 @@ function HomePage() {
   if (
     activeMode === "restock" &&
     authenticatedEmployee !== null &&
+    restockFaceAuthorization !== null &&
     activeStaffSession?.type === "RESTOCK_AUTH"
   ) {
     return (
       <RestockMode
         sessionId={activeStaffSession.id}
         authenticatedEmployee={authenticatedEmployee}
+        faceAuthorization={restockFaceAuthorization}
+        inventorySlots={slots}
         onExit={cancelActiveRestockSession}
         onCompletedExit={clearStaffWorkflowState}
         onRestockSuccess={handleRestockSuccess}

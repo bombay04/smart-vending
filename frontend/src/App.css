@@ -1703,6 +1703,53 @@
   font-weight: 750;
 }
 
+.restock-product-name {
+  max-width: 150px;
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: #52627a;
+  font-size: 0.95rem;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.restock-unlock-button {
+  width: 100%;
+  min-height: 50px;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 14px;
+  color: #ffffff;
+  background: #0369a1;
+  font-size: 1rem;
+  font-weight: 850;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.restock-unlock-button:disabled {
+  color: #64748b;
+  background: #e2e8f0;
+  cursor: not-allowed;
+}
+
+.restock-unlock-feedback {
+  min-height: 2.4em;
+  margin: 7px 0 0;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.restock-unlock-feedback--success {
+  color: #047857;
+}
+
+.restock-unlock-feedback--error {
+  color: #b91c1c;
+}
+
 .hardware-value {
   min-width: 116px;
   padding: 10px 14px;
@@ -2353,6 +2400,23 @@
     min-width: 96px;
     padding: 8px 9px;
     font-size: 0.82rem;
+  }
+
+  .restock-product-name {
+    max-width: 130px;
+    font-size: 0.84rem;
+  }
+
+  .restock-unlock-button {
+    min-height: 48px;
+    margin-top: 8px;
+    font-size: 0.92rem;
+  }
+
+  .restock-unlock-feedback {
+    min-height: 2.2em;
+    margin-top: 5px;
+    font-size: 0.74rem;
   }
 
   .hardware-unavailable {

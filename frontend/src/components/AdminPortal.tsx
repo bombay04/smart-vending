@@ -30,6 +30,7 @@ import { didKioskSessionEnd } from "../kiosk-session-flow.mjs";
 import type { RegistrationEmployee } from "../types/employee";
 import SuccessCheckIcon from "./SuccessCheckIcon";
 import SlotManagement from "./SlotManagement";
+import { getKioskSessionSecondsRemaining } from "../kiosk-session-countdown.mjs";
 
 const sortEmployees = (employees: RegistrationEmployee[]) =>
   [...employees].sort((a, b) => a.employeeCode.localeCompare(b.employeeCode));
@@ -98,7 +99,7 @@ function AdminPortal() {
   const [session, setSession] = useState<KioskSession | null>(null);
   const [sessionBusy, setSessionBusy] = useState(false);
   const [faceSessionError, setFaceSessionError] = useState<string | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const [countdownNow, setCountdownNow] = useState(performance.now());
   const requestRef = useRef<AbortController | null>(null);
   const previousSessionRef = useRef<KioskSession | null>(null);
   const modalTimerRef = useRef<number | null>(null);
@@ -269,7 +270,7 @@ function AdminPortal() {
   }, [loadEmployees, showTimedModal]);
 
   useEffect(() => {
-    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    const interval = window.setInterval(() => setCountdownNow(performance.now()), 1000);
     return () => window.clearInterval(interval);
   }, []);
 
@@ -611,12 +612,7 @@ function AdminPortal() {
     if (portalState === "OWN_SESSION") dismissTimedModal();
   }, [dismissTimedModal, portalState]);
 
-  const secondsRemaining = session
-    ? Math.max(
-        0,
-        Math.ceil((new Date(session.expiresAt).getTime() - now) / 1000),
-      )
-    : 0;
+  const secondsRemaining = getKioskSessionSecondsRemaining(session, countdownNow);
 
   return (
     <main className="home-page remote-portal-page admin-portal-page">

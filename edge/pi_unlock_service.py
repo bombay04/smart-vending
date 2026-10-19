@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import atexit
+import base64
+import hashlib
+import hmac
+import json
 import logging
 import math
 import os
@@ -10,6 +14,7 @@ from pathlib import Path
 import subprocess
 import threading
 import time
+import secrets
 from typing import Any, Callable, Protocol
 
 from flask import Flask, Response, jsonify, request
@@ -66,6 +71,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5000
 ALLOWED_ORIGIN = "http://localhost:5173"
 HARDWARE_STATUS_TIMEOUT_SECONDS = 3.0
+RESTOCK_UNLOCK_GRANT_MAX_TTL_MS = 10_000
 MAX_FAILED_ATTEMPTS = 3
 LOCKOUT_DURATION_SECONDS = 180
 MAX_REGISTRATION_STATUS_CODES = 100
@@ -94,9 +100,48 @@ serial_client: Esp32SerialClient | None = None
 serial_recovery: SerialRecoveryManager | None = None
 serial_operation_lock = threading.Lock()
 unlock_idempotency_lock = threading.Lock()
+restock_unlock_lock = threading.RLock()
 face_authentication_lock = threading.Lock()
 audio_playback_lock = threading.Lock()
 unlock_transaction_outcomes: dict[int, tuple[int, str, bool]] = {}
+used_restock_unlock_nonces: dict[str, int] = {}
+restock_unlock_cycles: dict[int, str] = {}
+
+
+def restock_unlock_secret() -> bytes | None:
+    value = os.getenv("RESTOCK_UNLOCK_SECRET", "").strip()
+    return value.encode("utf-8") if len(value) >= 32 else None
+
+
+def encode_authorization(payload: dict[str, object]) -> str | None:
+    secret = restock_unlock_secret()
+    if secret is None:
+        return None
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    ).rstrip(b"=")
+    signature = base64.urlsafe_b64encode(
+        hmac.new(secret, encoded, hashlib.sha256).digest()
+    ).rstrip(b"=")
+    return f"{encoded.decode('ascii')}.{signature.decode('ascii')}"
+
+
+def decode_authorization(value: object) -> dict[str, object] | None:
+    secret = restock_unlock_secret()
+    if secret is None or not isinstance(value, str) or value.count(".") != 1:
+        return None
+    encoded, supplied_signature = value.split(".")
+    expected_signature = base64.urlsafe_b64encode(
+        hmac.new(secret, encoded.encode("ascii"), hashlib.sha256).digest()
+    ).rstrip(b"=").decode("ascii")
+    if not hmac.compare_digest(supplied_signature, expected_signature):
+        return None
+    try:
+        padding = "=" * (-len(encoded) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(encoded + padding))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 class FaceRecognizer(Protocol):
@@ -358,15 +403,43 @@ def collect_hardware_status(
     raise SerialClientError("Timed out waiting for complete ESP32 hardware status.")
 
 
+def read_fresh_hardware_status_locked() -> list[dict[str, int | bool]]:
+    """Read a fresh complete sensor snapshot while serial_operation_lock is held."""
+
+    if MOCK_HARDWARE:
+        return [
+            {"slotNumber": slot_number, "productPresent": True, "doorClosed": True}
+            for slot_number in (1, 2, 3)
+        ]
+    if not hardware_ready():
+        raise SerialClientError("Serial connection unavailable.")
+    return collect_hardware_status()
+
+
+def observe_restock_door_cycles(slots: list[dict[str, int | bool]]) -> None:
+    """Advance only from actual Reed observations: CLOSED -> OPEN -> CLOSED."""
+
+    with restock_unlock_lock:
+        for slot in slots:
+            slot_number = slot.get("slotNumber")
+            door_closed = slot.get("doorClosed")
+            if type(slot_number) is not int or type(door_closed) is not bool:
+                continue
+            cycle = restock_unlock_cycles.get(slot_number)
+            if cycle == "WAITING_OPEN" and door_closed is False:
+                restock_unlock_cycles[slot_number] = "WAITING_CLOSED"
+            elif cycle == "WAITING_CLOSED" and door_closed is True:
+                restock_unlock_cycles.pop(slot_number, None)
+
+
 @app.get("/hardware/status")
 def hardware_status() -> tuple[Response, int] | Response:
     if MOCK_HARDWARE:
+        slots = read_fresh_hardware_status_locked()
+        observe_restock_door_cycles(slots)
         return jsonify(
             status="ok",
-            slots=[
-                {"slotNumber": slot_number, "productPresent": True, "doorClosed": True}
-                for slot_number in (1, 2, 3)
-            ],
+            slots=slots,
         )
 
     if not hardware_ready():
@@ -377,7 +450,8 @@ def hardware_status() -> tuple[Response, int] | Response:
     try:
         if not hardware_ready():
             return jsonify(error="Hardware status unavailable."), 503
-        slots = collect_hardware_status()
+        slots = read_fresh_hardware_status_locked()
+        observe_restock_door_cycles(slots)
         if serial_recovery is not None:
             serial_recovery.note_status_success_locked()
         logger.info("Complete ESP32 hardware status collected")
@@ -517,6 +591,13 @@ def camera_status() -> tuple[Response, int] | Response:
 
 @app.post("/face/authenticate")
 def authenticate_face() -> tuple[Response, int] | Response:
+    body: Any = request.get_json(silent=True) if request.is_json else None
+    if not isinstance(body, dict) or set(body) != {"sessionId"}:
+        return jsonify(status="INVALID_REQUEST", error="sessionId is required."), 400
+    session_id = body.get("sessionId")
+    if type(session_id) is not int or session_id <= 0:
+        return jsonify(status="INVALID_REQUEST", error="sessionId must be a positive integer."), 400
+
     lockout_status = face_authentication_lockout.status()
     if lockout_status["status"] == "LOCKED":
         return locked_response(lockout_status)
@@ -620,11 +701,27 @@ def authenticate_face() -> tuple[Response, int] | Response:
             )
 
         face_authentication_lockout.reset_failures()
+        authorization = encode_authorization(
+            {
+                "v": 1,
+                "purpose": "FACE_MATCH",
+                "machineId": os.getenv("KIOSK_MACHINE_ID", "PILOT_KIOSK"),
+                "sessionId": session_id,
+                "employeeCode": result.employee_code,
+                "expiresAt": int(time.time() * 1000) + 300_000,
+                "nonce": secrets.token_urlsafe(16),
+            }
+        )
+        if authorization is None:
+            logger.error("RESTOCK_UNLOCK_SECRET is not configured")
+            return jsonify(status="UNAVAILABLE"), 503
+
         return jsonify(
             status="MATCH",
             employeeCode=result.employee_code,
             distance=result.distance,
             threshold=result.threshold,
+            authorization=authorization,
         )
     finally:
         face_authentication_lock.release()
@@ -917,6 +1014,98 @@ def unlock() -> tuple[Response, int] | Response:
             "status": "UNLOCK_COMMAND_SENT",
             "mockHardware": False,
             "deduplicated": False,
+        }
+    )
+
+
+@app.post("/restock/unlock")
+def restock_unlock() -> tuple[Response, int] | Response:
+    if not request.is_json:
+        return jsonify(error="Request body must be JSON."), 400
+    body: Any = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) != {"slotNumber", "authorization"}:
+        return jsonify(error="Invalid restock unlock request."), 400
+
+    slot_number = body.get("slotNumber")
+    if type(slot_number) is not int or slot_number not in (1, 2, 3):
+        return jsonify(error="slotNumber must be an integer: 1, 2, or 3."), 400
+
+    claims = decode_authorization(body.get("authorization"))
+    now_ms = int(time.time() * 1000)
+    if (
+        claims is None
+        or claims.get("v") != 1
+        or claims.get("purpose") != "RESTOCK_UNLOCK"
+        or claims.get("machineId") != os.getenv("KIOSK_MACHINE_ID", "PILOT_KIOSK")
+        or claims.get("slotNumber") != slot_number
+        or type(claims.get("sessionId")) is not int
+        or type(claims.get("employeeId")) is not int
+        or type(claims.get("expiresAt")) is not int
+        or claims["expiresAt"] <= now_ms
+        or claims["expiresAt"] > now_ms + RESTOCK_UNLOCK_GRANT_MAX_TTL_MS
+        or not isinstance(claims.get("nonce"), str)
+        or not claims["nonce"]
+    ):
+        return jsonify(error="Restock unlock authorization is invalid or expired."), 403
+
+    nonce = claims["nonce"]
+    with restock_unlock_lock:
+        for used_nonce, expires_at in list(used_restock_unlock_nonces.items()):
+            if expires_at <= now_ms:
+                used_restock_unlock_nonces.pop(used_nonce, None)
+        if nonce in used_restock_unlock_nonces:
+            return jsonify(error="Restock unlock authorization was already used."), 409
+        used_restock_unlock_nonces[nonce] = claims["expiresAt"]
+
+    if not MOCK_HARDWARE and not hardware_ready():
+        return jsonify(error="Serial connection unavailable."), 503
+    if not serial_operation_lock.acquire(timeout=0.25):
+        return jsonify(error="Serial connection busy."), 503
+    try:
+        slots = read_fresh_hardware_status_locked()
+        with restock_unlock_lock:
+            observe_restock_door_cycles(slots)
+            if slot_number in restock_unlock_cycles:
+                return (
+                    jsonify(error="A previous restock unlock is still awaiting a door cycle."),
+                    409,
+                )
+            slot_status = next(
+                (slot for slot in slots if slot.get("slotNumber") == slot_number),
+                None,
+            )
+            if slot_status is None or type(slot_status.get("doorClosed")) is not bool:
+                return jsonify(error="Door sensor status is unavailable."), 503
+            if slot_status["doorClosed"] is False:
+                return jsonify(error="Compartment door is already open."), 409
+
+            if not MOCK_HARDWARE:
+                serial_client.open_slot(slot_number)
+            restock_unlock_cycles[slot_number] = "WAITING_OPEN"
+    except SerialClientError as error:
+        if serial_recovery is not None:
+            serial_recovery.invalidate_locked(str(error))
+        logger.error("Restock serial unlock failed: %s", error)
+        return jsonify(error="Serial connection unavailable."), 503
+    except Exception:
+        if serial_recovery is not None:
+            serial_recovery.invalidate_locked("Unexpected restock unlock error")
+        logger.exception("Unexpected restock unlock error")
+        return jsonify(error="Internal server error."), 500
+    finally:
+        serial_operation_lock.release()
+
+    logger.info(
+        "Authorized restock unlock sent for session %s and slot %s",
+        claims["sessionId"],
+        slot_number,
+    )
+    return jsonify(
+        data={
+            "sessionId": claims["sessionId"],
+            "slotNumber": slot_number,
+            "status": "UNLOCK_COMMAND_SENT",
+            "mockHardware": MOCK_HARDWARE,
         }
     )
 

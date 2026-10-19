@@ -16,6 +16,8 @@ import {
   startOffboarding,
 } from "../services/employee-lifecycle.service";
 import { requireActiveKioskSession } from "../services/kiosk-session.service";
+import { verifyFaceAuthorization } from "../services/restock-authorization";
+import { HttpError } from "../utils/http-error";
 
 async function authenticateEmployeeRequest(
   request: Request,
@@ -41,8 +43,12 @@ export async function faceAuthenticateEmployeeForSession(
   next: NextFunction,
 ): Promise<void> {
   try {
-    await requireActiveKioskSession(request.body?.sessionId, "RESTOCK_AUTH");
-    const employee = await authenticateEmployee(request.body?.employeeCode);
+    const session = await requireActiveKioskSession(request.body?.sessionId, "RESTOCK_AUTH");
+    const face = verifyFaceAuthorization(request.body?.faceAuthorization, session.id);
+    if (request.body?.employeeCode !== face.employeeCode) {
+      throw new HttpError("Face authorization does not match the employee.", 403);
+    }
+    const employee = await authenticateEmployee(face.employeeCode);
     response.status(200).json({ employee });
   } catch (error: unknown) {
     next(error);

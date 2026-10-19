@@ -129,6 +129,7 @@ class PiUnlockServiceTests(unittest.TestCase):
             {
                 "FACE_CAMERA_INDEX": "0",
                 "FACE_CAMERA_USB_RECOVERY_ENABLED": "false",
+                "RESTOCK_UNLOCK_SECRET": "test-restock-unlock-secret-32-characters",
             },
         )
         self.camera_environment_patch.start()
@@ -147,6 +148,9 @@ class PiUnlockServiceTests(unittest.TestCase):
         )
         with pi_unlock_service.unlock_idempotency_lock:
             pi_unlock_service.unlock_transaction_outcomes.clear()
+        with pi_unlock_service.restock_unlock_lock:
+            pi_unlock_service.used_restock_unlock_nonces.clear()
+            pi_unlock_service.restock_unlock_cycles.clear()
 
     def tearDown(self) -> None:
         pi_unlock_service.face_engine = None
@@ -159,8 +163,8 @@ class PiUnlockServiceTests(unittest.TestCase):
         if pi_unlock_service.face_authentication_lock.locked():
             pi_unlock_service.face_authentication_lock.release()
 
-    def post_face_authentication(self):
-        return self.client.post("/face/authenticate")
+    def post_face_authentication(self, session_id: object = 17):
+        return self.client.post("/face/authenticate", json={"sessionId": session_id})
 
     def post_face_registration(self, employee_code: object = "EMP001"):
         return self.client.post("/face/register", json={"employeeCode": employee_code})
@@ -192,15 +196,15 @@ class PiUnlockServiceTests(unittest.TestCase):
         response = self.post_face_authentication()
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.get_json(),
-            {
-                "status": "MATCH",
-                "employeeCode": "EMP001",
-                "distance": 0.437637,
-                "threshold": 1.128,
-            },
-        )
+        payload = response.get_json()
+        self.assertEqual(payload["status"], "MATCH")
+        self.assertEqual(payload["employeeCode"], "EMP001")
+        self.assertEqual(payload["distance"], 0.437637)
+        self.assertEqual(payload["threshold"], 1.128)
+        claims = pi_unlock_service.decode_authorization(payload["authorization"])
+        self.assertEqual(claims["purpose"], "FACE_MATCH")
+        self.assertEqual(claims["sessionId"], 17)
+        self.assertEqual(claims["employeeCode"], "EMP001")
         serialized = response.get_data(as_text=True).lower()
         for forbidden in ("embedding", "template", "image", "landmark", "crop"):
             self.assertNotIn(forbidden, serialized)
@@ -345,7 +349,9 @@ class PiUnlockServiceTests(unittest.TestCase):
 
         def finish_third_failure() -> None:
             with pi_unlock_service.app.test_client() as thread_client:
-                response = thread_client.post("/face/authenticate")
+                response = thread_client.post(
+                    "/face/authenticate", json={"sessionId": 17}
+                )
                 response_holder.append((response.status_code, response.get_json()))
 
         request_thread = threading.Thread(target=finish_third_failure)
@@ -1023,6 +1029,348 @@ class PiUnlockServiceTests(unittest.TestCase):
             duplicate.get_json()["data"]["status"], "UNLOCK_OUTCOME_UNCERTAIN"
         )
         self.assertTrue(duplicate.get_json()["data"]["deduplicated"])
+
+    def restock_authorization(
+        self, slot_number: int, *, expires_at: int | None = None, nonce: str = "nonce-1234567890"
+    ) -> str:
+        authorization = pi_unlock_service.encode_authorization(
+            {
+                "v": 1,
+                "purpose": "RESTOCK_UNLOCK",
+                "machineId": "PILOT_KIOSK",
+                "sessionId": 17,
+                "employeeId": 4,
+                "slotNumber": slot_number,
+                "expiresAt": expires_at or int(pi_unlock_service.time.time() * 1000) + 10_000,
+                "nonce": nonce,
+            }
+        )
+        self.assertIsNotNone(authorization)
+        return authorization
+
+    def test_restock_unlock_opens_only_the_authorized_slot(self) -> None:
+        class StubSerialClient:
+            is_connected = True
+
+            def __init__(self) -> None:
+                self.opened_slots: list[int] = []
+
+            def open_slot(self, slot_number: int) -> None:
+                self.opened_slots.append(slot_number)
+
+        serial = StubSerialClient()
+        authorization = self.restock_authorization(2)
+        with (
+            patch.object(pi_unlock_service, "MOCK_HARDWARE", False),
+            patch.object(pi_unlock_service, "serial_client", serial),
+            patch.object(
+                pi_unlock_service,
+                "read_fresh_hardware_status_locked",
+                return_value=[
+                    {
+                        "slotNumber": number,
+                        "productPresent": True,
+                        "doorClosed": True,
+                    }
+                    for number in (1, 2, 3)
+                ],
+            ),
+        ):
+            response = self.client.post(
+                "/restock/unlock",
+                json={"slotNumber": 2, "authorization": authorization},
+            )
+            wrong_slot = self.client.post(
+                "/restock/unlock",
+                json={"slotNumber": 1, "authorization": authorization},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(serial.opened_slots, [2])
+        self.assertEqual(wrong_slot.status_code, 403)
+
+    def test_restock_unlock_rejects_open_door_without_solenoid_activation(self) -> None:
+        class StubSerialClient:
+            is_connected = True
+
+            def __init__(self) -> None:
+                self.opened_slots: list[int] = []
+
+            def open_slot(self, slot_number: int) -> None:
+                self.opened_slots.append(slot_number)
+
+        serial = StubSerialClient()
+        authorization = self.restock_authorization(1)
+        slots = [
+            {
+                "slotNumber": number,
+                "productPresent": True,
+                "doorClosed": number != 1,
+            }
+            for number in (1, 2, 3)
+        ]
+        with (
+            patch.object(pi_unlock_service, "MOCK_HARDWARE", False),
+            patch.object(pi_unlock_service, "serial_client", serial),
+            patch.object(
+                pi_unlock_service,
+                "read_fresh_hardware_status_locked",
+                return_value=slots,
+            ) as sensor_read,
+        ):
+            response = self.client.post(
+                "/restock/unlock",
+                json={"slotNumber": 1, "authorization": authorization},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(serial.opened_slots, [])
+        sensor_read.assert_called_once_with()
+
+    def test_restock_unlock_rejects_unknown_or_failed_sensor_read(self) -> None:
+        class StubSerialClient:
+            is_connected = True
+
+            def __init__(self) -> None:
+                self.opened_slots: list[int] = []
+
+            def open_slot(self, slot_number: int) -> None:
+                self.opened_slots.append(slot_number)
+
+        serial = StubSerialClient()
+        authorization = self.restock_authorization(2)
+        with (
+            patch.object(pi_unlock_service, "MOCK_HARDWARE", False),
+            patch.object(pi_unlock_service, "serial_client", serial),
+            patch.object(
+                pi_unlock_service,
+                "read_fresh_hardware_status_locked",
+                side_effect=pi_unlock_service.SerialClientError("sensor timeout"),
+            ),
+        ):
+            response = self.client.post(
+                "/restock/unlock",
+                json={"slotNumber": 2, "authorization": authorization},
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(serial.opened_slots, [])
+
+        unknown_authorization = self.restock_authorization(
+            2, nonce="unknown-sensor-123456"
+        )
+        unknown_slots = [
+            {
+                "slotNumber": number,
+                "productPresent": True,
+                "doorClosed": None if number == 2 else True,
+            }
+            for number in (1, 2, 3)
+        ]
+        with (
+            patch.object(pi_unlock_service, "MOCK_HARDWARE", False),
+            patch.object(pi_unlock_service, "serial_client", serial),
+            patch.object(
+                pi_unlock_service,
+                "read_fresh_hardware_status_locked",
+                return_value=unknown_slots,
+            ),
+        ):
+            unknown = self.client.post(
+                "/restock/unlock",
+                json={"slotNumber": 2, "authorization": unknown_authorization},
+            )
+
+        self.assertEqual(unknown.status_code, 503)
+        self.assertEqual(serial.opened_slots, [])
+
+    def test_restock_unlock_requires_open_then_closed_before_same_slot_reuse(self) -> None:
+        def slots(door_closed: bool):
+            return [
+                {
+                    "slotNumber": number,
+                    "productPresent": True,
+                    "doorClosed": door_closed if number == 1 else True,
+                }
+                for number in (1, 2, 3)
+            ]
+
+        with patch.object(pi_unlock_service, "MOCK_HARDWARE", True):
+            first = self.client.post(
+                "/restock/unlock",
+                json={
+                    "slotNumber": 1,
+                    "authorization": self.restock_authorization(1, nonce="cycle-first-123456"),
+                },
+            )
+            still_closed = self.client.post(
+                "/restock/unlock",
+                json={
+                    "slotNumber": 1,
+                    "authorization": self.restock_authorization(1, nonce="cycle-second-12345"),
+                },
+            )
+            pi_unlock_service.observe_restock_door_cycles(slots(False))
+            pi_unlock_service.observe_restock_door_cycles(slots(True))
+            after_cycle = self.client.post(
+                "/restock/unlock",
+                json={
+                    "slotNumber": 1,
+                    "authorization": self.restock_authorization(1, nonce="cycle-third-123456"),
+                },
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(still_closed.status_code, 409)
+        self.assertEqual(after_cycle.status_code, 200)
+
+    def test_concurrent_same_slot_restock_requests_send_one_solenoid_command(self) -> None:
+        class BlockingSerialClient:
+            is_connected = True
+
+            def __init__(self) -> None:
+                self.started = threading.Event()
+                self.release = threading.Event()
+                self.opened_slots: list[int] = []
+
+            def open_slot(self, slot_number: int) -> None:
+                self.opened_slots.append(slot_number)
+                self.started.set()
+                if not self.release.wait(timeout=2):
+                    raise AssertionError("Timed out waiting to release solenoid command")
+
+        serial = BlockingSerialClient()
+        statuses: list[int] = []
+
+        def request_unlock(nonce: str) -> None:
+            with pi_unlock_service.app.test_client() as thread_client:
+                response = thread_client.post(
+                    "/restock/unlock",
+                    json={
+                        "slotNumber": 1,
+                        "authorization": self.restock_authorization(1, nonce=nonce),
+                    },
+                )
+                statuses.append(response.status_code)
+
+        closed_slots = [
+            {"slotNumber": number, "productPresent": True, "doorClosed": True}
+            for number in (1, 2, 3)
+        ]
+        with (
+            patch.object(pi_unlock_service, "MOCK_HARDWARE", False),
+            patch.object(pi_unlock_service, "serial_client", serial),
+            patch.object(
+                pi_unlock_service,
+                "read_fresh_hardware_status_locked",
+                return_value=closed_slots,
+            ),
+        ):
+            first = threading.Thread(target=request_unlock, args=("concurrent-first-123",))
+            second = threading.Thread(target=request_unlock, args=("concurrent-second-12",))
+            first.start()
+            self.assertTrue(serial.started.wait(timeout=2))
+            second.start()
+            serial.release.set()
+            first.join(timeout=2)
+            second.join(timeout=2)
+
+        self.assertEqual(sorted(statuses), [200, 409])
+        self.assertEqual(serial.opened_slots, [1])
+
+    def test_one_pending_slot_does_not_block_another_safe_slot(self) -> None:
+        with patch.object(pi_unlock_service, "MOCK_HARDWARE", True):
+            first = self.client.post(
+                "/restock/unlock",
+                json={
+                    "slotNumber": 1,
+                    "authorization": self.restock_authorization(1, nonce="slot-one-123456789"),
+                },
+            )
+            second = self.client.post(
+                "/restock/unlock",
+                json={
+                    "slotNumber": 2,
+                    "authorization": self.restock_authorization(2, nonce="slot-two-123456789"),
+                },
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+
+    def test_restock_unlock_fails_closed_for_missing_or_incorrect_secret(self) -> None:
+        valid = self.restock_authorization(1)
+        with (
+            patch.object(pi_unlock_service, "MOCK_HARDWARE", True),
+            patch.dict("os.environ", {"RESTOCK_UNLOCK_SECRET": ""}),
+        ):
+            missing = self.client.post(
+                "/restock/unlock", json={"slotNumber": 1, "authorization": valid}
+            )
+        with (
+            patch.object(pi_unlock_service, "MOCK_HARDWARE", True),
+            patch.dict(
+                "os.environ",
+                {"RESTOCK_UNLOCK_SECRET": "different-restock-unlock-secret-32-chars"},
+            ),
+        ):
+            incorrect = self.client.post(
+                "/restock/unlock", json={"slotNumber": 1, "authorization": valid}
+            )
+
+        self.assertEqual(missing.status_code, 403)
+        self.assertEqual(incorrect.status_code, 403)
+
+    def test_restock_unlock_rejects_expired_tampered_and_replayed_grants(self) -> None:
+        valid = self.restock_authorization(1)
+        expired = self.restock_authorization(
+            1,
+            expires_at=int(pi_unlock_service.time.time() * 1000) - 1,
+            nonce="expired-1234567890",
+        )
+        overlong = self.restock_authorization(
+            1,
+            expires_at=int(pi_unlock_service.time.time() * 1000) + 60_000,
+            nonce="overlong-123456789",
+        )
+        with patch.object(pi_unlock_service, "MOCK_HARDWARE", True):
+            first = self.client.post(
+                "/restock/unlock", json={"slotNumber": 1, "authorization": valid}
+            )
+            replay = self.client.post(
+                "/restock/unlock", json={"slotNumber": 1, "authorization": valid}
+            )
+            expired_response = self.client.post(
+                "/restock/unlock", json={"slotNumber": 1, "authorization": expired}
+            )
+            overlong_response = self.client.post(
+                "/restock/unlock", json={"slotNumber": 1, "authorization": overlong}
+            )
+            tampered = self.client.post(
+                "/restock/unlock",
+                json={"slotNumber": 1, "authorization": f"{valid}x"},
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(replay.status_code, 409)
+        self.assertEqual(expired_response.status_code, 403)
+        self.assertEqual(overlong_response.status_code, 403)
+        self.assertEqual(tampered.status_code, 403)
+
+    def test_payment_unlock_idempotency_remains_separate_from_restock_unlock(self) -> None:
+        authorization = self.restock_authorization(3)
+        with patch.object(pi_unlock_service, "MOCK_HARDWARE", True):
+            restock = self.client.post(
+                "/restock/unlock",
+                json={"slotNumber": 3, "authorization": authorization},
+            )
+            payment = self.client.post(
+                "/unlock", json={"slotNumber": 3, "transactionId": 91}
+            )
+
+        self.assertEqual(restock.status_code, 200)
+        self.assertEqual(payment.status_code, 200)
+        self.assertFalse(payment.get_json()["data"]["deduplicated"])
 
 
 class AudioPlaybackTests(unittest.TestCase):
