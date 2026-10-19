@@ -34,9 +34,10 @@ test("admin restores the selected product section after a refresh", async () => 
 });
 
 test("slot management renders backend slots and supports validated save feedback", async () => {
-  const [management, api] = await Promise.all([
+  const [management, api, priceValidation] = await Promise.all([
     source("src/components/SlotManagement.tsx"),
     source("src/api/admin-slot.ts"),
+    source("src/product-price-validation.mjs"),
   ]);
   assert.match(management, /fetchAdminSlots/);
   assert.match(management, /slots\.map\(\(slot\)/);
@@ -52,7 +53,8 @@ test("slot management renders backend slots and supports validated save feedback
   assert.match(management, /เปิดจำหน่ายสินค้า/);
   assert.match(management, /URL รูปภาพต้องเป็น HTTPS/);
   assert.match(management, /SLOT_PAYMENT_ACTIVE/);
-  assert.match(management, /ราคาสินค้าต้องมากกว่า 20 บาท/);
+  assert.match(priceValidation, /ราคาสินค้าต้องไม่น้อยกว่า 20 บาท/);
+  assert.match(management, /validateProductPrice\(edit\.price\)/);
   assert.match(management, /aria-invalid=\{priceError !== null\}/);
   assert.match(management, /disabled=\{saving \|\| priceError !== null\}/);
   assert.match(management, /บันทึกไม่สำเร็จ/);

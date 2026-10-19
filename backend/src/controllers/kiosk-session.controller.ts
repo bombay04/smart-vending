@@ -13,6 +13,10 @@ import {
   requireEmptyLifecycleBody,
 } from "../services/employee-lifecycle.service";
 
+function sessionResponse(session: unknown) {
+  return { session, serverNow: new Date().toISOString() };
+}
+
 function requireEmptyBody(body: unknown): void {
   if (
     typeof body !== "object" ||
@@ -31,7 +35,7 @@ export async function currentKioskSession(
 ) {
   try {
     const session = await getCurrentKioskSession();
-    response.status(200).json({ mode: session?.type ?? "CUSTOMER", session });
+    response.status(200).json({ mode: session?.type ?? "CUSTOMER", ...sessionResponse(session) });
   } catch (error) {
     next(error);
   }
@@ -44,7 +48,7 @@ export async function startRestockSession(
 ) {
   try {
     requireEmptyBody(request.body);
-    response.status(201).json({ session: await createRestockSession() });
+    response.status(201).json(sessionResponse(await createRestockSession()));
   } catch (error) {
     next(error);
   }
@@ -66,7 +70,7 @@ export async function startFaceRegistrationSession(
       throw new HttpError("Request body must contain only employeeId.", 400);
     response
       .status(201)
-      .json({ session: await createFaceRegistrationSession(request.body.employeeId) });
+      .json(sessionResponse(await createFaceRegistrationSession(request.body.employeeId)));
   } catch (error) {
     next(error);
   }
@@ -77,7 +81,7 @@ export async function completeSession(request: Request, response: Response, next
     requireEmptyBody(request.body);
     response
       .status(200)
-      .json({ session: await completeKioskSession(Number(request.params.sessionId)) });
+      .json(sessionResponse(await completeKioskSession(Number(request.params.sessionId))));
   } catch (error) {
     next(error);
   }
@@ -88,7 +92,7 @@ export async function cancelSession(request: Request, response: Response, next: 
     requireEmptyBody(request.body);
     response
       .status(200)
-      .json({ session: await cancelKioskSession(Number(request.params.sessionId)) });
+      .json(sessionResponse(await cancelKioskSession(Number(request.params.sessionId))));
   } catch (error) {
     next(error);
   }

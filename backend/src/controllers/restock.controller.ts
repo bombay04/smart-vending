@@ -1,5 +1,18 @@
 import type { NextFunction, Request, Response } from "express";
 import { createMockRestock } from "../services/restock.service";
+import { createRestockUnlockGrant } from "../services/restock-unlock.service";
+
+export async function authorizeRestockUnlock(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    response.status(200).json({ data: await createRestockUnlockGrant(request.body) });
+  } catch (error: unknown) {
+    next(error);
+  }
+}
 
 export async function mockRestock(
   request: Request,

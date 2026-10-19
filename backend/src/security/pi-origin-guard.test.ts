@@ -97,6 +97,7 @@ test("origin allowlist exactly matches the relay cloud surface", () => {
     ["POST", "/api/v1/kiosk-sessions/1/cancel"],
     ["POST", "/api/v1/employees/auth/face"],
     ["POST", "/api/v1/restocks/mock"],
+    ["POST", "/api/v1/restocks/unlock-grant"],
     ["POST", "/api/v1/employees/face-registration/complete"],
     ["POST", "/api/v1/kiosk-sessions/1/draft-delete-result"],
     ["POST", "/api/v1/kiosk-sessions/1/offboarding-complete"],

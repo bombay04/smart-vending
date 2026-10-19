@@ -16,7 +16,7 @@ import SuccessCheckIcon from "./SuccessCheckIcon";
 
 interface EmployeeAuthenticationProps {
   sessionId: number;
-  onAuthenticated: (employee: AuthenticatedEmployee) => void;
+  onAuthenticated: (employee: AuthenticatedEmployee, faceAuthorization: string) => void;
   onCancel: () => Promise<void>;
 }
 
@@ -203,6 +203,7 @@ function EmployeeAuthentication({
 
     try {
       const faceMatch = await requestFaceAuthentication(
+        sessionId,
         requestController.signal,
       );
       setRemainingAttempts(null);
@@ -211,7 +212,12 @@ function EmployeeAuthentication({
         requestController.signal,
         {
           validateEmployee: (employeeCode, signal) =>
-            validateFaceAuthenticatedEmployee(employeeCode, sessionId, signal),
+            validateFaceAuthenticatedEmployee(
+              employeeCode,
+              sessionId,
+              faceMatch.authorization,
+              signal,
+            ),
           playAudio: playAudioFeedback,
         },
       );
@@ -224,7 +230,7 @@ function EmployeeAuthentication({
       setAuthenticationState("SUCCESS");
       completionTimerRef.current = window.setTimeout(() => {
         completionTimerRef.current = null;
-        onAuthenticated(employee);
+        onAuthenticated(employee, faceMatch.authorization);
       }, 700);
     } catch (error: unknown) {
       if (requestController.signal.aborted) {

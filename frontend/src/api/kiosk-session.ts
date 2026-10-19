@@ -24,6 +24,8 @@ export interface KioskSession {
   createdAt: string;
   expiresAt: string;
   completedAt: string | null;
+  countdownServerNow: string;
+  countdownReceivedAtMs: number;
 }
 
 const sessionsUrl = `${API_BASE_URL}/api/v1/kiosk-sessions`;
@@ -95,9 +97,28 @@ export function isKioskSession(value: unknown): value is KioskSession {
   );
 }
 
+function parseServerNow(value: unknown): string {
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
+    throw new Error("Kiosk session clock is invalid.");
+  }
+  return value;
+}
+
+function withCountdownClock(
+  session: KioskSession,
+  serverNow: string,
+): KioskSession {
+  return {
+    ...session,
+    countdownServerNow: serverNow,
+    countdownReceivedAtMs: performance.now(),
+  };
+}
+
 async function readSession(response: Response): Promise<KioskSession> {
   const payload = (await response.json()) as {
     session?: unknown;
+    serverNow?: unknown;
     error?: unknown;
     code?: unknown;
   };
@@ -110,7 +131,7 @@ async function readSession(response: Response): Promise<KioskSession> {
       typeof payload.code === "string" ? payload.code : null,
     );
   }
-  return payload.session;
+  return withCountdownClock(payload.session, parseServerNow(payload.serverNow));
 }
 
 export async function fetchCurrentKioskSession(
@@ -121,12 +142,12 @@ export async function fetchCurrentKioskSession(
     signal,
   });
   if (!response.ok) throw new Error("Kiosk session status is unavailable.");
-  const payload = (await response.json()) as { session?: unknown };
+  const payload = (await response.json()) as { session?: unknown; serverNow?: unknown };
   if (payload.session === null) return null;
   if (!isKioskSession(payload.session) || payload.session.status !== "ACTIVE") {
     throw new Error("Kiosk session status is invalid.");
   }
-  return payload.session;
+  return withCountdownClock(payload.session, parseServerNow(payload.serverNow));
 }
 
 export async function startRestockSession(
