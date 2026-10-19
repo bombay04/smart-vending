@@ -1,4 +1,5 @@
 import express from "express";
+import path from "node:path";
 import adminSlotRouter from "./routes/admin-slot.routes";
 import employeeRouter from "./routes/employee.routes";
 import { errorMiddleware } from "./middlewares/error.middleware";
@@ -52,6 +53,15 @@ app.use("/api/v1/transactions", transactionRouter);
 app.use("/api/v1/restocks", restockRouter);
 app.use("/api/v1/kiosk-sessions", kioskSessionRouter);
 app.use("/api/v1/admin/slots", adminSlotRouter);
+
+const frontendDistDirectory = path.resolve(__dirname, "../../frontend/dist");
+app.use(express.static(frontendDistDirectory, { index: false }));
+app.get(["/staff", "/admin"], (_request, response, next) => {
+  response.sendFile("index.html", { root: frontendDistDirectory }, (error) => {
+    if (error) next(error);
+  });
+});
+
 app.use(errorMiddleware);
 
 export default app;
