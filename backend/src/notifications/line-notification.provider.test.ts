@@ -98,6 +98,7 @@ test("LINE provider sends one compact Thai Flex card for restock", async () => {
   );
 
   await provider.sendRestockNotification({
+    employee: { employeeCode: "EMP071", name: "สมพง สมหมาย" },
     slots: [
       { slotNumber: 3, productName: "Sanitary Pads", status: "AVAILABLE" },
       { slotNumber: 1, productName: "Tissue", status: "AVAILABLE" },
@@ -111,9 +112,15 @@ test("LINE provider sends one compact Thai Flex card for restock", async () => {
   assert.equal(payload.messages.length, 1);
   assert.equal(payload.messages[0].type, "flex");
   assert.equal(payload.messages[0].contents.type, "bubble");
-  assert.match(payload.messages[0].altText, /^เติมสินค้าสำเร็จ/);
+  assert.equal(
+    payload.messages[0].altText,
+    "เติมสินค้าสำเร็จโดย EMP071 — สมพง สมหมาย และอัปเดตสถานะทุกช่องแล้ว",
+  );
   assert.deepEqual(collectText(payload.messages[0]), [
     "เติมสินค้าสำเร็จ",
+    "ผู้ดำเนินการ",
+    "EMP071 — สมพง สมหมาย",
+    "สถานะสินค้าปัจจุบัน",
     "ช่อง 1: Tissue",
     "พร้อมจำหน่าย",
     "ช่อง 2: Wet Wipes",
@@ -121,6 +128,37 @@ test("LINE provider sends one compact Thai Flex card for restock", async () => {
     "ช่อง 3: Sanitary Pads",
     "พร้อมจำหน่าย",
   ]);
+});
+
+test("LINE restock card handles missing employee details without inventing an identity", async () => {
+  let body = "";
+  const provider = new LineNotificationProvider(
+    { channelAccessToken: "server-only-token", targetId: "server-target" },
+    async (_input, init) => {
+      body = String(init?.body);
+      return new Response(null, { status: 200 });
+    },
+  );
+
+  await provider.sendRestockNotification({
+    employee: null,
+    slots: [{ slotNumber: 1, productName: "Tissue", status: "AVAILABLE" }],
+  });
+
+  const payload = JSON.parse(body) as {
+    messages: Array<{ altText: string; contents: unknown }>;
+  };
+  assert.equal(payload.messages.length, 1);
+  assert.match(payload.messages[0].altText, /ไม่พบข้อมูลผู้ดำเนินการ/);
+  assert.deepEqual(collectText(payload.messages[0]), [
+    "เติมสินค้าสำเร็จ",
+    "ผู้ดำเนินการ",
+    "ไม่พบข้อมูลพนักงาน",
+    "สถานะสินค้าปัจจุบัน",
+    "ช่อง 1: Tissue",
+    "พร้อมจำหน่าย",
+  ]);
+  assert.doesNotMatch(body, /undefined|null/);
 });
 
 test("Flex payloads use LINE-compatible message, bubble, box, and text shapes", async () => {

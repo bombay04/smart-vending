@@ -16,6 +16,7 @@ import {
 const committedRestock: RestockResult = {
   restockId: 44,
   employeeId: 7,
+  employee: { employeeCode: "EMP007", name: "Verified Employee" },
   slots: [
     { slotNumber: 1, productName: "Tissue", status: "AVAILABLE" },
     { slotNumber: 2, productName: "Wet Wipes", status: "AVAILABLE" },
@@ -32,11 +33,10 @@ class MemoryRestockStore implements RestockStore {
 
   constructor(private readonly failure: Error | null = null) {}
 
-  async commitRestock(sessionId: number, employeeId: number) {
+  async commitRestock(sessionId: number) {
     this.commitCount += 1;
     assert.equal(sessionId, 9);
     if (this.failure) throw this.failure;
-    assert.equal(employeeId, committedRestock.employeeId);
     return structuredClone(this.committed);
   }
 
@@ -75,10 +75,12 @@ test("successful restock sends one notification with three authoritative mapping
   const store = new MemoryRestockStore();
   const provider = new MockNotificationProvider();
 
-  const result = await createMockRestockWithDependencies(9, 7, store, { provider });
+  const result = await createMockRestockWithDependencies(9, store, { provider });
 
   assert.deepEqual(result, committedRestock);
-  assert.deepEqual(provider.restockNotifications, [{ slots: store.databaseSlots }]);
+  assert.deepEqual(provider.restockNotifications, [
+    { employee: committedRestock.employee, slots: store.databaseSlots },
+  ]);
   assert.equal(store.notificationClaimed, true);
 });
 
@@ -92,11 +94,12 @@ test("restock notification reads every configured slot after a partial restock r
   ];
   const provider = new MockNotificationProvider();
 
-  const result = await createMockRestockWithDependencies(9, 7, store, { provider });
+  const result = await createMockRestockWithDependencies(9, store, { provider });
 
   assert.deepEqual(result.slots, [{ slotNumber: 1, productName: "Tissue", status: "AVAILABLE" }]);
   assert.deepEqual(provider.restockNotifications, [
     {
+      employee: committedRestock.employee,
       slots: [
         { slotNumber: 1, productName: "Tissue", status: "AVAILABLE" },
         { slotNumber: 2, productName: "Wet Wipes", status: "SOLD_OUT" },
@@ -112,7 +115,7 @@ test("failed restock never claims or sends a notification", async () => {
   const provider = new MockNotificationProvider();
 
   await assert.rejects(
-    createMockRestockWithDependencies(9, 7, store, { provider }),
+    createMockRestockWithDependencies(9, store, { provider }),
     (error: unknown) => error instanceof HttpError && error.statusCode === 403,
   );
   assert.equal(store.notificationClaimed, false);
@@ -125,8 +128,8 @@ test("durable restock claim prevents duplicate notification handling", async () 
   const provider = new MockNotificationProvider();
   const notifications = { provider };
 
-  await createMockRestockWithDependencies(9, 7, store, notifications);
-  await createMockRestockWithDependencies(9, 7, store, notifications);
+  await createMockRestockWithDependencies(9, store, notifications);
+  await createMockRestockWithDependencies(9, store, notifications);
 
   assert.equal(store.commitCount, 2);
   assert.equal(provider.restockNotifications.length, 1);
@@ -137,7 +140,7 @@ test("notification failure leaves the restock committed and slots available", as
   const provider = new MockNotificationProvider(new Error("line-secret-value"));
   const logEntries: unknown[][] = [];
 
-  const result = await createMockRestockWithDependencies(9, 7, store, {
+  const result = await createMockRestockWithDependencies(9, store, {
     provider,
     logger: { error: (...entry: unknown[]) => logEntries.push(entry) },
   });

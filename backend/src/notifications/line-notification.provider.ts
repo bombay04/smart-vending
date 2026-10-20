@@ -131,6 +131,7 @@ function statusCard(
   altText: string,
   slots: ProductStatusNotificationSlot[],
   headerColor: string,
+  leadingContents: FlexComponent[] = [],
 ): FlexMessage {
   return {
     type: "flex",
@@ -143,12 +144,20 @@ function statusCard(
         type: "box",
         layout: "vertical",
         paddingAll: "18px",
-        contents: [...slots]
-          .sort((left, right) => left.slotNumber - right.slotNumber)
-          .map(statusRow),
+        contents: [
+          ...leadingContents,
+          ...[...slots].sort((left, right) => left.slotNumber - right.slotNumber).map(statusRow),
+        ],
       },
     },
   };
+}
+
+function restockOperator(notification: RestockNotification): string | null {
+  const employeeCode = notification.employee?.employeeCode.trim() ?? "";
+  const name = notification.employee?.name.trim() ?? "";
+  const parts = [employeeCode, name].filter(Boolean);
+  return parts.length > 0 ? parts.join(" — ") : null;
 }
 
 export class LineNotificationProvider implements NotificationProvider {
@@ -170,12 +179,27 @@ export class LineNotificationProvider implements NotificationProvider {
   }
 
   sendRestockNotification(notification: RestockNotification): Promise<void> {
+    const operator = restockOperator(notification);
     return this.sendMessages([
       statusCard(
         "เติมสินค้าสำเร็จ",
-        "เติมสินค้าสำเร็จและอัปเดตสถานะทุกช่องแล้ว",
+        operator
+          ? `เติมสินค้าสำเร็จโดย ${operator} และอัปเดตสถานะทุกช่องแล้ว`
+          : "เติมสินค้าสำเร็จและอัปเดตสถานะทุกช่องแล้ว (ไม่พบข้อมูลผู้ดำเนินการ)",
         notification.slots,
         "#2563EB",
+        [
+          detailRow("ผู้ดำเนินการ", operator ?? "ไม่พบข้อมูลพนักงาน"),
+          { type: "separator", margin: "lg", color: "#E2E8F0" },
+          {
+            type: "text",
+            text: "สถานะสินค้าปัจจุบัน",
+            color: "#334155",
+            size: "sm",
+            weight: "bold",
+            margin: "lg",
+          },
+        ],
       ),
     ]);
   }
