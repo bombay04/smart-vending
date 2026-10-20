@@ -32,6 +32,53 @@ test("a slot remains disabled until its observed closed-open-closed cycle comple
   assert.match(restock, /role="status"/);
 });
 
+test("unlock status stays on buttons while important errors use one shared alert", async () => {
+  const [restock, appCss] = await Promise.all([
+    source("src/components/RestockMode.tsx"),
+    source("src/App.css"),
+  ]);
+  for (const label of [
+    "กำลังเปิด...",
+    "ช่องเปิดอยู่แล้ว",
+    "รอฝาเปิด",
+    "ต้องตรวจสอบ",
+  ]) {
+    assert.match(restock, new RegExp(label.replaceAll(".", "\\.")));
+  }
+  assert.doesNotMatch(restock, /ส่งคำสั่งเปิดช่อง/);
+  assert.doesNotMatch(restock, /restock-unlock-feedback/);
+  assert.doesNotMatch(appCss, /restock-unlock-feedback/);
+  assert.match(
+    restock,
+    /className="restock-unlock-alert"[\s\S]*?role="alert"[\s\S]*?aria-live="assertive"/,
+  );
+  assert.ok(
+    restock.indexOf('className="restock-unlock-alert"') <
+      restock.indexOf('className="hardware-grid"'),
+  );
+  assert.match(
+    restock,
+    /ช่อง \$\{slotNumber\} ไม่เปิดตามคำสั่ง กรุณาติดต่อผู้ดูแล/,
+  );
+});
+
+test("1024 by 600 layout keeps all three restock cards in one compact row", async () => {
+  const appCss = await source("src/App.css");
+  const shortLandscape = appCss.slice(appCss.indexOf("max-height: 700px"));
+  assert.match(
+    shortLandscape,
+    /\.hardware-grid\s*\{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/,
+  );
+  assert.match(
+    shortLandscape,
+    /\.hardware-card\s*\{[\s\S]*?padding: 16px 18px;/,
+  );
+  assert.match(
+    shortLandscape,
+    /\.restock-unlock-alert\s*\{[\s\S]*?font-size: 0\.82rem;/,
+  );
+});
+
 test("sensor errors show an unavailable state instead of unlock controls", async () => {
   const restock = await source("src/components/RestockMode.tsx");
   assert.match(restock, /isUnavailable && \(/);
