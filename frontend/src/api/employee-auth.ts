@@ -13,7 +13,10 @@ const employeesUrl = `${API_BASE_URL}/api/v1/employees`;
 const faceRegistrationCompleteUrl = `${API_BASE_URL}/api/v1/employees/face-registration/complete`;
 
 export class EmployeeValidationError extends Error {
-  constructor(readonly rejected: boolean) {
+  constructor(
+    readonly rejected: boolean,
+    readonly status: number | null = null,
+  ) {
     super(
       rejected
         ? "Employee access is not active."
@@ -62,25 +65,31 @@ async function postEmployeeCode(
 ): Promise<AuthenticatedEmployee> {
   const normalizedEmployeeCode = employeeCode.trim().toUpperCase();
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(
-      sessionId === undefined
-        ? { employeeCode: normalizedEmployeeCode }
-        : {
-            employeeCode: normalizedEmployeeCode,
-            sessionId,
-            ...(faceAuthorization === undefined ? {} : { faceAuthorization }),
-          },
-    ),
-    signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(
+        sessionId === undefined
+          ? { employeeCode: normalizedEmployeeCode }
+          : {
+              employeeCode: normalizedEmployeeCode,
+              sessionId,
+              ...(faceAuthorization === undefined ? {} : { faceAuthorization }),
+            },
+      ),
+      signal,
+    });
+  } catch (error: unknown) {
+    if (signal?.aborted) throw error;
+    throw new EmployeeValidationError(false);
+  }
 
   if (!response.ok) {
-    throw new EmployeeValidationError(response.status === 401);
+    throw new EmployeeValidationError(response.status === 401, response.status);
   }
 
   let responseData: unknown;

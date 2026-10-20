@@ -12,6 +12,7 @@ import {
 import type { AuthenticatedEmployee } from "../types/employee";
 import { playAudioFeedback } from "../api/audio";
 import { validateEmployeeAndNotify } from "../audio-feedback.mjs";
+import { employeeValidationFailureState } from "../employee-validation-state.mjs";
 import SuccessCheckIcon from "./SuccessCheckIcon";
 
 interface EmployeeAuthenticationProps {
@@ -25,6 +26,8 @@ type AuthenticationState =
   | "IDLE"
   | "SCANNING"
   | "SUCCESS"
+  | "AUTHORIZATION_FAILED"
+  | "VALIDATION_UNAVAILABLE"
   | FaceAuthenticationFailureStatus;
 
 const STATE_CONTENT: Record<
@@ -59,6 +62,14 @@ const STATE_CONTENT: Record<
   UNAVAILABLE: {
     title: "ไม่สามารถใช้งานเครื่องสแกนได้",
     instruction: "กรุณาตรวจสอบบริการสแกนใบหน้าบนเครื่อง แล้วลองอีกครั้ง",
+  },
+  AUTHORIZATION_FAILED: {
+    title: "ไม่สามารถยืนยันสิทธิ์พนักงานได้",
+    instruction: "เซสชันหรือสิทธิ์ยืนยันตัวตนไม่ถูกต้อง กรุณากลับหน้าหลักแล้วเริ่มใหม่",
+  },
+  VALIDATION_UNAVAILABLE: {
+    title: "ไม่สามารถตรวจสอบสิทธิ์พนักงานได้",
+    instruction: "ระบบส่วนกลางไม่พร้อมใช้งาน กรุณาลองอีกครั้ง",
   },
   LOCKED: {
     instruction: "ยืนยันตัวตนไม่สำเร็จหลายครั้ง",
@@ -249,9 +260,9 @@ function EmployeeAuthentication({
           }
           setAuthenticationState(error.status);
         }
-      } else if (error instanceof EmployeeValidationError && error.rejected) {
+      } else if (error instanceof EmployeeValidationError) {
         setRemainingAttempts(null);
-        setAuthenticationState("NO_MATCH");
+        setAuthenticationState(employeeValidationFailureState(error));
       } else {
         setRemainingAttempts(null);
         setAuthenticationState("UNAVAILABLE");
