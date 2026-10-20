@@ -88,17 +88,22 @@ function RestockMode({
   const [unlockCycles, setUnlockCycles] = useState<
     Map<number, RestockUnlockCycle>
   >(() => new Map());
-  const [unlockFeedback, setUnlockFeedback] = useState<{
-    slotNumber: number;
-    tone: "success" | "error";
-    message: string;
-  } | null>(null);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
   const submissionInProgressRef = useRef(false);
   const unlockCyclesRef = useRef(new Map<number, RestockUnlockCycle>());
   const allSlotsReady =
     slots !== null &&
     slots.length === 3 &&
     slots.every((slot) => slot.validationState === "READY");
+  const unlockAlertMessages = [
+    ...Array.from(unlockCycles.entries())
+      .filter(([, cycle]) => cycle.stage === "ASSISTANCE")
+      .map(
+        ([slotNumber]) =>
+          `ช่อง ${slotNumber} ไม่เปิดตามคำสั่ง กรุณาติดต่อผู้ดูแล`,
+      ),
+    ...(unlockError ? [unlockError] : []),
+  ];
 
   useEffect(() => {
     let isActive = true;
@@ -127,18 +132,6 @@ function RestockMode({
               observationTime,
             );
             unlockCyclesRef.current = next;
-            for (const [slotNumber, cycle] of next) {
-              if (
-                cycle.stage === "ASSISTANCE" &&
-                current.get(slotNumber)?.stage !== "ASSISTANCE"
-              ) {
-                setUnlockFeedback({
-                  slotNumber,
-                  tone: "error",
-                  message: "ไม่พบการเปิดช่อง กรุณาติดต่อผู้ดูแล ห้ามกดเปิดซ้ำ",
-                });
-              }
-            }
             return next;
           });
           setIsUnavailable(false);
@@ -248,7 +241,7 @@ function RestockMode({
     );
     unlockCyclesRef.current = requesting;
     setUnlockCycles(requesting);
-    setUnlockFeedback(null);
+    setUnlockError(null);
     try {
       await unlockRestockSlot(sessionId, slotNumber, faceAuthorization);
       const waitingForOpen = markRestockUnlockSent(
@@ -258,11 +251,6 @@ function RestockMode({
       );
       unlockCyclesRef.current = waitingForOpen;
       setUnlockCycles(waitingForOpen);
-      setUnlockFeedback({
-        slotNumber,
-        tone: "success",
-        message: `ส่งคำสั่งเปิดช่อง ${slotNumber} แล้ว กรุณาเปิดช่อง`,
-      });
     } catch (error) {
       const cleared = clearRestockUnlockRequest(
         unlockCyclesRef.current,
@@ -270,14 +258,11 @@ function RestockMode({
       );
       unlockCyclesRef.current = cleared;
       setUnlockCycles(cleared);
-      setUnlockFeedback({
-        slotNumber,
-        tone: "error",
-        message:
-          error instanceof Error && error.message
-            ? error.message
-            : `เปิดช่อง ${slotNumber} ไม่สำเร็จ กรุณาลองใหม่`,
-      });
+      setUnlockError(
+        error instanceof Error && error.message
+          ? `ช่อง ${slotNumber}: ${error.message}`
+          : `เปิดช่อง ${slotNumber} ไม่สำเร็จ กรุณาติดต่อผู้ดูแล`,
+      );
     }
   }
 
@@ -334,6 +319,16 @@ function RestockMode({
           </section>
         )}
 
+        {!isUnavailable && unlockAlertMessages.length > 0 && (
+          <div
+            className="restock-unlock-alert"
+            role="alert"
+            aria-live="assertive"
+          >
+            {unlockAlertMessages.join(" • ")}
+          </div>
+        )}
+
         {slots !== null && !isUnavailable && (
           <section
             className="hardware-grid"
@@ -352,7 +347,7 @@ function RestockMode({
                         : unlockCycle?.stage === "REQUESTING"
                           ? "กำลังเปิด..."
                           : unlockCycle?.stage === "WAITING_OPEN"
-                            ? "รอเปิดช่อง"
+                            ? "รอฝาเปิด"
                             : unlockCycle?.stage === "WAITING_CLOSED"
                               ? "รอปิดช่อง"
                               : unlockCycle?.stage === "ASSISTANCE"
@@ -416,14 +411,6 @@ function RestockMode({
                       >
                         {unlockButtonText}
                       </button>
-                      {unlockFeedback?.slotNumber === slot.slotNumber && (
-                        <p
-                          className={`restock-unlock-feedback restock-unlock-feedback--${unlockFeedback.tone}`}
-                          role="status"
-                        >
-                          {unlockFeedback.message}
-                        </p>
-                      )}
                     </>
                   );
                 })()}
