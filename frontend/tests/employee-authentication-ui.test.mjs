@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { employeeValidationFailureState } from "../src/employee-validation-state.mjs";
 
 const source = (path) =>
   readFile(new URL(`../${path}`, import.meta.url), "utf8");
@@ -52,6 +53,10 @@ test("face authentication translates scanning, errors, attempts, lockout, and su
     "มีการใช้งานกล้องอยู่ กรุณาลองอีกครั้งในอีกสักครู่",
     "ไม่สามารถใช้งานเครื่องสแกนได้",
     "กรุณาตรวจสอบบริการสแกนใบหน้าบนเครื่อง แล้วลองอีกครั้ง",
+    "ไม่สามารถยืนยันสิทธิ์พนักงานได้",
+    "เซสชันหรือสิทธิ์ยืนยันตัวตนไม่ถูกต้อง กรุณากลับหน้าหลักแล้วเริ่มใหม่",
+    "ไม่สามารถตรวจสอบสิทธิ์พนักงานได้",
+    "ระบบส่วนกลางไม่พร้อมใช้งาน กรุณาลองอีกครั้ง",
     "ยืนยันตัวตนไม่สำเร็จ",
     "กรุณาลองสแกนใบหน้าอีกครั้ง",
     "ระบบถูกล็อกชั่วคราว",
@@ -116,6 +121,25 @@ test("face authentication translates scanning, errors, attempts, lockout, and su
   assert.match(
     authentication,
     /\{!isScanning && !isSuccessful && \([\s\S]*?<div className="employee-auth-actions">/,
+  );
+});
+
+test("backend employee validation failures are not reported as scanner failures", () => {
+  assert.equal(
+    employeeValidationFailureState({ rejected: true, status: 401 }),
+    "NO_MATCH",
+  );
+  assert.equal(
+    employeeValidationFailureState({ rejected: false, status: 403 }),
+    "AUTHORIZATION_FAILED",
+  );
+  assert.equal(
+    employeeValidationFailureState({ rejected: false, status: 500 }),
+    "VALIDATION_UNAVAILABLE",
+  );
+  assert.equal(
+    employeeValidationFailureState({ rejected: false, status: null }),
+    "VALIDATION_UNAVAILABLE",
   );
 });
 

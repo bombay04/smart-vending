@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import test from "node:test";
 import { HttpError } from "../utils/http-error";
 import {
@@ -154,6 +156,13 @@ test("binds the database employee verified for a restock session and prevents re
     employeeCode: "EMP001",
     name: "Active Employee",
   });
+  const authorized = await requireActiveKioskSessionWithStore(
+    created!.id,
+    "RESTOCK_AUTH",
+    store,
+    NOW,
+  );
+  assert.equal(authorized.employeeId, 1);
   assert.equal(
     (await bindVerifiedRestockEmployeeToSessionWithStore(created!.id, 1, store, NOW)).employeeId,
     1,
@@ -163,6 +172,19 @@ test("binds the database employee verified for a restock session and prevents re
     (error: unknown) => error instanceof HttpError && error.statusCode === 403,
   );
   assert.equal(store.sessions[0].employeeId, 1);
+});
+
+test("database constraint permits RESTOCK_AUTH to transition from unbound to face-verified", async () => {
+  const migration = await readFile(
+    resolve(
+      "prisma/migrations/20261020113000_allow_restock_session_employee_binding/migration.sql",
+    ),
+    "utf8",
+  );
+
+  assert.match(migration, /DROP CONSTRAINT "KioskSession_employee_binding_check"/);
+  assert.match(migration, /\("type" = 'RESTOCK_AUTH'\) OR/);
+  assert.doesNotMatch(migration, /RESTOCK_AUTH' AND "employeeId" IS NULL/);
 });
 
 test("creates FACE_REGISTRATION only for an active employee and binds safe identity", async () => {
@@ -210,6 +232,10 @@ test("expired sessions are marked EXPIRED and never returned or authorized", asy
   assert.equal(store.sessions[0].status, "EXPIRED");
   await assert.rejects(
     requireActiveKioskSessionWithStore(created!.id, "RESTOCK_AUTH", store, later),
+    (error: unknown) => error instanceof HttpError && error.statusCode === 403,
+  );
+  await assert.rejects(
+    bindVerifiedRestockEmployeeToSessionWithStore(created!.id, 1, store, later),
     (error: unknown) => error instanceof HttpError && error.statusCode === 403,
   );
 });
