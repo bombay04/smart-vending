@@ -59,19 +59,20 @@ export function isKioskSession(value: unknown): value is KioskSession {
     (typeof session.employeeId === "number" &&
       Number.isInteger(session.employeeId) &&
       session.employeeId > 0);
+  const hasMatchingEmployee =
+    typeof session.employeeId === "number" &&
+    employee !== null &&
+    typeof employee === "object" &&
+    (employee as Record<string, unknown>).id === session.employeeId;
   const employeeMatchesType =
-    (session.type === "RESTOCK_AUTH" &&
-      session.employeeId === null &&
-      employee === null) ||
-    ([
-      "FACE_REGISTRATION",
-      "EMPLOYEE_DRAFT_DELETE",
-      "EMPLOYEE_OFFBOARDING",
-    ].includes(String(session.type)) &&
-      typeof session.employeeId === "number" &&
-      employee !== null &&
-      typeof employee === "object" &&
-      (employee as Record<string, unknown>).id === session.employeeId);
+    session.type === "RESTOCK_AUTH"
+      ? (session.employeeId === null && employee === null) ||
+        hasMatchingEmployee
+      : [
+          "FACE_REGISTRATION",
+          "EMPLOYEE_DRAFT_DELETE",
+          "EMPLOYEE_OFFBOARDING",
+        ].includes(String(session.type)) && hasMatchingEmployee;
   return (
     typeof session.id === "number" &&
     Number.isInteger(session.id) &&
@@ -142,7 +143,10 @@ export async function fetchCurrentKioskSession(
     signal,
   });
   if (!response.ok) throw new Error("Kiosk session status is unavailable.");
-  const payload = (await response.json()) as { session?: unknown; serverNow?: unknown };
+  const payload = (await response.json()) as {
+    session?: unknown;
+    serverNow?: unknown;
+  };
   if (payload.session === null) return null;
   if (!isKioskSession(payload.session) || payload.session.status !== "ACTIVE") {
     throw new Error("Kiosk session status is invalid.");

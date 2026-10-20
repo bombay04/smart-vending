@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   cancelKioskSession,
   fetchCurrentKioskSession,
@@ -7,14 +7,23 @@ import {
 } from "../api/kiosk-session";
 import { getPortalSessionState } from "../portal-session-state.mjs";
 import { getKioskSessionSecondsRemaining } from "../kiosk-session-countdown.mjs";
+import {
+  createStaffSessionPollState,
+  reduceStaffSessionPollState,
+} from "../staff-session-poll-state.mjs";
 
 function StaffPortal() {
-  const [session, setSession] = useState<KioskSession | null>(null);
-  const [sessionLoaded, setSessionLoaded] = useState(false);
+  const [pollState, setPollState] = useState(() =>
+    createStaffSessionPollState<KioskSession>(),
+  );
   const [sessionBusy, setSessionBusy] = useState(false);
-  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [countdownNow, setCountdownNow] = useState(performance.now());
+  const sessionMutationVersionRef = useRef(0);
+
+  const session = pollState.session;
+  const sessionError = actionError ?? pollState.pollingError;
 
   useEffect(() => {
     let stopped = false;
@@ -22,17 +31,31 @@ function StaffPortal() {
     let controller: AbortController | undefined;
     const poll = async () => {
       controller = new AbortController();
+      const requestMutationVersion = sessionMutationVersionRef.current;
       try {
         const current = await fetchCurrentKioskSession(controller.signal);
-        if (!stopped) {
-          setSession(current);
-          setSessionLoaded(true);
-          setSessionError(null);
+        if (
+          !stopped &&
+          requestMutationVersion === sessionMutationVersionRef.current
+        ) {
+          setPollState((currentState) =>
+            reduceStaffSessionPollState<KioskSession>(currentState, {
+              type: "POLL_SUCCEEDED",
+              session: current,
+            }),
+          );
+          setActionError(null);
         }
       } catch {
-        if (!stopped) {
-          setSessionLoaded(true);
-          setSessionError("ไม่สามารถตรวจสอบสถานะเครื่องได้");
+        if (
+          !stopped &&
+          requestMutationVersion === sessionMutationVersionRef.current
+        ) {
+          setPollState((currentState) =>
+            reduceStaffSessionPollState<KioskSession>(currentState, {
+              type: "POLL_FAILED",
+            }),
+          );
         }
       } finally {
         if (!stopped) timeoutId = window.setTimeout(poll, 1500);
@@ -47,7 +70,10 @@ function StaffPortal() {
   }, []);
 
   useEffect(() => {
-    const interval = window.setInterval(() => setCountdownNow(performance.now()), 1000);
+    const interval = window.setInterval(
+      () => setCountdownNow(performance.now()),
+      1000,
+    );
     return () => window.clearInterval(interval);
   }, []);
 
@@ -59,13 +85,21 @@ function StaffPortal() {
 
   async function handleStartRestock() {
     if (sessionBusy || session !== null) return;
+    sessionMutationVersionRef.current += 1;
     setSessionBusy(true);
-    setSessionError(null);
+    setActionError(null);
     setMessage(null);
     try {
-      setSession(await startRestockSession());
+      const startedSession = await startRestockSession();
+      sessionMutationVersionRef.current += 1;
+      setPollState((currentState) =>
+        reduceStaffSessionPollState<KioskSession>(currentState, {
+          type: "SESSION_STARTED",
+          session: startedSession,
+        }),
+      );
     } catch (error) {
-      setSessionError(
+      setActionError(
         error instanceof Error
           ? `ไม่สามารถเริ่มการเติมสินค้าได้: ${error.message}`
           : "ไม่สามารถเริ่มการเติมสินค้าได้",
@@ -77,15 +111,21 @@ function StaffPortal() {
 
   async function handleCancelRestock() {
     if (session?.type !== "RESTOCK_AUTH" || sessionBusy) return;
+    sessionMutationVersionRef.current += 1;
     setSessionBusy(true);
-    setSessionError(null);
+    setActionError(null);
     setMessage(null);
     try {
       await cancelKioskSession(session.id);
-      setSession(null);
+      sessionMutationVersionRef.current += 1;
+      setPollState((currentState) =>
+        reduceStaffSessionPollState<KioskSession>(currentState, {
+          type: "SESSION_CANCELLED",
+        }),
+      );
       setMessage("ยกเลิกการเติมสินค้าแล้ว");
     } catch (error) {
-      setSessionError(
+      setActionError(
         error instanceof Error
           ? `ไม่สามารถยกเลิกการเติมสินค้าได้: ${error.message}`
           : "ไม่สามารถยกเลิกการเติมสินค้าได้",
@@ -96,7 +136,10 @@ function StaffPortal() {
   }
 
   const portalState = getPortalSessionState(session, "RESTOCK_AUTH");
-  const secondsRemaining = getKioskSessionSecondsRemaining(session, countdownNow);
+  const secondsRemaining = getKioskSessionSecondsRemaining(
+    session,
+    countdownNow,
+  );
 
   return (
     <main className="home-page remote-portal-page staff-portal-page">
@@ -122,7 +165,10 @@ function StaffPortal() {
                 className="staff-primary-action"
                 type="button"
                 disabled={
-                  sessionBusy || !sessionLoaded || sessionError !== null
+                  sessionBusy ||
+                  !pollState.sessionLoaded ||
+                  !pollState.statusAvailable ||
+                  sessionError !== null
                 }
                 onClick={() => void handleStartRestock()}
               >
@@ -159,9 +205,7 @@ function StaffPortal() {
             <div className="staff-restock-modal-icon" aria-hidden="true">
               ◉
             </div>
-            <h2 id="staff-restock-modal-title">
-              กำลังรอยืนยันตัวตนพนักงาน
-            </h2>
+            <h2 id="staff-restock-modal-title">กำลังรอยืนยันตัวตนพนักงาน</h2>
             <p id="staff-restock-modal-description">
               กรุณาสแกนใบหน้าที่หน้าจอเครื่องขายสินค้า
             </p>
