@@ -15,7 +15,10 @@ import {
   startDraftDelete,
   startOffboarding,
 } from "../services/employee-lifecycle.service";
-import { requireActiveKioskSession } from "../services/kiosk-session.service";
+import {
+  bindVerifiedRestockEmployeeToSession,
+  requireActiveKioskSession,
+} from "../services/kiosk-session.service";
 import { verifyFaceAuthorization } from "../services/restock-authorization";
 import { HttpError } from "../utils/http-error";
 
@@ -49,6 +52,7 @@ export async function faceAuthenticateEmployeeForSession(
       throw new HttpError("Face authorization does not match the employee.", 403);
     }
     const employee = await authenticateEmployee(face.employeeCode);
+    await bindVerifiedRestockEmployeeToSession(session.id, employee.id);
     response.status(200).json({ employee });
   } catch (error: unknown) {
     next(error);

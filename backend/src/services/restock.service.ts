@@ -4,7 +4,10 @@ import {
   type NotificationDependencies,
 } from "../notifications/notification-dispatch";
 import { getNotificationProvider } from "../notifications/line-notification.provider";
-import type { ProductStatusNotificationSlot } from "../notifications/notification-provider";
+import type {
+  ProductStatusNotificationSlot,
+  RestockNotificationEmployee,
+} from "../notifications/notification-provider";
 import { HttpError } from "../utils/http-error";
 import { PILOT_KIOSK_MACHINE_ID } from "./kiosk-session.service";
 
@@ -19,20 +22,28 @@ export interface RestockedSlot {
 export interface RestockResult {
   restockId: number;
   employeeId: number;
+  employee: RestockNotificationEmployee;
   slots: RestockedSlot[];
 }
 
 export interface RestockStore {
-  commitRestock(sessionId: number, employeeId: number): Promise<RestockResult>;
+  commitRestock(sessionId: number): Promise<RestockResult>;
   claimRestockNotification(restockId: number): Promise<boolean>;
   listRestockNotificationSlots(): Promise<ProductStatusNotificationSlot[]>;
 }
 
 const prismaRestockStore: RestockStore = {
-  async commitRestock(sessionId, employeeId) {
+  async commitRestock(sessionId) {
     return prisma.$transaction(async (transaction) => {
       const now = new Date();
-      const session = await transaction.kioskSession.findUnique({ where: { id: sessionId } });
+      const session = await transaction.kioskSession.findUnique({
+        where: { id: sessionId },
+        include: {
+          employee: {
+            select: { id: true, employeeCode: true, name: true, isActive: true },
+          },
+        },
+      });
       if (
         !session ||
         session.machineId !== PILOT_KIOSK_MACHINE_ID ||
@@ -48,15 +59,11 @@ const prismaRestockStore: RestockStore = {
         }
         throw new HttpError("A valid active restock session is required.", 403);
       }
-      const employee = await transaction.employee.findUnique({
-        where: { id: employeeId },
-      });
-
-      if (!employee) {
-        throw new HttpError("Employee not found.", 404);
+      const verifiedEmployee = session.employee;
+      if (!verifiedEmployee || session.employeeId !== verifiedEmployee.id) {
+        throw new HttpError("A verified restock employee is required.", 403);
       }
-
-      if (!employee.isActive) {
+      if (!verifiedEmployee.isActive) {
         throw new HttpError("Employee is inactive.", 403);
       }
 
@@ -91,7 +98,7 @@ const prismaRestockStore: RestockStore = {
 
       const restockLog = await transaction.restockLog.create({
         data: {
-          employeeId,
+          employeeId: verifiedEmployee.id,
           note: "Mock restock",
           beforeStatus,
           afterStatus,
@@ -105,7 +112,11 @@ const prismaRestockStore: RestockStore = {
 
       return {
         restockId: restockLog.id,
-        employeeId,
+        employeeId: verifiedEmployee.id,
+        employee: {
+          employeeCode: verifiedEmployee.employeeCode,
+          name: verifiedEmployee.name,
+        },
         slots: requiredSlots.map((slot) => ({
           slotNumber: slot.slotNumber,
           productName: slot.product?.name ?? null,
@@ -138,11 +149,10 @@ const prismaRestockStore: RestockStore = {
 
 export async function createMockRestockWithDependencies(
   sessionId: number,
-  employeeId: number,
   store: RestockStore,
   notifications?: NotificationDependencies,
 ): Promise<RestockResult> {
-  const restock = await store.commitRestock(sessionId, employeeId);
+  const restock = await store.commitRestock(sessionId);
 
   if (notifications) {
     let slots: ProductStatusNotificationSlot[];
@@ -161,7 +171,7 @@ export async function createMockRestockWithDependencies(
 
     await dispatchRestockNotification(
       restock.restockId,
-      { slots },
+      { employee: restock.employee, slots },
       () => store.claimRestockNotification(restock.restockId),
       notifications,
     );
@@ -170,8 +180,8 @@ export async function createMockRestockWithDependencies(
   return restock;
 }
 
-export function createMockRestock(sessionId: number, employeeId: number): Promise<RestockResult> {
-  return createMockRestockWithDependencies(sessionId, employeeId, prismaRestockStore, {
+export function createMockRestock(sessionId: number): Promise<RestockResult> {
+  return createMockRestockWithDependencies(sessionId, prismaRestockStore, {
     provider: getNotificationProvider(),
   });
 }

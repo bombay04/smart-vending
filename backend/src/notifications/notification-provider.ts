@@ -13,7 +13,13 @@ export interface ProductStatusNotificationSlot {
 
 export type RestockNotificationSlot = ProductStatusNotificationSlot;
 
+export interface RestockNotificationEmployee {
+  employeeCode: string;
+  name: string;
+}
+
 export interface RestockNotification {
+  employee: RestockNotificationEmployee | null;
   slots: RestockNotificationSlot[];
 }
 

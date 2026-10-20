@@ -41,6 +41,12 @@ export interface KioskSessionStore {
     nextStatus: "COMPLETED" | "CANCELLED",
     now: Date,
   ): Promise<KioskSessionRecord | null>;
+  bindRestockEmployee(
+    sessionId: number,
+    employeeId: number,
+    machineId: string,
+    now: Date,
+  ): Promise<KioskSessionRecord | null>;
   findById(sessionId: number, now: Date): Promise<KioskSessionRecord | null>;
 }
 
@@ -129,6 +135,27 @@ const prismaKioskSessionStore: KioskSessionStore = {
           status: nextStatus,
           completedAt: nextStatus === "COMPLETED" ? now : null,
         },
+        select: sessionSelect,
+      });
+    });
+  },
+
+  async bindRestockEmployee(sessionId, employeeId, machineId, now) {
+    return prisma.$transaction(async (transaction) => {
+      const result = await transaction.kioskSession.updateMany({
+        where: {
+          id: sessionId,
+          machineId,
+          type: "RESTOCK_AUTH",
+          status: "ACTIVE",
+          expiresAt: { gt: now },
+          OR: [{ employeeId: null }, { employeeId }],
+        },
+        data: { employeeId },
+      });
+      if (result.count !== 1) return null;
+      return transaction.kioskSession.findUnique({
+        where: { id: sessionId },
         select: sessionSelect,
       });
     });
@@ -257,6 +284,26 @@ export async function requireActiveKioskSessionWithStore(
   return session;
 }
 
+export async function bindVerifiedRestockEmployeeToSessionWithStore(
+  sessionIdValue: unknown,
+  employeeIdValue: unknown,
+  store: KioskSessionStore,
+  now = new Date(),
+): Promise<KioskSessionRecord> {
+  const sessionId = positiveInteger(sessionIdValue, "sessionId");
+  const employeeId = positiveInteger(employeeIdValue, "employeeId");
+  const session = await store.bindRestockEmployee(
+    sessionId,
+    employeeId,
+    PILOT_KIOSK_MACHINE_ID,
+    now,
+  );
+  if (!session || session.employeeId !== employeeId || !session.employee) {
+    throw new HttpError("Unable to bind the verified employee to the restock session.", 403);
+  }
+  return session;
+}
+
 export const getCurrentKioskSession = () =>
   getCurrentKioskSessionWithStore(prismaKioskSessionStore);
 export const createRestockSession = () => createRestockSessionWithStore(prismaKioskSessionStore);
@@ -268,3 +315,5 @@ export const cancelKioskSession = (sessionId: unknown) =>
   transitionKioskSessionWithStore(sessionId, "CANCELLED", prismaKioskSessionStore);
 export const requireActiveKioskSession = (sessionId: unknown, type: KioskSessionType) =>
   requireActiveKioskSessionWithStore(sessionId, type, prismaKioskSessionStore);
+export const bindVerifiedRestockEmployeeToSession = (sessionId: unknown, employeeId: unknown) =>
+  bindVerifiedRestockEmployeeToSessionWithStore(sessionId, employeeId, prismaKioskSessionStore);

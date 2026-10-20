@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { HttpError } from "../utils/http-error";
 import {
+  bindVerifiedRestockEmployeeToSessionWithStore,
   createFaceRegistrationSessionWithStore,
   createRestockSessionWithStore,
   getCurrentKioskSessionWithStore,
@@ -105,6 +106,29 @@ class MemorySessionStore implements KioskSessionStore {
     return session;
   }
 
+  async bindRestockEmployee(sessionId: number, employeeId: number, machineId: string, now: Date) {
+    this.expire(now);
+    const session =
+      this.sessions.find(
+        (item) =>
+          item.id === sessionId &&
+          item.machineId === machineId &&
+          item.type === "RESTOCK_AUTH" &&
+          item.status === "ACTIVE" &&
+          item.expiresAt > now &&
+          (item.employeeId === null || item.employeeId === employeeId),
+      ) ?? null;
+    const employee = this.employees.get(employeeId);
+    if (!session || !employee) return null;
+    session.employeeId = employeeId;
+    session.employee = {
+      id: employee.id,
+      employeeCode: employee.employeeCode,
+      name: employee.name,
+    };
+    return session;
+  }
+
   async findById(sessionId: number, now: Date) {
     this.expire(now);
     return this.sessions.find((item) => item.id === sessionId) ?? null;
@@ -117,6 +141,28 @@ test("creates an unbound RESTOCK_AUTH session with a five-minute expiry", async 
   assert.equal(session?.type, "RESTOCK_AUTH");
   assert.equal(session?.employeeId, null);
   assert.equal(new Date(session!.expiresAt).getTime() - NOW.getTime(), 300_000);
+});
+
+test("binds the database employee verified for a restock session and prevents rebinding", async () => {
+  const store = new MemorySessionStore();
+  const created = await createRestockSessionWithStore(store, NOW);
+
+  const bound = await bindVerifiedRestockEmployeeToSessionWithStore(created!.id, 1, store, NOW);
+  assert.equal(bound.employeeId, 1);
+  assert.deepEqual(bound.employee, {
+    id: 1,
+    employeeCode: "EMP001",
+    name: "Active Employee",
+  });
+  assert.equal(
+    (await bindVerifiedRestockEmployeeToSessionWithStore(created!.id, 1, store, NOW)).employeeId,
+    1,
+  );
+  await assert.rejects(
+    bindVerifiedRestockEmployeeToSessionWithStore(created!.id, 2, store, NOW),
+    (error: unknown) => error instanceof HttpError && error.statusCode === 403,
+  );
+  assert.equal(store.sessions[0].employeeId, 1);
 });
 
 test("creates FACE_REGISTRATION only for an active employee and binds safe identity", async () => {

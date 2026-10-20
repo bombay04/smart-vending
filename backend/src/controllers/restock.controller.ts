@@ -32,7 +32,7 @@ export async function mockRestock(
   }
 
   try {
-    const restock = await createMockRestock(sessionId, employeeId);
+    const restock = await createMockRestock(sessionId);
     response.status(201).json({ data: restock });
   } catch (error: unknown) {
     next(error);
