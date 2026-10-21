@@ -25,7 +25,7 @@ test("LINE provider sends two ordered Thai Flex cards with authoritative sale da
   let requestedUrl = "";
   let requestedInit: RequestInit | undefined;
   const provider = new LineNotificationProvider(
-    { channelAccessToken: "server-only-token", targetId: "server-target" },
+    { channelAccessToken: "server-only-token" },
     async (input, init) => {
       requestedUrl = input.toString();
       requestedInit = init;
@@ -44,16 +44,16 @@ test("LINE provider sends two ordered Thai Flex cards with authoritative sale da
     ],
   });
 
-  assert.equal(requestedUrl, "https://api.line.me/v2/bot/message/push");
+  assert.equal(requestedUrl, "https://api.line.me/v2/bot/message/broadcast");
+  assert.equal(requestedInit?.method, "POST");
   assert.equal(
     (requestedInit?.headers as Record<string, string>).Authorization,
     "Bearer server-only-token",
   );
   const payload = JSON.parse(String(requestedInit?.body)) as {
-    to: string;
     messages: Array<{ type: string; altText: string; contents: { type: string } }>;
   };
-  assert.equal(payload.to, "server-target");
+  assert.equal(Object.hasOwn(payload, "to"), false);
   assert.equal(payload.messages.length, 2);
   assert.deepEqual(
     payload.messages.map((message) => [message.type, message.contents.type]),
@@ -90,7 +90,7 @@ test("LINE provider sends two ordered Thai Flex cards with authoritative sale da
 test("LINE provider sends one compact Thai Flex card for restock", async () => {
   let body = "";
   const provider = new LineNotificationProvider(
-    { channelAccessToken: "server-only-token", targetId: "server-target" },
+    { channelAccessToken: "server-only-token" },
     async (_input, init) => {
       body = String(init?.body);
       return new Response(null, { status: 200 });
@@ -109,6 +109,7 @@ test("LINE provider sends one compact Thai Flex card for restock", async () => {
   const payload = JSON.parse(body) as {
     messages: Array<{ type: string; altText: string; contents: { type: string } }>;
   };
+  assert.equal(Object.hasOwn(payload, "to"), false);
   assert.equal(payload.messages.length, 1);
   assert.equal(payload.messages[0].type, "flex");
   assert.equal(payload.messages[0].contents.type, "bubble");
@@ -133,7 +134,7 @@ test("LINE provider sends one compact Thai Flex card for restock", async () => {
 test("LINE restock card handles missing employee details without inventing an identity", async () => {
   let body = "";
   const provider = new LineNotificationProvider(
-    { channelAccessToken: "server-only-token", targetId: "server-target" },
+    { channelAccessToken: "server-only-token" },
     async (_input, init) => {
       body = String(init?.body);
       return new Response(null, { status: 200 });
@@ -164,7 +165,7 @@ test("LINE restock card handles missing employee details without inventing an id
 test("Flex payloads use LINE-compatible message, bubble, box, and text shapes", async () => {
   let body = "";
   const provider = new LineNotificationProvider(
-    { channelAccessToken: "server-only-token", targetId: "server-target" },
+    { channelAccessToken: "server-only-token" },
     async (_input, init) => {
       body = String(init?.body);
       return new Response(null, { status: 200 });
@@ -194,13 +195,13 @@ test("Flex payloads use LINE-compatible message, bubble, box, and text shapes", 
   }
 });
 
-test("LINE provider errors never contain credentials or response content", async () => {
+test("LINE provider does not retry quota errors or expose credentials", async () => {
   const token = "line-super-secret-token";
-  const targetId = "line-secret-target";
-  const provider = new LineNotificationProvider(
-    { channelAccessToken: token, targetId },
-    async () => new Response(`provider echoed ${token} ${targetId}`, { status: 401 }),
-  );
+  let requestCount = 0;
+  const provider = new LineNotificationProvider({ channelAccessToken: token }, async () => {
+    requestCount += 1;
+    return new Response(`provider echoed ${token}`, { status: 429 });
+  });
 
   await assert.rejects(
     provider.sendSaleNotification({
@@ -211,9 +212,10 @@ test("LINE provider errors never contain credentials or response content", async
     }),
     (error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
-      return !message.includes(token) && !message.includes(targetId);
+      return !message.includes(token);
     },
   );
+  assert.equal(requestCount, 1);
 });
 
 test("frontend source and example configuration contain no LINE credentials", () => {

@@ -6,12 +6,11 @@ import {
   type SaleNotification,
 } from "./notification-provider";
 
-const LINE_MESSAGING_API_ENDPOINT = "https://api.line.me/v2/bot/message/push";
+const LINE_MESSAGING_API_ENDPOINT = "https://api.line.me/v2/bot/message/broadcast";
 const LINE_REQUEST_TIMEOUT_MS = 3_000;
 
 interface LineConfiguration {
   channelAccessToken: string;
-  targetId: string;
 }
 
 type FlexComponent = Record<string, unknown>;
@@ -205,8 +204,8 @@ export class LineNotificationProvider implements NotificationProvider {
   }
 
   private async sendMessages(messages: FlexMessage[]): Promise<void> {
-    const { channelAccessToken, targetId } = this.configuration;
-    if (!channelAccessToken || !targetId) {
+    const { channelAccessToken } = this.configuration;
+    if (!channelAccessToken) {
       throw new NotificationProviderError("LINE notifications are not configured.");
     }
 
@@ -219,7 +218,6 @@ export class LineNotificationProvider implements NotificationProvider {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          to: targetId,
           messages,
         }),
         signal: AbortSignal.timeout(LINE_REQUEST_TIMEOUT_MS),
@@ -239,6 +237,5 @@ export class LineNotificationProvider implements NotificationProvider {
 export function getNotificationProvider(): NotificationProvider {
   return new LineNotificationProvider({
     channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN ?? "",
-    targetId: process.env.LINE_TARGET_ID ?? "",
   });
 }
