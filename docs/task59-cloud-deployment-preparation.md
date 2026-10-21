@@ -47,7 +47,14 @@ Backend application configuration:
 - `OMISE_API_VERSION`
 - `OMISE_WEBHOOK_SECRET`
 - `LINE_CHANNEL_ACCESS_TOKEN`
-- `LINE_TARGET_ID`
+
+LINE notifications use the Messaging API broadcast endpoint. The channel access
+token is the only LINE recipient configuration: each notification is sent to all
+users who are eligible to receive broadcasts from the existing LINE Official
+Account. No follower webhook or subscriber table is required. Broadcast delivery
+is subject to the LINE Official Account's monthly message allowance and the
+Messaging API broadcast rate limit; quota or delivery errors are logged without
+automatic retries so a notification failure cannot repeat vending or restocking.
 
 Frontend build configuration:
 
