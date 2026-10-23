@@ -25,6 +25,7 @@ export interface PaymentRecord {
   paymentStatus: PaymentStatus;
   providerChargeId: string | null;
   providerStatus: string | null;
+  providerLiveMode: boolean | null;
   expiresAt: Date | null;
   paidAt: Date | null;
   customerCancelledAt: Date | null;
@@ -33,6 +34,7 @@ export interface PaymentRecord {
 export interface SaveProviderPaymentInput {
   chargeId: string;
   providerStatus: string;
+  providerLiveMode: boolean;
   expiresAt: Date | null;
 }
 
@@ -67,6 +69,7 @@ function toPaymentRecord(transaction: TransactionWithRelations): PaymentRecord {
     paymentStatus: transaction.paymentStatus,
     providerChargeId: transaction.providerChargeId,
     providerStatus: transaction.providerStatus,
+    providerLiveMode: transaction.providerLiveMode,
     expiresAt: transaction.expiresAt,
     paidAt: transaction.paidAt,
     customerCancelledAt: transaction.customerCancelledAt,
@@ -130,6 +133,7 @@ const prismaPaymentStore: PaymentStore = {
             data: {
               slotId: slot.id,
               productId: slot.product.id,
+              productNameSnapshot: slot.product.name,
               amount: slot.product.price,
               paymentStatus: "PENDING",
               paymentProvider: "OPN",
@@ -150,6 +154,7 @@ const prismaPaymentStore: PaymentStore = {
       data: {
         providerChargeId: payment.chargeId,
         providerStatus: payment.providerStatus,
+        providerLiveMode: payment.providerLiveMode,
         expiresAt: payment.expiresAt,
       },
       include: { slot: true, product: true },
@@ -210,6 +215,7 @@ const prismaPaymentStore: PaymentStore = {
             data: {
               paymentStatus,
               providerStatus: providerPayment.status,
+              providerLiveMode: providerPayment.liveMode,
               expiresAt: providerPayment.expiresAt
                 ? new Date(providerPayment.expiresAt)
                 : current.expiresAt,
@@ -433,6 +439,7 @@ export async function createPromptPayPaymentWithDependencies(
   const saved = await store.saveProviderPayment(pendingPayment.id, {
     chargeId: providerPayment.chargeId,
     providerStatus: providerPayment.status,
+    providerLiveMode: providerPayment.liveMode,
     expiresAt: providerPayment.expiresAt ? new Date(providerPayment.expiresAt) : null,
   });
   validateProviderPayment(saved, providerPayment);

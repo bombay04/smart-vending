@@ -28,6 +28,23 @@ enum PaymentProvider {
   OPN
 }
 
+enum SalesReportType {
+  DAILY
+  WEEKLY
+}
+
+enum SalesReportDeliveryStatus {
+  SENDING
+  SENT
+  FAILED
+  MANUAL_REVIEW
+}
+
+enum SalesReportDataMode {
+  LIVE
+  DEMO_TEST
+}
+
 enum KioskSessionType {
   RESTOCK_AUTH
   FACE_REGISTRATION
@@ -72,10 +89,12 @@ model Transaction {
   slotId                      Int
   productId                   Int
   amount                      Decimal         @db.Decimal(10, 2)
+  productNameSnapshot         String?
   paymentStatus               PaymentStatus   @default(PENDING)
   paymentProvider             PaymentProvider
   providerChargeId            String?         @unique
   providerStatus              String?
+  providerLiveMode            Boolean?
   expiresAt                   DateTime?
   paidAt                      DateTime?
   customerCancelledAt         DateTime?
@@ -87,6 +106,30 @@ model Transaction {
 
   @@index([slotId])
   @@index([productId])
+  @@index([paymentStatus, paidAt])
+}
+
+model SalesReportDelivery {
+  id                    Int                       @id @default(autoincrement())
+  reportType            SalesReportType
+  dataMode              SalesReportDataMode       @default(LIVE)
+  periodStart           DateTime
+  periodEnd             DateTime
+  status                SalesReportDeliveryStatus @default(SENDING)
+  attemptCount          Int                       @default(1)
+  claimedAt             DateTime                  @default(now())
+  retryKey              String                    @unique
+  retryKeyCreatedAt     DateTime                  @default(now())
+  payloadSnapshot       String
+  sentAt                DateTime?
+  lineRequestId         String?
+  lineAcceptedRequestId String?
+  lastErrorCode         String?
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+
+  @@unique([reportType, dataMode, periodStart])
+  @@index([status, claimedAt])
 }
 
 model Employee {

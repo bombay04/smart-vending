@@ -10,6 +10,7 @@ const chargeResponse = {
   amount: 2000,
   currency: "THB",
   paid: false,
+  livemode: false,
   expires_at: "2026-09-23T10:00:00.000Z",
   source: {
     scannable_code: {
@@ -91,6 +92,7 @@ test("Omise provider retrieves the exact stored charge and exposes status and pa
   assert.equal(payment.chargeId, "chrg_test_abc123");
   assert.equal(payment.status, "successful");
   assert.equal(payment.paid, true);
+  assert.equal(payment.liveMode, false);
 });
 
 test("Omise provider failures expose only a safe provider error", async () => {

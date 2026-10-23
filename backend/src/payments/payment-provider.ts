@@ -6,6 +6,7 @@ export interface ProviderPayment {
   amount: number;
   currency: "THB";
   paid: boolean;
+  liveMode: boolean;
   qrImageUrl: string | null;
   expiresAt: string | null;
 }
