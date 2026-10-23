@@ -12,8 +12,10 @@ const GUIDANCE: Record<FaceScanState, string> = {
   FACE_DETECTED: "ตรวจพบใบหน้า กรุณามองตรง",
   NO_FACE: "ไม่พบใบหน้า กรุณาขยับเข้าหากล้อง",
   MULTIPLE_FACES: "กรุณาให้มีเพียงหนึ่งคนในภาพ",
-  TURN_LEFT: "หันหน้าไปทางซ้ายของตัวเอง",
-  TURN_RIGHT: "หันหน้าไปทางขวาของตัวเอง",
+  // Deployed YuNet/camera coordinates are mirrored: the legacy server token
+  // TURN_RIGHT is the employee's physical left, and TURN_LEFT is physical right.
+  TURN_LEFT: "หันหน้าไปทางขวา",
+  TURN_RIGHT: "หันหน้าไปทางซ้าย",
   RETURN_CENTER: "กลับมามองตรง",
   VERIFYING: "กำลังตรวจสอบและบันทึกภาพ...",
   SUCCESS: "ตรวจสอบสำเร็จ",

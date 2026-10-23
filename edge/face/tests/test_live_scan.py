@@ -100,7 +100,7 @@ class LiveScanTests(unittest.TestCase):
             )
         return result, states, camera
 
-    def test_realistic_head_turn_passes_and_uses_one_camera_session(self):
+    def test_turn_left_token_accepts_negative_yaw_delta(self):
         detections = (
             [detection()] * 4
             + [detection(46), detection(46)]
@@ -114,7 +114,7 @@ class LiveScanTests(unittest.TestCase):
         self.assertIn("TURN_LEFT", [state[0] for state in states])
         self.assertIn("VERIFYING", [state[0] for state in states])
 
-    def test_opposite_server_selected_direction_uses_positive_yaw_delta(self):
+    def test_turn_right_token_accepts_positive_yaw_delta(self):
         detections = (
             [detection()] * 4
             + [detection(54), detection(54)]
@@ -134,6 +134,32 @@ class LiveScanTests(unittest.TestCase):
                 clock=IncrementingClock(0.01),
             )
 
+        self.assertEqual(len(embeddings), 3)
+        self.assertIn("TURN_RIGHT", [state[0] for state in states])
+
+    def test_random_challenge_selection_keeps_both_directions_supported(self):
+        detections = (
+            [detection()] * 4
+            + [detection(54), detection(54)]
+            + [detection(), detection()]
+            + [detection()] * 3
+        )
+        camera = Camera([Frame()] * 20)
+        states = []
+        with (
+            patch("edge.face.live_scan.CameraCaptureSession", return_value=camera),
+            patch("edge.face.live_scan.secrets.choice", return_value="TURN_RIGHT") as choice,
+        ):
+            embeddings = collect_liveness_verified_embeddings(
+                Engine(detections),
+                sample_count=3,
+                state_callback=lambda *state: states.append(state),
+                preview_callback=lambda _frame: None,
+                cancelled=lambda: False,
+                clock=IncrementingClock(0.01),
+            )
+
+        choice.assert_called_once_with(("TURN_LEFT", "TURN_RIGHT"))
         self.assertEqual(len(embeddings), 3)
         self.assertIn("TURN_RIGHT", [state[0] for state in states])
 
