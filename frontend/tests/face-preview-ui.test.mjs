@@ -37,12 +37,15 @@ test("preview polls ephemeral localhost state and never requests browser camera 
   assert.doesNotMatch(`${preview}\n${scanApi}`, /getUserMedia|mediaDevices/);
 });
 
-test("challenge guidance uses the user's physical Thai directions without arrows", async () => {
+test("challenge guidance maps deployed server tokens to physical Thai directions", async () => {
   const preview = await source("src/components/FaceScanPreview.tsx");
 
-  assert.match(preview, /TURN_LEFT: "หันหน้าไปทางซ้ายของตัวเอง"/);
-  assert.match(preview, /TURN_RIGHT: "หันหน้าไปทางขวาของตัวเอง"/);
+  // Physical Pi acceptance established that the server's negative-delta
+  // TURN_LEFT token is physical right, while TURN_RIGHT is physical left.
+  assert.match(preview, /TURN_LEFT: "หันหน้าไปทางขวา"/);
+  assert.match(preview, /TURN_RIGHT: "หันหน้าไปทางซ้าย"/);
   assert.match(preview, /RETURN_CENTER: "กลับมามองตรง"/);
+  assert.doesNotMatch(preview, /ของตัวเอง/);
   assert.doesNotMatch(preview, /←|→|ตามลูกศร/);
 });
 
