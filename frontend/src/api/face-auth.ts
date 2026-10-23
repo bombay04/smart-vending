@@ -4,6 +4,8 @@ export type FaceAuthenticationFailureStatus =
   | "NO_MATCH"
   | "NO_FACE"
   | "MULTIPLE_FACES"
+  | "LIVENESS_FAILED"
+  | "CANCELLED"
   | "BUSY"
   | "UNAVAILABLE"
   | "LOCKED";
@@ -99,12 +101,13 @@ export async function requestFaceAuthenticationStatus(
 
 export async function requestFaceAuthentication(
   sessionId: number,
+  scanId: string,
   signal?: AbortSignal,
 ): Promise<FaceAuthenticationMatch> {
   const response = await fetch(faceAuthenticationUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sessionId }),
+    body: JSON.stringify({ sessionId, scanId }),
     signal,
   });
   const responseData = await readJson(response);
@@ -156,6 +159,16 @@ export async function requestFaceAuthentication(
         status,
         responseData.remainingAttempts,
       );
+    }
+    if (
+      response.status === 422 &&
+      status === "LIVENESS_FAILED" &&
+      isNonNegativeInteger(responseData.remainingAttempts)
+    ) {
+      throw new FaceAuthenticationError(status, responseData.remainingAttempts);
+    }
+    if (response.status === 409 && status === "CANCELLED") {
+      throw new FaceAuthenticationError("CANCELLED");
     }
     if (response.status === 409 && status === "BUSY") {
       throw new FaceAuthenticationError("BUSY");

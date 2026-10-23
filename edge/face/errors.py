@@ -41,6 +41,20 @@ class MultipleFacesError(FaceEngineError):
     code = "MULTIPLE_FACES"
 
 
+class LivenessError(FaceEngineError):
+    """The active liveness challenge was not completed reliably."""
+
+    code = "LIVENESS_FAILED"
+
+
+class ScanCancelledError(FaceEngineError):
+    code = "SCAN_CANCELLED"
+
+
+class ScanTimeoutError(LivenessError):
+    code = "SCAN_TIMEOUT"
+
+
 class TemplateStorageError(FaceEngineError):
     code = "TEMPLATE_ERROR"
 

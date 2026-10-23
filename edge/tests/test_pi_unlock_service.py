@@ -12,6 +12,7 @@ from edge.face.errors import (
     CameraError,
     CorruptTemplateError,
     DuplicateFaceError,
+    LivenessError,
     ModelError,
     MultipleFacesError,
     NoFaceError,
@@ -135,6 +136,8 @@ class PiUnlockServiceTests(unittest.TestCase):
         self.camera_environment_patch.start()
         self.client = pi_unlock_service.app.test_client()
         pi_unlock_service.face_engine = None
+        self.original_scan_registry = pi_unlock_service.face_scan_registry
+        pi_unlock_service.face_scan_registry = pi_unlock_service.FaceScanRegistry()
         self.original_camera_usb_recovery = pi_unlock_service.camera_usb_recovery
         self.original_camera_usb_recovery_initialized = (
             pi_unlock_service.camera_usb_recovery_initialized
@@ -154,6 +157,7 @@ class PiUnlockServiceTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         pi_unlock_service.face_engine = None
+        pi_unlock_service.face_scan_registry = self.original_scan_registry
         pi_unlock_service.camera_usb_recovery = self.original_camera_usb_recovery
         pi_unlock_service.camera_usb_recovery_initialized = (
             self.original_camera_usb_recovery_initialized
@@ -640,6 +644,40 @@ class PiUnlockServiceTests(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, serialized)
 
+    def test_liveness_failure_blocks_authentication_and_counts_once(self) -> None:
+        self.set_face_outcome(error=LivenessError("challenge failed"))
+
+        response = self.post_face_authentication()
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.get_json(),
+            {"status": "LIVENESS_FAILED", "remainingAttempts": 2},
+        )
+        self.assertNotIn("authorization", response.get_data(as_text=True).lower())
+
+    def test_scan_status_preview_and_cancel_are_local_ephemeral_state(self) -> None:
+        scan_id = "scan-1234567890123456"
+        self.assertTrue(pi_unlock_service.face_scan_registry.begin(scan_id))
+        pi_unlock_service.face_scan_registry.update(
+            scan_id, "TURN_LEFT", "TURN_LEFT", 1, 2
+        )
+        pi_unlock_service.face_scan_registry.set_jpeg(scan_id, b"jpeg-data")
+
+        status_response = self.client.get(f"/face/scan/status?scanId={scan_id}")
+        preview_response = self.client.get(f"/face/scan/preview?scanId={scan_id}")
+        cancel_response = self.client.post(
+            "/face/scan/cancel", json={"scanId": scan_id}
+        )
+
+        self.assertEqual(status_response.status_code, 200)
+        self.assertEqual(status_response.get_json()["state"], "TURN_LEFT")
+        self.assertTrue(status_response.get_json()["previewReady"])
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_response.mimetype, "image/jpeg")
+        self.assertEqual(preview_response.data, b"jpeg-data")
+        self.assertEqual(cancel_response.get_json(), {"status": "CANCELLED"})
+
     def test_successful_registration_normalizes_code_and_returns_safe_fields(self) -> None:
         engine = StubFaceEngine(result=recognition_result(matched=True))
         pi_unlock_service.face_engine = engine
@@ -678,6 +716,18 @@ class PiUnlockServiceTests(unittest.TestCase):
             self.assertEqual(response.status_code, 422)
             self.assertEqual(response.get_json(), {"status": expected_status})
             self.assertNotIn("sensitive", response.get_data(as_text=True))
+
+    def test_liveness_failure_blocks_registration_without_template_success(self) -> None:
+        engine = StubFaceEngine(
+            result=recognition_result(matched=True),
+            registration_error=LivenessError("challenge failed"),
+        )
+        pi_unlock_service.face_engine = engine
+
+        response = self.post_face_registration()
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.get_json(), {"status": "LIVENESS_FAILED"})
 
     def test_registration_does_not_overwrite_existing_template(self) -> None:
         engine = StubFaceEngine(

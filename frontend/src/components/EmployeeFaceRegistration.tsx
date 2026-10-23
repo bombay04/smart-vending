@@ -9,6 +9,8 @@ import type { KioskSession } from "../api/kiosk-session";
 import { fetchCurrentKioskSession } from "../api/kiosk-session";
 import { canCancelFaceRegistration } from "../face-registration-session-cleanup.mjs";
 import SuccessCheckIcon from "./SuccessCheckIcon";
+import { cancelFaceScan, createFaceScanId } from "../api/face-scan";
+import FaceScanPreview from "./FaceScanPreview";
 
 type RegistrationState =
   | "CHECKING"
@@ -21,6 +23,8 @@ type RegistrationState =
   | "NO_FACE"
   | "MULTIPLE_FACES"
   | "FACE_ALREADY_REGISTERED"
+  | "LIVENESS_FAILED"
+  | "CANCELLED"
   | "BUSY"
   | "PI_UNAVAILABLE";
 
@@ -65,6 +69,13 @@ const CONTENT: Record<
     instruction:
       "ใบหน้านี้ถูกใช้งานกับพนักงานคนอื่นในระบบแล้ว",
   },
+  LIVENESS_FAILED: {
+    title: "ไม่ผ่านการตรวจสอบการเคลื่อนไหว",
+    instruction: "กรุณาทำตามลูกศรบนภาพและลองสแกนอีกครั้ง",
+  },
+  CANCELLED: {
+    instruction: "การสแกนถูกยกเลิก กรุณาเริ่มใหม่",
+  },
   BUSY: {
     title: "กล้องกำลังถูกใช้งาน",
     instruction: "มีการใช้งานกล้องอยู่ กรุณาลองอีกครั้งในอีกสักครู่",
@@ -92,7 +103,19 @@ function EmployeeFaceRegistration({
   const [state, setState] = useState<RegistrationState>("CHECKING");
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [activeScanId, setActiveScanId] = useState<string | null>(null);
+  const activeScanIdRef = useRef<string | null>(null);
   const activeRequestRef = useRef<AbortController | null>(null);
+
+  useEffect(
+    () => () => {
+      activeRequestRef.current?.abort();
+      if (activeScanIdRef.current !== null) {
+        void cancelFaceScan(activeScanIdRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (employee === null) {
@@ -137,8 +160,11 @@ function EmployeeFaceRegistration({
   async function capture() {
     if (employee === null) return;
     const controller = new AbortController();
+    const scanId = createFaceScanId();
     activeRequestRef.current?.abort();
     activeRequestRef.current = controller;
+    activeScanIdRef.current = scanId;
+    setActiveScanId(scanId);
     setState("CAPTURING");
     try {
       const authorizedSession = await fetchCurrentKioskSession(
@@ -152,7 +178,7 @@ function EmployeeFaceRegistration({
         onSessionEnded();
         return;
       }
-      await registerEmployeeFace(employee.employeeCode, controller.signal);
+      await registerEmployeeFace(employee.employeeCode, scanId, controller.signal);
       await syncCompletion();
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
@@ -163,12 +189,20 @@ function EmployeeFaceRegistration({
             error.status === "UNAVAILABLE" ? "PI_UNAVAILABLE" : error.status,
           );
       } else setState("PI_UNAVAILABLE");
+    } finally {
+      setActiveScanId((current) => (current === scanId ? null : current));
+      if (activeScanIdRef.current === scanId) activeScanIdRef.current = null;
     }
   }
 
   async function handleCancel() {
     if (isCancelling) return;
     activeRequestRef.current?.abort();
+    if (activeScanId !== null) {
+      void cancelFaceScan(activeScanId);
+      activeScanIdRef.current = null;
+      setActiveScanId(null);
+    }
     setCancelError(null);
     setIsCancelling(true);
     try {
@@ -188,6 +222,8 @@ function EmployeeFaceRegistration({
   const retryCapture = [
     "NO_FACE",
     "MULTIPLE_FACES",
+    "LIVENESS_FAILED",
+    "CANCELLED",
     "BUSY",
     "PI_UNAVAILABLE",
   ].includes(state);
@@ -200,6 +236,8 @@ function EmployeeFaceRegistration({
           "NO_FACE",
           "MULTIPLE_FACES",
           "FACE_ALREADY_REGISTERED",
+          "LIVENESS_FAILED",
+          "CANCELLED",
           "PI_UNAVAILABLE",
         ].includes(state)
         ? "error"
@@ -232,6 +270,9 @@ function EmployeeFaceRegistration({
           {state === "SUCCESS" ? <SuccessCheckIcon /> : <span>◎</span>}
         </div>
         <h1 id="registration-title">{pageTitle}</h1>
+        {state === "CAPTURING" && activeScanId !== null && (
+          <FaceScanPreview scanId={activeScanId} />
+        )}
         <div
           className={`employee-registration-status face-flow-status face-flow-status--${statusTone}`}
           aria-live="polite"

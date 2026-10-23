@@ -5,6 +5,8 @@ export type FaceRegistrationFailureStatus =
   | "MULTIPLE_FACES"
   | "ALREADY_REGISTERED"
   | "FACE_ALREADY_REGISTERED"
+  | "LIVENESS_FAILED"
+  | "CANCELLED"
   | "BUSY"
   | "UNAVAILABLE";
 
@@ -31,13 +33,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export async function registerEmployeeFace(
   employeeCode: string,
+  scanId: string,
   signal?: AbortSignal,
 ): Promise<FaceRegistrationSuccess> {
   const normalizedEmployeeCode = employeeCode.trim().toUpperCase();
   const response = await fetch(`${PI_UNLOCK_BASE_URL}/face/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ employeeCode: normalizedEmployeeCode }),
+    body: JSON.stringify({ employeeCode: normalizedEmployeeCode, scanId }),
     signal,
   });
 
@@ -68,9 +71,13 @@ export async function registerEmployeeFace(
     if (
       response.status === 422 &&
       (responseData.status === "NO_FACE" ||
-        responseData.status === "MULTIPLE_FACES")
+        responseData.status === "MULTIPLE_FACES" ||
+        responseData.status === "LIVENESS_FAILED")
     ) {
       throw new FaceRegistrationError(responseData.status);
+    }
+    if (response.status === 409 && responseData.status === "CANCELLED") {
+      throw new FaceRegistrationError("CANCELLED");
     }
     if (
       response.status === 409 &&
