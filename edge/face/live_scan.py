@@ -152,6 +152,8 @@ def collect_liveness_verified_embeddings(
             baseline_yaw = _median(baseline_yaws)
             if phase == "CHALLENGE":
                 delta = yaw - baseline_yaw
+                # This sign contract is server-side and intentionally independent
+                # of how the kiosk preview is mirrored or rendered.
                 passed_direction = (
                     delta <= -YAW_CHALLENGE_DELTA
                     if selected_challenge == "TURN_LEFT"

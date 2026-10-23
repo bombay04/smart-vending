@@ -103,8 +103,9 @@ CAMERA_STATUS_REASONS = {
     "NEAR_BLACK_FRAME",
 }
 SCAN_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
-PREVIEW_JPEG_QUALITY = 70
-PREVIEW_MIN_INTERVAL_SECONDS = 0.18
+PREVIEW_JPEG_QUALITY = 55
+PREVIEW_MAX_WIDTH = 320
+PREVIEW_MIN_INTERVAL_SECONDS = 0.16
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("pi-unlock-service")
@@ -549,9 +550,20 @@ def make_preview_callback(scan_id: str) -> Callable[[Any], None]:
         now = time.monotonic()
         if now - last_encoded_at < PREVIEW_MIN_INTERVAL_SECONDS:
             return
+        preview_frame = frame
+        frame_height, frame_width = int(frame.shape[0]), int(frame.shape[1])
+        if frame_width > PREVIEW_MAX_WIDTH:
+            preview_height = max(
+                1, round(frame_height * PREVIEW_MAX_WIDTH / frame_width)
+            )
+            preview_frame = cv2.resize(
+                frame,
+                (PREVIEW_MAX_WIDTH, preview_height),
+                interpolation=cv2.INTER_AREA,
+            )
         encoded, jpeg = cv2.imencode(
             ".jpg",
-            frame,
+            preview_frame,
             [int(cv2.IMWRITE_JPEG_QUALITY), PREVIEW_JPEG_QUALITY],
         )
         if not encoded:

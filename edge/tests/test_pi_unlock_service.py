@@ -673,10 +673,57 @@ class PiUnlockServiceTests(unittest.TestCase):
         self.assertEqual(status_response.status_code, 200)
         self.assertEqual(status_response.get_json()["state"], "TURN_LEFT")
         self.assertTrue(status_response.get_json()["previewReady"])
+        self.assertEqual(status_response.get_json()["previewVersion"], 1)
         self.assertEqual(preview_response.status_code, 200)
         self.assertEqual(preview_response.mimetype, "image/jpeg")
         self.assertEqual(preview_response.data, b"jpeg-data")
         self.assertEqual(cancel_response.get_json(), {"status": "CANCELLED"})
+
+    def test_preview_encoding_downscales_only_the_published_jpeg(self) -> None:
+        class Frame:
+            shape = (480, 640, 3)
+
+        class PreviewFrame:
+            shape = (240, 320, 3)
+
+        class FakeCv2:
+            IMWRITE_JPEG_QUALITY = 1
+            INTER_AREA = 3
+
+            def __init__(self) -> None:
+                self.resize_calls = []
+                self.encoded_frame = None
+                self.parameters = None
+
+            def resize(self, frame, dimensions, *, interpolation):
+                self.resize_calls.append((frame, dimensions, interpolation))
+                return PreviewFrame()
+
+            def imencode(self, _extension, frame, parameters):
+                self.encoded_frame = frame
+                self.parameters = parameters
+                return True, b"jpeg"
+
+        scan_id = "scan-1234567890123456"
+        original_frame = Frame()
+        fake_cv2 = FakeCv2()
+        pi_unlock_service.face_scan_registry.begin(scan_id)
+
+        with patch.object(pi_unlock_service, "require_cv2", return_value=fake_cv2):
+            publish = pi_unlock_service.make_preview_callback(scan_id)
+            publish(original_frame)
+
+        self.assertEqual(
+            fake_cv2.resize_calls,
+            [(original_frame, (320, 240), fake_cv2.INTER_AREA)],
+        )
+        self.assertIsInstance(fake_cv2.encoded_frame, PreviewFrame)
+        self.assertEqual(
+            fake_cv2.parameters,
+            [fake_cv2.IMWRITE_JPEG_QUALITY, 55],
+        )
+        self.assertEqual(original_frame.shape, (480, 640, 3))
+        self.assertEqual(pi_unlock_service.face_scan_registry.jpeg(scan_id), b"jpeg")
 
     def test_successful_registration_normalizes_code_and_returns_safe_fields(self) -> None:
         engine = StubFaceEngine(result=recognition_result(matched=True))

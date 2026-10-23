@@ -28,9 +28,32 @@ test("preview polls ephemeral localhost state and never requests browser camera 
   assert.match(scanApi, /PI_UNLOCK_BASE_URL.*\/face\/scan\/preview/s);
   assert.match(scanApi, /\/face\/scan\/status/);
   assert.match(scanApi, /\/face\/scan\/cancel/);
-  assert.match(preview, /window\.clearInterval\(statusTimer\)/);
+  assert.match(preview, /window\.clearTimeout\(statusTimer\)/);
+  assert.match(preview, /window\.setTimeout\(\(\) => void poll\(\), 150\)/);
+  assert.doesNotMatch(preview, /setInterval/);
   assert.match(preview, /controller\.abort\(\)/);
+  assert.match(preview, /next\.previewVersion > requestedPreviewVersionRef\.current/);
+  assert.doesNotMatch(preview, /previewTimer/);
   assert.doesNotMatch(`${preview}\n${scanApi}`, /getUserMedia|mediaDevices/);
+});
+
+test("challenge guidance uses the user's physical Thai directions without arrows", async () => {
+  const preview = await source("src/components/FaceScanPreview.tsx");
+
+  assert.match(preview, /TURN_LEFT: "หันหน้าไปทางซ้ายของตัวเอง"/);
+  assert.match(preview, /TURN_RIGHT: "หันหน้าไปทางขวาของตัวเอง"/);
+  assert.match(preview, /RETURN_CENTER: "กลับมามองตรง"/);
+  assert.doesNotMatch(preview, /←|→|ตามลูกศร/);
+});
+
+test("the centered face guide is enlarged without covering the full preview", async () => {
+  const css = await source("src/App.css");
+
+  assert.match(css, /\.face-preview__guide[\s\S]*inset: 6% 20% 14%/);
+  assert.doesNotMatch(
+    css,
+    /\.face-preview__guide\s*\{[^}]*inset: 0(?:px|%|;)/,
+  );
 });
 
 test("both Pi scan operations send a unique scan id with the protected request", async () => {
