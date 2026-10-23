@@ -114,6 +114,29 @@ class LiveScanTests(unittest.TestCase):
         self.assertIn("TURN_LEFT", [state[0] for state in states])
         self.assertIn("VERIFYING", [state[0] for state in states])
 
+    def test_opposite_server_selected_direction_uses_positive_yaw_delta(self):
+        detections = (
+            [detection()] * 4
+            + [detection(54), detection(54)]
+            + [detection(), detection()]
+            + [detection()] * 3
+        )
+        camera = Camera([Frame()] * 20)
+        states = []
+        with patch("edge.face.live_scan.CameraCaptureSession", return_value=camera):
+            embeddings = collect_liveness_verified_embeddings(
+                Engine(detections),
+                sample_count=3,
+                state_callback=lambda *state: states.append(state),
+                preview_callback=lambda _frame: None,
+                cancelled=lambda: False,
+                challenge="TURN_RIGHT",
+                clock=IncrementingClock(0.01),
+            )
+
+        self.assertEqual(len(embeddings), 3)
+        self.assertIn("TURN_RIGHT", [state[0] for state in states])
+
     def test_static_photo_or_phone_display_fails_the_challenge(self):
         camera = Camera([Frame()] * 50)
         with patch("edge.face.live_scan.CameraCaptureSession", return_value=camera):

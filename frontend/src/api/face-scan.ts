@@ -20,6 +20,7 @@ export interface FaceScanStatus {
   progress: number;
   required: number;
   previewReady: boolean;
+  previewVersion: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -47,20 +48,24 @@ export async function fetchFaceScanStatus(
   }
   const state = payload.state;
   const challenge = payload.challenge;
+  const previewVersion = payload.previewVersion;
   if (
     typeof state !== "string" ||
     (challenge !== null && challenge !== "TURN_LEFT" && challenge !== "TURN_RIGHT") ||
     typeof payload.progress !== "number" ||
     typeof payload.required !== "number" ||
-    typeof payload.previewReady !== "boolean"
+    typeof payload.previewReady !== "boolean" ||
+    typeof previewVersion !== "number" ||
+    !Number.isSafeInteger(previewVersion) ||
+    previewVersion < 0
   ) {
     throw new Error("Face scan status response is invalid.");
   }
   return payload as unknown as FaceScanStatus;
 }
 
-export function faceScanPreviewUrl(scanId: string, revision: number): string {
-  return `${PI_UNLOCK_BASE_URL}/face/scan/preview?scanId=${encodeURIComponent(scanId)}&v=${revision}`;
+export function faceScanPreviewUrl(scanId: string, previewVersion: number): string {
+  return `${PI_UNLOCK_BASE_URL}/face/scan/preview?scanId=${encodeURIComponent(scanId)}&v=${previewVersion}`;
 }
 
 export async function cancelFaceScan(scanId: string): Promise<void> {

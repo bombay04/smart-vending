@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   faceScanPreviewUrl,
   fetchFaceScanStatus,
@@ -12,9 +12,9 @@ const GUIDANCE: Record<FaceScanState, string> = {
   FACE_DETECTED: "ตรวจพบใบหน้า กรุณามองตรง",
   NO_FACE: "ไม่พบใบหน้า กรุณาขยับเข้าหากล้อง",
   MULTIPLE_FACES: "กรุณาให้มีเพียงหนึ่งคนในภาพ",
-  TURN_LEFT: "หันใบหน้าตามลูกศร ←",
-  TURN_RIGHT: "หันใบหน้าตามลูกศร →",
-  RETURN_CENTER: "หันกลับมามองตรง",
+  TURN_LEFT: "หันหน้าไปทางซ้ายของตัวเอง",
+  TURN_RIGHT: "หันหน้าไปทางขวาของตัวเอง",
+  RETURN_CENTER: "กลับมามองตรง",
   VERIFYING: "กำลังตรวจสอบและบันทึกภาพ...",
   SUCCESS: "ตรวจสอบสำเร็จ",
   ERROR: "ไม่สามารถตรวจสอบได้",
@@ -33,44 +33,73 @@ function FaceScanPreview({ scanId, onStatus }: FaceScanPreviewProps) {
     progress: 0,
     required: 0,
     previewReady: false,
+    previewVersion: 0,
   });
-  const [revision, setRevision] = useState(0);
+  const [requestedPreviewVersion, setRequestedPreviewVersion] = useState(0);
   const [imageVisible, setImageVisible] = useState(false);
+  const requestedPreviewVersionRef = useRef(0);
+  const imageRequestPendingRef = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
     let stopped = false;
+    let statusTimer: number | null = null;
     const poll = async () => {
       try {
         const next = await fetchFaceScanStatus(scanId, controller.signal);
         if (next !== null && !stopped) {
-          setStatus(next);
+          setStatus((current) =>
+            current.state === next.state &&
+            current.challenge === next.challenge &&
+            current.progress === next.progress &&
+            current.required === next.required &&
+            current.previewReady === next.previewReady &&
+            current.previewVersion === next.previewVersion
+              ? current
+              : next,
+          );
+          if (
+            !imageRequestPendingRef.current &&
+            next.previewReady &&
+            next.previewVersion > requestedPreviewVersionRef.current
+          ) {
+            imageRequestPendingRef.current = true;
+            requestedPreviewVersionRef.current = next.previewVersion;
+            setRequestedPreviewVersion(next.previewVersion);
+          }
           onStatus?.(next);
         }
       } catch {
         // The operation response owns the terminal error state.
+      } finally {
+        if (!stopped) {
+          statusTimer = window.setTimeout(() => void poll(), 150);
+        }
       }
     };
-    const statusTimer = window.setInterval(() => void poll(), 250);
-    const previewTimer = window.setInterval(() => setRevision((value) => value + 1), 220);
     void poll();
     return () => {
       stopped = true;
       controller.abort();
-      window.clearInterval(statusTimer);
-      window.clearInterval(previewTimer);
+      if (statusTimer !== null) window.clearTimeout(statusTimer);
     };
   }, [onStatus, scanId]);
 
   return (
     <div className="face-preview" aria-label="ภาพสดจากกล้องสแกนใบหน้า">
-      {status.previewReady && (
+      {requestedPreviewVersion > 0 && (
         <img
           className={`face-preview__image${imageVisible ? " face-preview__image--visible" : ""}`}
-          src={faceScanPreviewUrl(scanId, revision)}
+          src={faceScanPreviewUrl(scanId, requestedPreviewVersion)}
           alt="ภาพสดสำหรับจัดตำแหน่งใบหน้า"
-          onLoad={() => setImageVisible(true)}
-          onError={() => setImageVisible(false)}
+          onLoad={() => {
+            setImageVisible(true);
+            imageRequestPendingRef.current = false;
+          }}
+          onError={() => {
+            setImageVisible(false);
+            imageRequestPendingRef.current = false;
+          }}
         />
       )}
       <div className="face-preview__guide" aria-hidden="true" />

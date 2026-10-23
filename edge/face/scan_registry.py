@@ -19,6 +19,7 @@ class ScanRecord:
     progress: int = 0
     required: int = 0
     jpeg: bytes | None = None
+    preview_version: int = 0
     updated_at: float = field(default_factory=time.monotonic)
     cancelled: threading.Event = field(default_factory=threading.Event)
 
@@ -61,6 +62,7 @@ class FaceScanRegistry:
             if record is None or record.state in TERMINAL_STATES:
                 return
             record.jpeg = jpeg
+            record.preview_version += 1
             record.updated_at = time.monotonic()
 
     def finish(self, scan_id: str, state: str) -> None:
@@ -101,6 +103,7 @@ class FaceScanRegistry:
                 "progress": record.progress,
                 "required": record.required,
                 "previewReady": record.jpeg is not None,
+                "previewVersion": record.preview_version,
             }
 
     def jpeg(self, scan_id: str) -> bytes | None:
