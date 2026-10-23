@@ -2,6 +2,14 @@
 
 The reusable Pi-side face engine registers and compares prototype employee face templates. The Pi hardware service uses it for kiosk authentication and session-bound registration; the frontend then asks the backend to validate the matched active employee before entering Restock Mode. Templates and embeddings remain local to the Pi, while PostgreSQL stores only non-biometric workflow metadata. The CLI documented below remains available for isolated diagnostics and maintenance. This is not production biometric security.
 
+## Kiosk live preview and active liveness gate
+
+The Pi-local kiosk passes an opaque per-attempt `scanId` to authentication or enrollment. One `CameraCaptureSession` owns the USB camera for the entire attempt. Frames from that same session feed YuNet/SFace and an ephemeral, throttled JPEG preview at `GET /face/scan/preview`; status comes from `GET /face/scan/status`. The endpoints are served by the loopback-bound Pi service, are CORS-limited to the local kiosk origin, use `no-store`, and never route frames through Railway or the remote Staff/Admin portals. A cancel request or the bounded 20-second deadline closes the capture. The existing face-operation mutex prevents camera status, enrollment, and authentication from opening the device concurrently.
+
+Before any template is saved or match authorization is issued, the service chooses a random left/right head-turn challenge. YuNet eye and nose landmarks establish a face-relative baseline, require the chosen turn for consecutive frames, and require a return to center. The pre-challenge embedding is retained only in memory and every collected sample must match it, preventing a person from completing the challenge and then swapping in another face. An unmoving printed photo or static phone image cannot satisfy the landmark sequence and fails closed as `LIVENESS_FAILED`. Refresh or retry creates a new attempt and a new server-selected challenge; a `scanId` cannot be reused.
+
+This is a practical active-motion mitigation, not production-grade presentation-attack detection. A responsive replay/video, a manipulated display, a 3-D mask, or carefully moved/warped planar media may defeat a monocular RGB landmark challenge. YuNet/SFace has no texture, depth, infrared, or certified PAD model. Production security requires a physically validated PAD-capable camera/SDK (preferably depth/IR) plus threshold calibration on the deployed population. Physical Raspberry Pi acceptance below is mandatory before enabling this as a security claim.
+
 ## Dependency installation
 
 The project pins `opencv-python-headless==4.13.0.92`. PyPI provides a prebuilt `cp37-abi3` ARM64 wheel compatible with the Pi's Debian 13, AArch64, and CPython 3.13 environment. The headless package retains camera/video support but omits GUI dependencies that this CLI does not use.
@@ -114,3 +122,9 @@ Templates default to `edge/face/data/templates/`, which is Git-ignored. Never co
 ```bash
 python -m unittest discover -s edge/face/tests -v
 ```
+
+These tests use scripted landmarks and camera doubles. They prove fail-closed state transitions, single-camera ownership, cancellation cleanup, identity binding, and rejection of a motionless fixture; they do not prove physical spoof resistance.
+
+## Physical liveness acceptance on Raspberry Pi
+
+Run enrollment and Restock authentication with service logs visible, and record the camera model, lighting, distance, and software revision. Verify: a real authorized employee completes both possible turn directions; a motionless printed face and a motionless phone-displayed face time out with `LIVENESS_FAILED`; failure creates no template and no Restock authorization; cancel, timeout, navigation, and unplug/replug release the camera so the next attempt succeeds; a second concurrent request receives `BUSY`; no preview is reachable through the public Railway URL. Then test realistic adversarial movement and replay separately and record failures—the current control is not expected to resist every replay or 3-D presentation attack.

@@ -13,6 +13,8 @@ import type { AuthenticatedEmployee } from "../types/employee";
 import { playAudioFeedback } from "../api/audio";
 import { validateEmployeeAndNotify } from "../audio-feedback.mjs";
 import { employeeValidationFailureState } from "../employee-validation-state.mjs";
+import { cancelFaceScan, createFaceScanId } from "../api/face-scan";
+import FaceScanPreview from "./FaceScanPreview";
 import SuccessCheckIcon from "./SuccessCheckIcon";
 
 interface EmployeeAuthenticationProps {
@@ -54,6 +56,13 @@ const STATE_CONTENT: Record<
   MULTIPLE_FACES: {
     title: "ตรวจพบหลายใบหน้า",
     instruction: "กรุณาให้พนักงานอยู่หน้ากล้องเพียงคนเดียว",
+  },
+  LIVENESS_FAILED: {
+    title: "ไม่ผ่านการตรวจสอบการเคลื่อนไหว",
+    instruction: "กรุณาทำตามลูกศรบนภาพและลองสแกนอีกครั้ง",
+  },
+  CANCELLED: {
+    instruction: "การสแกนถูกยกเลิก กรุณาเริ่มใหม่",
   },
   BUSY: {
     title: "กล้องกำลังถูกใช้งาน",
@@ -98,6 +107,8 @@ function EmployeeAuthentication({
   const [lockedUntilMs, setLockedUntilMs] = useState<number | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [activeScanId, setActiveScanId] = useState<string | null>(null);
+  const activeScanIdRef = useRef<string | null>(null);
   const activeRequestRef = useRef<AbortController | null>(null);
   const requestInProgressRef = useRef(false);
   const completionTimerRef = useRef<number | null>(null);
@@ -189,6 +200,9 @@ function EmployeeAuthentication({
   useEffect(
     () => () => {
       activeRequestRef.current?.abort();
+      if (activeScanIdRef.current !== null) {
+        void cancelFaceScan(activeScanIdRef.current);
+      }
       if (completionTimerRef.current !== null) {
         window.clearTimeout(completionTimerRef.current);
       }
@@ -207,14 +221,18 @@ function EmployeeAuthentication({
     }
 
     const requestController = new AbortController();
+    const scanId = createFaceScanId();
     requestInProgressRef.current = true;
     activeRequestRef.current = requestController;
+    activeScanIdRef.current = scanId;
+    setActiveScanId(scanId);
     setAuthenticatedEmployee(null);
     setAuthenticationState("SCANNING");
 
     try {
       const faceMatch = await requestFaceAuthentication(
         sessionId,
+        scanId,
         requestController.signal,
       );
       setRemainingAttempts(null);
@@ -272,12 +290,19 @@ function EmployeeAuthentication({
       if (activeRequestRef.current === requestController) {
         activeRequestRef.current = null;
       }
+      setActiveScanId((current) => (current === scanId ? null : current));
+      if (activeScanIdRef.current === scanId) activeScanIdRef.current = null;
     }
   }
 
   async function handleCancel() {
     if (isCancelling) return;
     activeRequestRef.current?.abort();
+    if (activeScanId !== null) {
+      void cancelFaceScan(activeScanId);
+      activeScanIdRef.current = null;
+      setActiveScanId(null);
+    }
     if (completionTimerRef.current !== null) {
       window.clearTimeout(completionTimerRef.current);
       completionTimerRef.current = null;
@@ -342,6 +367,9 @@ function EmployeeAuthentication({
           {isSuccessful ? <SuccessCheckIcon /> : <span>◎</span>}
         </div>
         <h1 id="employee-auth-title">{pageTitle}</h1>
+        {isScanning && activeScanId !== null && (
+          <FaceScanPreview scanId={activeScanId} />
+        )}
         <div
           className={`employee-auth-status face-flow-status face-flow-status--${statusTone}`}
           aria-live="polite"

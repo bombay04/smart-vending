@@ -190,10 +190,12 @@ Task 39 did not fabricate binary recordings; later work added the four named Tha
 Start one bounded employee face scan:
 
 ```bash
-curl -X POST http://localhost:5000/face/authenticate
+curl -X POST http://localhost:5000/face/authenticate \
+  -H "Content-Type: application/json" \
+  -d '{"sessionId":17,"scanId":"acceptance-scan-0001"}'
 ```
 
-The service lazily initializes one `FaceEngine` and reuses its YuNet/SFace runtime for later requests. Recognition retains the engine's schema-v3 templates, default `1.128` SFace L2 threshold, three live samples, all-samples-pass consensus, ambiguous-candidate rejection, and bounded capture retries. `FACE_CAMERA_INDEX` selects the camera on the server and defaults to index `0`; request bodies cannot override it.
+The service lazily initializes one `FaceEngine` and reuses its YuNet/SFace runtime for later requests. Recognition retains the engine's schema-v3 templates, default `1.128` SFace L2 threshold, three live samples, all-samples-pass consensus, ambiguous-candidate rejection, and bounded capture retries. Before collecting those samples, the same camera session must complete the server-selected head-turn liveness challenge described in [pi-face-recognition.md](pi-face-recognition.md). `FACE_CAMERA_INDEX` selects the camera on the server and defaults to index `0`; request bodies cannot override it.
 
 Every capture validates frame contents before YuNet runs. A usable frame must be a finite numeric, three-channel BGR image at least 32 by 32 pixels. A frame whose maximum channel value is `2` or lower is a dead `BLACK_FRAME`; a frame whose grayscale mean is at most `1.0` and p99 is at most `5.0` is a `NEAR_BLACK_FRAME`, even when sparse hot pixels are present. After an unhealthy open/read/frame result, the service releases the capture, waits 250 ms, reopens it, repeats the bounded 1.5-second/180-read warm-up, and revalidates up to two times. Recovery success continues through the unchanged YuNet/SFace pipeline. Recovery exhaustion is `UNAVAILABLE`, not `NO_FACE`.
 
@@ -205,6 +207,7 @@ Responses are:
 | `401` | `NO_MATCH` | Recognition completed without one unambiguous match; counted failure with `remainingAttempts`. |
 | `422` | `NO_FACE` | No usable face was captured within the bounded retries; counted failure with `remainingAttempts`. |
 | `422` | `MULTIPLE_FACES` | More than one face remained visible within the bounded retries; counted failure with `remainingAttempts`. |
+| `422` | `LIVENESS_FAILED` | The movement challenge was incomplete or identity changed; counted failure with `remainingAttempts`. |
 | `409` | `BUSY` | Another face-authentication request owns the camera. |
 | `423` | `LOCKED` | Three counted failures occurred; no camera or recognition work was attempted. Response contains `retryAfterSeconds`. |
 | `503` | `UNAVAILABLE` | Camera, model, template, runtime, or another operational dependency failed. |
@@ -220,7 +223,7 @@ A successful match has this shape:
 }
 ```
 
-`NO_MATCH`, `NO_FACE`, and `MULTIPLE_FACES` each count once per completed `POST /face/authenticate`, regardless of the bounded internal capture retries. Camera open/read failure, invalid or black frames, recovery exhaustion, `BUSY`, `UNAVAILABLE`, malformed/internal errors, and requests that do not complete do not count. In particular, a camera fault after two failures leaves `failedAttempts` at two and does not activate lockout. A valid `MATCH` resets the accumulated failures. The third counted failure returns:
+`NO_MATCH`, `NO_FACE`, `MULTIPLE_FACES`, and `LIVENESS_FAILED` each count once per completed `POST /face/authenticate`, regardless of the bounded internal capture retries. Camera open/read failure, invalid or black frames, recovery exhaustion, `BUSY`, `UNAVAILABLE`, malformed/internal errors, and requests that do not complete do not count. In particular, a camera fault after two failures leaves `failedAttempts` at two and does not activate lockout. A valid `MATCH` resets the accumulated failures. The third counted failure returns:
 
 ```json
 {
@@ -348,10 +351,10 @@ For an employee already bound by a valid backend session, the Pi-local UI starts
 ```bash
 curl -X POST http://localhost:5000/face/register \
   -H "Content-Type: application/json" \
-  -d '{"employeeCode":"EMP001"}'
+  -d '{"employeeCode":"EMP001","scanId":"acceptance-scan-0002"}'
 ```
 
-The Pi normalizes the code again, then calls the existing `FaceEngine.register` path. Enrollment uses the existing YuNet single-face validation, SFace embedding generation, bounded retries, camera stabilization, and five independent valid captures. Each accepted capture must contain exactly one face. The resulting schema-v3 JSON template is atomically created under `edge/face/data/templates/`; an existing file is never replaced.
+The Pi normalizes the code again, then uses one camera session for preview, active liveness, and five independent valid SFace captures. Enrollment fails closed before template persistence if the challenge is incomplete or the identity changes. Each accepted capture must contain exactly one face. The resulting schema-v3 JSON template is atomically created under `edge/face/data/templates/`; an existing file is never replaced.
 
 Responses are deliberately bounded and contain no biometric material:
 
@@ -363,6 +366,7 @@ Responses are deliberately bounded and contain no biometric material:
 | `409` | `BUSY` | Authentication or another registration request owns the camera. |
 | `422` | `NO_FACE` | A valid enrollment sample could not be collected within bounded retries; the admin may retry. |
 | `422` | `MULTIPLE_FACES` | More than one face remained visible within bounded retries; the admin may retry. |
+| `422` | `LIVENESS_FAILED` | The movement challenge was incomplete or identity changed; no template is written. |
 | `503` | `UNAVAILABLE` | Camera, model, storage, runtime, or another operational dependency failed. |
 
 Only after HTTP `200 REGISTERED`, the frontend reports completion to the cloud backend:
@@ -380,6 +384,6 @@ Registration does not read, increment, reset, or bypass face-authentication `fai
 
 Frames are processed in memory and are not persisted. HTTP bodies and service logs do not include captured images, crops, landmarks, detections, embeddings, template paths, model data, or template contents. Models and templates remain in the Git-ignored `edge/face/data/` directory. Actual registration existence remains Pi-authoritative. The backend persists only a `faceRegistered` workflow Boolean and cannot reconstruct, validate, or use a face template from it.
 
-Prototype limitations: these UIs do not include separate staff/admin sign-in or authorization, employee create/edit/delete beyond name-only creation, re-enrollment/replacement, liveness, or multi-Pi reconciliation. Employee validation, capture, and metadata completion are frontend-orchestrated requests rather than one backend-issued enrollment grant, and aborting browser navigation does not cancel a capture already running in the Pi process. Enrollment has automated coverage but has not been claimed as validated on physical Raspberry Pi camera hardware by Task 37.
+Prototype limitations: these UIs do not include separate staff/admin sign-in or authorization, employee create/edit/delete beyond name-only creation, re-enrollment/replacement, certified presentation-attack detection, or multi-Pi reconciliation. Employee validation, capture, and metadata completion are frontend-orchestrated requests rather than one backend-issued enrollment grant. The kiosk sends an explicit scan-cancel request on cancel/navigation, and the Pi also enforces a bounded timeout. Automated fixtures do not establish physical spoof resistance; real Pi/camera acceptance remains required.
 
 `ERROR:BUSY` handling will be added when the service supports synchronously matching ESP32 responses to commands. The current API intentionally reports only that the command was written to Serial.

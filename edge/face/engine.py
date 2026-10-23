@@ -111,6 +111,22 @@ class FaceEngine:
         embeddings = self._collect_embeddings(
             phase="enrollment", sample_count=self.enrollment_sample_count
         )
+        return self.register_embeddings(employee_code, embeddings)
+
+    def register_embeddings(
+        self,
+        employee_code: str,
+        embeddings: tuple[tuple[float, ...], ...],
+    ) -> FaceTemplate:
+        """Persist already-liveness-verified samples without reopening the camera."""
+
+        if self.template_store.exists(employee_code):
+            raise AlreadyRegisteredError(
+                f"A face template is already registered for employeeCode "
+                f"{employee_code}."
+            )
+        if len(embeddings) != self.enrollment_sample_count:
+            raise ValueError("Unexpected enrollment sample count.")
         template = FaceTemplate(
             employee_code=employee_code,
             algorithm=SFACE_ALGORITHM,
@@ -146,6 +162,20 @@ class FaceEngine:
         live_embeddings = self._collect_embeddings(
             phase="recognition", sample_count=self.live_sample_count
         )
+        return self.recognize_embeddings(live_embeddings, templates=templates)
+
+    def recognize_embeddings(
+        self,
+        live_embeddings: tuple[tuple[float, ...], ...],
+        *,
+        templates: list[FaceTemplate] | None = None,
+    ) -> RecognitionResult:
+        """Match already-liveness-verified samples without reopening the camera."""
+
+        if len(live_embeddings) != self.live_sample_count:
+            raise ValueError("Unexpected live sample count.")
+        if templates is None:
+            templates = self.template_store.load_all()
 
         candidate_results: list[
             tuple[FaceTemplate, tuple[float, ...], float, bool]

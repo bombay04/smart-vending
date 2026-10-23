@@ -11,6 +11,7 @@ import logging
 import math
 import os
 from pathlib import Path
+import re
 import subprocess
 import threading
 import time
@@ -28,10 +29,15 @@ if __package__:
         CameraError,
         DuplicateFaceError,
         FaceEngineError,
+        LivenessError,
         MultipleFacesError,
         NoFaceError,
+        ScanCancelledError,
     )
     from .face.models import RecognitionResult
+    from .face.live_scan import collect_liveness_verified_embeddings
+    from .face.opencv_support import require_cv2
+    from .face.scan_registry import FaceScanRegistry
     from .face.storage import EMPLOYEE_CODE_PATTERN
     from .face.usb_recovery import (
         DEFAULT_USB_RECOVERY_COOLDOWN_SECONDS,
@@ -51,10 +57,15 @@ else:
         CameraError,
         DuplicateFaceError,
         FaceEngineError,
+        LivenessError,
         MultipleFacesError,
         NoFaceError,
+        ScanCancelledError,
     )
     from face.models import RecognitionResult
+    from face.live_scan import collect_liveness_verified_embeddings
+    from face.opencv_support import require_cv2
+    from face.scan_registry import FaceScanRegistry
     from face.storage import EMPLOYEE_CODE_PATTERN
     from face.usb_recovery import (
         DEFAULT_USB_RECOVERY_COOLDOWN_SECONDS,
@@ -91,6 +102,9 @@ CAMERA_STATUS_REASONS = {
     "BLACK_FRAME",
     "NEAR_BLACK_FRAME",
 }
+SCAN_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+PREVIEW_JPEG_QUALITY = 70
+PREVIEW_MIN_INTERVAL_SECONDS = 0.18
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("pi-unlock-service")
@@ -102,6 +116,7 @@ serial_operation_lock = threading.Lock()
 unlock_idempotency_lock = threading.Lock()
 restock_unlock_lock = threading.RLock()
 face_authentication_lock = threading.Lock()
+face_scan_registry = FaceScanRegistry()
 audio_playback_lock = threading.Lock()
 unlock_transaction_outcomes: dict[int, tuple[int, str, bool]] = {}
 used_restock_unlock_nonces: dict[str, int] = {}
@@ -512,6 +527,92 @@ def normalized_employee_code_from_request() -> str | None:
     return normalize_employee_code(body.get("employeeCode"))
 
 
+def scan_id_from_body(body: object) -> str | None:
+    if not isinstance(body, dict):
+        return None
+    value = body.get("scanId")
+    if value is None:
+        # Compatibility for maintenance clients: the operation still performs
+        # full liveness, but no preview/status consumer can attach to it.
+        return secrets.token_urlsafe(18)
+    if not isinstance(value, str) or SCAN_ID_PATTERN.fullmatch(value) is None:
+        return None
+    return value
+
+
+def make_preview_callback(scan_id: str) -> Callable[[Any], None]:
+    cv2 = require_cv2()
+    last_encoded_at = 0.0
+
+    def publish(frame: Any) -> None:
+        nonlocal last_encoded_at
+        now = time.monotonic()
+        if now - last_encoded_at < PREVIEW_MIN_INTERVAL_SECONDS:
+            return
+        encoded, jpeg = cv2.imencode(
+            ".jpg",
+            frame,
+            [int(cv2.IMWRITE_JPEG_QUALITY), PREVIEW_JPEG_QUALITY],
+        )
+        if not encoded:
+            raise CameraError("Camera preview encoding failed.", reason="INVALID_FRAME")
+        face_scan_registry.set_jpeg(scan_id, bytes(jpeg))
+        last_encoded_at = now
+
+    return publish
+
+
+def recognize_with_liveness(engine: FaceRecognizer, scan_id: str) -> RecognitionResult:
+    if not all(
+        hasattr(engine, attribute)
+        for attribute in (
+            "camera_index",
+            "detector",
+            "embedder",
+            "live_sample_count",
+            "recognize_embeddings",
+        )
+    ):
+        # Test doubles exercise the HTTP authorization contract independently.
+        return engine.recognize()
+    embeddings = collect_liveness_verified_embeddings(
+        engine,
+        sample_count=engine.live_sample_count,
+        state_callback=lambda *state: face_scan_registry.update(scan_id, *state),
+        preview_callback=make_preview_callback(scan_id),
+        cancelled=lambda: face_scan_registry.is_cancelled(scan_id),
+    )
+    return engine.recognize_embeddings(embeddings)
+
+
+def register_with_liveness(
+    engine: FaceRecognizer, employee_code: str, scan_id: str
+) -> object:
+    if not all(
+        hasattr(engine, attribute)
+        for attribute in (
+            "camera_index",
+            "detector",
+            "embedder",
+            "enrollment_sample_count",
+            "register_embeddings",
+        )
+    ):
+        return engine.register(employee_code)
+    if engine.is_registered(employee_code):
+        raise AlreadyRegisteredError(
+            f"A face template is already registered for employeeCode {employee_code}."
+        )
+    embeddings = collect_liveness_verified_embeddings(
+        engine,
+        sample_count=engine.enrollment_sample_count,
+        state_callback=lambda *state: face_scan_registry.update(scan_id, *state),
+        preview_callback=make_preview_callback(scan_id),
+        cancelled=lambda: face_scan_registry.is_cancelled(scan_id),
+    )
+    return engine.register_embeddings(employee_code, embeddings)
+
+
 def normalized_employee_code_only_from_request() -> str | None:
     if not request.is_json:
         return None
@@ -550,6 +651,46 @@ def face_authentication_status() -> Response:
     response = jsonify(face_authentication_lockout.status())
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@app.get("/face/scan/status")
+def face_scan_status() -> tuple[Response, int] | Response:
+    scan_id = request.args.get("scanId", "")
+    if SCAN_ID_PATTERN.fullmatch(scan_id) is None:
+        return jsonify(status="INVALID_REQUEST"), 400
+    status = face_scan_registry.status(scan_id)
+    if status is None:
+        return jsonify(status="NOT_FOUND"), 404
+    response = jsonify(status="OK", **status)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/face/scan/preview")
+def face_scan_preview() -> tuple[Response, int] | Response:
+    scan_id = request.args.get("scanId", "")
+    if SCAN_ID_PATTERN.fullmatch(scan_id) is None:
+        return jsonify(status="INVALID_REQUEST"), 400
+    jpeg = face_scan_registry.jpeg(scan_id)
+    if jpeg is None:
+        response = Response(status=204)
+    else:
+        response = Response(jpeg, status=200, mimetype="image/jpeg")
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@app.post("/face/scan/cancel")
+def cancel_face_scan() -> tuple[Response, int] | Response:
+    body: Any = request.get_json(silent=True) if request.is_json else None
+    scan_id = scan_id_from_body(body)
+    if scan_id is None or not isinstance(body, dict) or "scanId" not in body:
+        return jsonify(status="INVALID_REQUEST"), 400
+    cancelled = face_scan_registry.cancel(scan_id)
+    return jsonify(status="CANCELLED" if cancelled else "NOT_FOUND"), (
+        200 if cancelled else 404
+    )
 
 
 @app.get("/camera/status")
@@ -592,11 +733,14 @@ def camera_status() -> tuple[Response, int] | Response:
 @app.post("/face/authenticate")
 def authenticate_face() -> tuple[Response, int] | Response:
     body: Any = request.get_json(silent=True) if request.is_json else None
-    if not isinstance(body, dict) or set(body) != {"sessionId"}:
+    if not isinstance(body, dict) or not set(body).issubset({"sessionId", "scanId"}):
         return jsonify(status="INVALID_REQUEST", error="sessionId is required."), 400
     session_id = body.get("sessionId")
+    scan_id = scan_id_from_body(body)
     if type(session_id) is not int or session_id <= 0:
         return jsonify(status="INVALID_REQUEST", error="sessionId must be a positive integer."), 400
+    if scan_id is None:
+        return jsonify(status="INVALID_REQUEST", error="scanId is invalid."), 400
 
     lockout_status = face_authentication_lockout.status()
     if lockout_status["status"] == "LOCKED":
@@ -605,6 +749,10 @@ def authenticate_face() -> tuple[Response, int] | Response:
     if not face_authentication_lock.acquire(blocking=False):
         return jsonify(status="BUSY"), 409
 
+    if not face_scan_registry.begin(scan_id):
+        face_authentication_lock.release()
+        return jsonify(status="BUSY"), 409
+    scan_terminal_state = "ERROR"
     try:
         # Recheck after acquiring the scan mutex. A request may have observed READY
         # just before another request atomically activated the lockout.
@@ -613,7 +761,7 @@ def authenticate_face() -> tuple[Response, int] | Response:
             return locked_response(lockout_status)
 
         try:
-            result = get_face_engine().recognize()
+            result = recognize_with_liveness(get_face_engine(), scan_id)
         except NoFaceError:
             logger.info("Face authentication capture outcome: NO_FACE")
             failure_status = face_authentication_lockout.record_failure()
@@ -638,6 +786,21 @@ def authenticate_face() -> tuple[Response, int] | Response:
                 ),
                 422,
             )
+        except LivenessError:
+            logger.info("Face authentication capture outcome: LIVENESS_FAILED")
+            failure_status = face_authentication_lockout.record_failure()
+            if failure_status["status"] == "LOCKED":
+                return locked_response(failure_status)
+            return (
+                jsonify(
+                    status="LIVENESS_FAILED",
+                    remainingAttempts=failure_status["remainingAttempts"],
+                ),
+                422,
+            )
+        except ScanCancelledError:
+            scan_terminal_state = "CANCELLED"
+            return jsonify(status="CANCELLED"), 409
         except FaceEngineError as error:
             logger.error(
                 "Face authentication unavailable (%s)", type(error).__name__
@@ -716,6 +879,7 @@ def authenticate_face() -> tuple[Response, int] | Response:
             logger.error("RESTOCK_UNLOCK_SECRET is not configured")
             return jsonify(status="UNAVAILABLE"), 503
 
+        scan_terminal_state = "SUCCESS"
         return jsonify(
             status="MATCH",
             employeeCode=result.employee_code,
@@ -724,12 +888,15 @@ def authenticate_face() -> tuple[Response, int] | Response:
             authorization=authorization,
         )
     finally:
+        face_scan_registry.finish(scan_id, scan_terminal_state)
         face_authentication_lock.release()
 
 
 @app.post("/face/register")
 def register_face() -> tuple[Response, int] | Response:
-    employee_code = normalized_employee_code_from_request()
+    body: Any = request.get_json(silent=True) if request.is_json else None
+    employee_code = normalize_employee_code(body.get("employeeCode")) if isinstance(body, dict) else None
+    scan_id = scan_id_from_body(body)
     if employee_code is None:
         return (
             jsonify(
@@ -738,15 +905,21 @@ def register_face() -> tuple[Response, int] | Response:
             ),
             400,
         )
+    if scan_id is None:
+        return jsonify(status="INVALID_REQUEST", error="scanId is invalid."), 400
 
     # Enrollment and authentication share one non-blocking camera mutex. An
     # expected registration outcome never reads or mutates authentication lockout.
     if not face_authentication_lock.acquire(blocking=False):
         return jsonify(status="BUSY"), 409
 
+    if not face_scan_registry.begin(scan_id):
+        face_authentication_lock.release()
+        return jsonify(status="BUSY"), 409
+    scan_terminal_state = "ERROR"
     try:
         try:
-            get_face_engine().register(employee_code)
+            register_with_liveness(get_face_engine(), employee_code, scan_id)
         except DuplicateFaceError as error:
             logger.info(
                 "Face registration outcome: FACE_ALREADY_REGISTERED "
@@ -770,6 +943,12 @@ def register_face() -> tuple[Response, int] | Response:
         except MultipleFacesError:
             logger.info("Face registration capture outcome: MULTIPLE_FACES")
             return jsonify(status="MULTIPLE_FACES"), 422
+        except LivenessError:
+            logger.info("Face registration capture outcome: LIVENESS_FAILED")
+            return jsonify(status="LIVENESS_FAILED"), 422
+        except ScanCancelledError:
+            scan_terminal_state = "CANCELLED"
+            return jsonify(status="CANCELLED"), 409
         except FaceEngineError as error:
             logger.error("Face registration unavailable (%s)", type(error).__name__)
             return (
@@ -790,8 +969,10 @@ def register_face() -> tuple[Response, int] | Response:
             )
 
         logger.info("Face registration completed")
+        scan_terminal_state = "SUCCESS"
         return jsonify(status="REGISTERED", employeeCode=employee_code)
     finally:
+        face_scan_registry.finish(scan_id, scan_terminal_state)
         face_authentication_lock.release()
 
 
