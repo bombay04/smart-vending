@@ -28,6 +28,7 @@ const providerPending: ProviderPayment = {
   amount: 2000,
   currency: "THB",
   paid: false,
+  liveMode: false,
   qrImageUrl: "https://api.omise.co/qr/test",
   expiresAt: "2026-09-23T10:00:00.000Z",
 };
@@ -44,6 +45,7 @@ function baseRecord(overrides: Partial<PaymentRecord> = {}): PaymentRecord {
     paymentStatus: "PENDING",
     providerChargeId: null,
     providerStatus: null,
+    providerLiveMode: null,
     expiresAt: null,
     paidAt: null,
     customerCancelledAt: null,
@@ -78,7 +80,12 @@ class MemoryStore implements PaymentStore {
 
   async saveProviderPayment(
     transactionId: number,
-    payment: { chargeId: string; providerStatus: string; expiresAt: Date | null },
+    payment: {
+      chargeId: string;
+      providerStatus: string;
+      providerLiveMode: boolean;
+      expiresAt: Date | null;
+    },
   ) {
     assert.equal(transactionId, this.record?.id);
     this.savedProviderChargeId = payment.chargeId;
@@ -86,6 +93,7 @@ class MemoryStore implements PaymentStore {
       ...this.record!,
       providerChargeId: payment.chargeId,
       providerStatus: payment.providerStatus,
+      providerLiveMode: payment.providerLiveMode,
       expiresAt: payment.expiresAt,
     };
     return { ...this.record };
@@ -122,6 +130,7 @@ class MemoryStore implements PaymentStore {
       ...this.record,
       paymentStatus,
       providerStatus: payment.status,
+      providerLiveMode: payment.liveMode,
       expiresAt: payment.expiresAt ? new Date(payment.expiresAt) : this.record.expiresAt,
       slotStatus:
         paymentStatus === "SUCCESS" && this.record.customerCancelledAt === null

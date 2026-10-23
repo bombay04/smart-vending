@@ -60,6 +60,7 @@ function normalizeCharge(value: unknown): ProviderPayment {
   const amount = value.amount;
   const currency = readString(value, "currency")?.toUpperCase();
   const paid = value.paid;
+  const liveMode = value.livemode;
   const expiresAt = readString(value, "expires_at");
 
   if (
@@ -71,7 +72,8 @@ function normalizeCharge(value: unknown): ProviderPayment {
     !Number.isSafeInteger(amount) ||
     amount <= 0 ||
     currency !== "THB" ||
-    typeof paid !== "boolean"
+    typeof paid !== "boolean" ||
+    typeof liveMode !== "boolean"
   ) {
     throw new PaymentProviderError("Payment provider returned an invalid response.");
   }
@@ -86,6 +88,7 @@ function normalizeCharge(value: unknown): ProviderPayment {
     amount,
     currency: "THB",
     paid,
+    liveMode,
     qrImageUrl: readQrImageUrl(value),
     expiresAt,
   };

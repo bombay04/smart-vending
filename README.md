@@ -19,6 +19,9 @@ See [the canonical project specification](docs/project-spec.md),
 [ESP32 protocol](docs/serial-protocol.md), and
 [full local system guide](docs/full-system-test-guide.md).
 
+Owner daily/weekly reporting architecture and the review-first Railway Cron
+runbook are documented in [Phase 2 owner sales reports](docs/phase2-owner-sales-reports.md).
+
 ## Local development
 
 Prerequisites are Node.js/npm, Docker with Compose, and Python for Edge tests.
