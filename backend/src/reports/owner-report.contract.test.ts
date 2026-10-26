@@ -15,6 +15,10 @@ test("owner report scripts preserve explicit dry-run and send separation", () =>
   assert.equal(packageJson.scripts["report:weekly:demo:preview"].includes("--send"), false);
   assert.match(packageJson.scripts["report:daily:demo:send"], /daily --demo --send$/);
   assert.match(packageJson.scripts["report:weekly:demo:send"], /weekly --demo --send$/);
+  assert.equal(packageJson.scripts["report:daily:scheduled:preview"].includes("--send"), false);
+  assert.equal(packageJson.scripts["report:weekly:scheduled:preview"].includes("--send"), false);
+  assert.match(packageJson.scripts["report:daily:scheduled:send"], /daily --scheduled --send$/);
+  assert.match(packageJson.scripts["report:weekly:scheduled:send"], /weekly --scheduled --send$/);
 });
 
 test("delivery ledger separates LIVE and DEMO and persists safe retry state", () => {
@@ -57,4 +61,7 @@ test("Railway instructions define Bangkok 08:00 schedules in UTC", () => {
   assert.match(deploymentGuide, /Daily.*`0 1 \* \* \*`/);
   assert.match(deploymentGuide, /Weekly.*`0 1 \* \* 1`/);
   assert.match(deploymentGuide, /Asia\/Bangkok/);
+  assert.match(deploymentGuide, /OWNER_REPORT_SCHEDULED_DATA_MODE=DEMO_TEST/);
+  assert.match(deploymentGuide, /report:daily:scheduled:send/);
+  assert.match(deploymentGuide, /report:weekly:scheduled:send/);
 });

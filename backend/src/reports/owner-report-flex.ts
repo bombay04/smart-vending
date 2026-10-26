@@ -14,6 +14,10 @@ export interface OwnerReportFlexMessage {
   contents: FlexComponent;
 }
 
+export interface OwnerReportFlexOptions {
+  scheduled?: boolean;
+}
+
 const GREEN = "#15803D";
 const DARK_BLUE = "#172554";
 
@@ -179,14 +183,21 @@ function productRows(products: ProductSales[]): FlexComponent[] {
   }));
 }
 
-function dailyMessage(report: DailySalesReport): OwnerReportFlexMessage {
+function dailyMessage(
+  report: DailySalesReport,
+  options: OwnerReportFlexOptions,
+): OwnerReportFlexMessage {
   const maximum = Math.max(1, ...report.timeBands.map((bucket) => bucket.revenueSatang));
   const demo = report.dataMode === "DEMO_TEST";
+  const scheduledDemo = demo && options.scheduled === true;
+  const prominentDemo = demo && !scheduledDemo;
   return {
     type: "flex",
-    altText: demo
+    altText: prominentDemo
       ? `DEMO / TEST MODE — ข้อมูลทดสอบ ไม่ใช่รายได้จริง — ${reportDateRange(report)}`
-      : `สรุปยอดขายรายวัน ${reportDateRange(report)}: ${money(report.totalRevenueSatang)}`,
+      : scheduledDemo
+        ? `สรุปรายการทดสอบรายวัน ${reportDateRange(report)}: ${money(report.totalRevenueSatang)}`
+        : `สรุปยอดขายรายวัน ${reportDateRange(report)}: ${money(report.totalRevenueSatang)}`,
     contents: {
       type: "bubble",
       size: "mega",
@@ -201,7 +212,7 @@ function dailyMessage(report: DailySalesReport): OwnerReportFlexMessage {
         layout: "vertical",
         paddingAll: "18px",
         contents: [
-          ...(demo ? [demoBanner()] : []),
+          ...(prominentDemo ? [demoBanner()] : []),
           primaryRevenue(report.totalRevenueSatang, demo ? "มูลค่ารายการทดสอบรวม" : "ยอดขายรวม"),
           {
             type: "box",
@@ -230,11 +241,26 @@ function dailyMessage(report: DailySalesReport): OwnerReportFlexMessage {
         paddingAll: "14px",
         backgroundColor: "#F0FDF4",
         contents: [
-          text(demo ? "รายงานทดสอบแบบสั่งทำงานด้วยตนเอง" : "รายงานอัตโนมัติ • ทุกวัน 08:00 น.", {
-            color: GREEN,
-            size: "xs",
-            align: "center",
-          }),
+          text(
+            prominentDemo
+              ? "รายงานทดสอบแบบสั่งทำงานด้วยตนเอง"
+              : "รายงานอัตโนมัติ • ทุกวัน 08:00 น.",
+            {
+              color: GREEN,
+              size: "xs",
+              align: "center",
+            },
+          ),
+          ...(scheduledDemo
+            ? [
+                text("ข้อมูลจากระบบทดสอบ", {
+                  color: "#64748B",
+                  size: "xxs",
+                  align: "center",
+                  margin: "xs",
+                }),
+              ]
+            : []),
         ],
       },
     },
@@ -281,13 +307,20 @@ function weekdayChart(report: WeeklySalesReport): FlexComponent {
   };
 }
 
-function weeklyMessage(report: WeeklySalesReport): OwnerReportFlexMessage {
+function weeklyMessage(
+  report: WeeklySalesReport,
+  options: OwnerReportFlexOptions,
+): OwnerReportFlexMessage {
   const demo = report.dataMode === "DEMO_TEST";
+  const scheduledDemo = demo && options.scheduled === true;
+  const prominentDemo = demo && !scheduledDemo;
   return {
     type: "flex",
-    altText: demo
+    altText: prominentDemo
       ? `DEMO / TEST MODE — ข้อมูลทดสอบ ไม่ใช่รายได้จริง — ${reportDateRange(report)}`
-      : `สรุปยอดขายรายสัปดาห์ ${reportDateRange(report)}: ${money(report.totalRevenueSatang)}`,
+      : scheduledDemo
+        ? `สรุปรายการทดสอบรายสัปดาห์ ${reportDateRange(report)}: ${money(report.totalRevenueSatang)}`
+        : `สรุปยอดขายรายสัปดาห์ ${reportDateRange(report)}: ${money(report.totalRevenueSatang)}`,
     contents: {
       type: "bubble",
       size: "mega",
@@ -302,7 +335,7 @@ function weeklyMessage(report: WeeklySalesReport): OwnerReportFlexMessage {
         layout: "vertical",
         paddingAll: "18px",
         contents: [
-          ...(demo ? [demoBanner()] : []),
+          ...(prominentDemo ? [demoBanner()] : []),
           primaryRevenue(
             report.totalRevenueSatang,
             demo ? "มูลค่ารายการทดสอบรวมประจำสัปดาห์" : "ยอดขายรวมประจำสัปดาห์",
@@ -359,19 +392,34 @@ function weeklyMessage(report: WeeklySalesReport): OwnerReportFlexMessage {
         backgroundColor: "#EFF6FF",
         contents: [
           text(
-            demo ? "รายงานทดสอบแบบสั่งทำงานด้วยตนเอง" : "รายงานอัตโนมัติ • ทุกวันจันทร์ 08:00 น.",
+            prominentDemo
+              ? "รายงานทดสอบแบบสั่งทำงานด้วยตนเอง"
+              : "รายงานอัตโนมัติ • ทุกวันจันทร์ 08:00 น.",
             {
               color: DARK_BLUE,
               size: "xs",
               align: "center",
             },
           ),
+          ...(scheduledDemo
+            ? [
+                text("ข้อมูลจากระบบทดสอบ", {
+                  color: "#64748B",
+                  size: "xxs",
+                  align: "center",
+                  margin: "xs",
+                }),
+              ]
+            : []),
         ],
       },
     },
   };
 }
 
-export function buildOwnerReportFlexMessage(report: SalesReport): OwnerReportFlexMessage {
-  return report.type === "DAILY" ? dailyMessage(report) : weeklyMessage(report);
+export function buildOwnerReportFlexMessage(
+  report: SalesReport,
+  options: OwnerReportFlexOptions = {},
+): OwnerReportFlexMessage {
+  return report.type === "DAILY" ? dailyMessage(report, options) : weeklyMessage(report, options);
 }

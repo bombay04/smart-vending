@@ -25,6 +25,10 @@
     "report:weekly:demo:preview": "tsx src/jobs/owner-sales-report.ts weekly --demo",
     "report:daily:demo:send": "node dist/jobs/owner-sales-report.js daily --demo --send",
     "report:weekly:demo:send": "node dist/jobs/owner-sales-report.js weekly --demo --send",
+    "report:daily:scheduled:preview": "tsx src/jobs/owner-sales-report.ts daily --scheduled",
+    "report:weekly:scheduled:preview": "tsx src/jobs/owner-sales-report.ts weekly --scheduled",
+    "report:daily:scheduled:send": "node dist/jobs/owner-sales-report.js daily --scheduled --send",
+    "report:weekly:scheduled:send": "node dist/jobs/owner-sales-report.js weekly --scheduled --send",
     "prisma:generate": "prisma generate",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts"

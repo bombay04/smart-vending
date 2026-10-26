@@ -57,3 +57,37 @@ test("daily and weekly DEMO cards are prominent and never label totals as real r
     assert.doesNotMatch(allText, /รายงานอัตโนมัติ/);
   }
 });
+
+test("scheduled DEMO cards keep approved themes with only a discreet test-data footer", () => {
+  const dailyPeriod = getReportPeriod("DAILY", new Date("2026-10-23T01:00:00Z"));
+  const weeklyPeriod = getReportPeriod("WEEKLY", new Date("2026-10-26T01:00:00Z"));
+  const messages = [
+    buildOwnerReportFlexMessage(aggregateDailySales([], dailyPeriod, "DEMO_TEST"), {
+      scheduled: true,
+    }),
+    buildOwnerReportFlexMessage(aggregateWeeklySales([], weeklyPeriod, "DEMO_TEST"), {
+      scheduled: true,
+    }),
+  ];
+
+  assert.equal(
+    (messages[0].contents.header as { backgroundColor: string }).backgroundColor,
+    "#15803D",
+  );
+  assert.equal(
+    (messages[1].contents.header as { backgroundColor: string }).backgroundColor,
+    "#172554",
+  );
+
+  for (const message of messages) {
+    const allText = collectText(message).join(" | ");
+    assert.doesNotMatch(message.altText, /DEMO \/ TEST MODE/);
+    assert.doesNotMatch(allText, /DEMO \/ TEST MODE/);
+    assert.doesNotMatch(allText, /ข้อมูลทดสอบ — ไม่ใช่รายได้จริง/);
+    assert.match(allText, /ข้อมูลจากระบบทดสอบ/);
+    assert.match(allText, /มูลค่ารายการทดสอบรวม/);
+    assert.doesNotMatch(allText, /ยอดขายรวม/);
+    assert.match(allText, /รายงานอัตโนมัติ/);
+    assert.doesNotMatch(allText, /รายงานทดสอบแบบสั่งทำงานด้วยตนเอง/);
+  }
+});

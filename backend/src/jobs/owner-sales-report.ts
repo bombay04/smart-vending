@@ -4,6 +4,12 @@ import { parseOwnerReportArguments } from "./owner-sales-report-arguments";
 
 async function main(): Promise<void> {
   const options = parseOwnerReportArguments(process.argv.slice(2), process.env);
+  if (options.configurationWarning) {
+    console.warn("Owner sales report configuration warning.", {
+      warning: options.configurationWarning,
+      selectedDataMode: options.dataMode,
+    });
+  }
   const result = await runOwnerReport(options.type, options);
   if (result.delivery === "PREVIEW") {
     process.stdout.write(`${JSON.stringify(result.message, null, 2)}\n`);
