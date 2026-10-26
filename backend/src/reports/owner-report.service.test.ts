@@ -21,6 +21,7 @@ import type {
 
 class MemoryReportStore implements OwnerReportStore {
   transactions: ReportSourceTransaction[] = [];
+  listRequests: Array<{ period: ReportPeriod; dataMode: SalesReportDataMode }> = [];
   state: "EMPTY" | "SENDING" | "SENT" | "FAILED" | "MANUAL_REVIEW" = "EMPTY";
   claimCount = 0;
   failedCodes: Array<{ code: string; retryable: boolean }> = [];
@@ -32,9 +33,8 @@ class MemoryReportStore implements OwnerReportStore {
   dataMode?: SalesReportDataMode;
   failMarkSent = false;
 
-  async listTransactions(_period: ReportPeriod, _dataMode: SalesReportDataMode) {
-    void _period;
-    void _dataMode;
+  async listTransactions(period: ReportPeriod, dataMode: SalesReportDataMode) {
+    this.listRequests.push({ period, dataMode });
     return this.transactions;
   }
 
@@ -142,6 +142,25 @@ const storedMessage: OwnerReportFlexMessage = {
   contents: { type: "bubble" },
 };
 
+function transaction(
+  id: number,
+  paidAt: string,
+  dataMode: SalesReportDataMode,
+): ReportSourceTransaction {
+  return {
+    id,
+    productId: id,
+    productName: `Product ${id}`,
+    amountSatang: dataMode === "DEMO_TEST" ? 3_000 : 2_000,
+    paidAt: new Date(paidAt),
+    paymentStatus: "SUCCESS",
+    providerStatus: "successful",
+    providerLiveMode: dataMode === "LIVE",
+    providerChargeId: dataMode === "LIVE" ? `chrg_live_${id}` : `chrg_test_${id}`,
+    customerCancelledAt: null,
+  };
+}
+
 test("preview generates a payload without claiming or contacting LINE", async () => {
   const store = new MemoryReportStore();
   const provider = new MemoryProvider();
@@ -158,6 +177,83 @@ test("preview generates a payload without claiming or contacting LINE", async ()
   assert.equal(result.delivery, "PREVIEW");
   assert.equal(store.claimCount, 0);
   assert.equal(provider.payloads.length, 0);
+});
+
+test("scheduled DEMO previews use previous Bangkok periods and exclude LIVE transactions", async () => {
+  const cases = [
+    {
+      type: "DAILY" as const,
+      now: "2026-10-23T01:00:00Z",
+      demoPaidAt: "2026-10-22T03:00:00Z",
+      livePaidAt: "2026-10-22T04:00:00Z",
+      start: "2026-10-21T17:00:00.000Z",
+      end: "2026-10-22T17:00:00.000Z",
+    },
+    {
+      type: "WEEKLY" as const,
+      now: "2026-10-26T01:00:00Z",
+      demoPaidAt: "2026-10-21T03:00:00Z",
+      livePaidAt: "2026-10-22T04:00:00Z",
+      start: "2026-10-18T17:00:00.000Z",
+      end: "2026-10-25T17:00:00.000Z",
+    },
+  ];
+
+  for (const item of cases) {
+    const store = new MemoryReportStore();
+    store.transactions = [
+      transaction(1, item.demoPaidAt, "DEMO_TEST"),
+      transaction(2, item.livePaidAt, "LIVE"),
+    ];
+    const provider = new MemoryProvider();
+    const result = await runOwnerReportWithDependencies(
+      item.type,
+      { send: false, dataMode: "DEMO_TEST", demoEnabled: true, scheduled: true },
+      {
+        store,
+        provider,
+        now: () => new Date(item.now),
+        logger: silentLogger,
+      },
+    );
+
+    assert.equal(store.listRequests[0].dataMode, "DEMO_TEST");
+    assert.equal(store.listRequests[0].period.start.toISOString(), item.start);
+    assert.equal(store.listRequests[0].period.end.toISOString(), item.end);
+    assert.equal(result.report?.totalUnits, 1);
+    assert.equal(result.report?.totalRevenueSatang, 3_000);
+    const payload = JSON.stringify(result.message);
+    assert.doesNotMatch(payload, /DEMO \/ TEST MODE/);
+    assert.match(payload, /ข้อมูลจากระบบทดสอบ/);
+    assert.equal(provider.payloads.length, 0);
+  }
+});
+
+test("scheduled DEMO delivery remains deduplicated across scheduler restarts", async () => {
+  const store = new MemoryReportStore();
+  store.transactions = [transaction(1, "2026-10-21T03:00:00Z", "DEMO_TEST")];
+  const provider = new MemoryProvider();
+  const dependencies = {
+    store,
+    provider,
+    now: () => new Date("2026-10-26T01:00:00Z"),
+    logger: silentLogger,
+  };
+  const options = {
+    send: true,
+    dataMode: "DEMO_TEST" as const,
+    demoEnabled: true,
+    scheduled: true,
+  };
+
+  const first = await runOwnerReportWithDependencies("WEEKLY", options, dependencies);
+  const restarted = await runOwnerReportWithDependencies("WEEKLY", options, dependencies);
+
+  assert.equal(first.delivery, "SENT");
+  assert.equal(restarted.delivery, "ALREADY_SENT");
+  assert.equal(store.dataMode, "DEMO_TEST");
+  assert.equal(provider.payloads.length, 1);
+  assert.match(provider.payloads[0], /ข้อมูลจากระบบทดสอบ/);
 });
 
 test("durable period claim prevents a second owner report delivery", async () => {

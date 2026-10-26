@@ -12,6 +12,7 @@ Status: implemented locally; stop for Tech Lead review before commit, deploy, or
 - Existing employee sales/restock delivery remains in `line-notification.provider.ts`, uses `LINE_CHANNEL_ACCESS_TOKEN`, sends the same two sale cards or one restock card, and retains its existing durable attempted-at claims.
 - The only existing machine ID is attached to kiosk workflow sessions. Transactions do not carry an authoritative machine ID, so the owner cards intentionally omit one. This is appropriate for the single-cabinet pilot; multi-machine reporting will require transaction-level machine identity.
 - The deployed backend and PostgreSQL run on Railway, but the repository had no scheduled-job manifest. The minimal approach is two isolated Railway Cron services that use the same source and database without changing the web service.
+- Scheduled jobs opt in with `--scheduled` and resolve their data source only from `OWNER_REPORT_SCHEDULED_DATA_MODE`. Existing manual LIVE and `--demo` commands ignore that variable, so a Cron setting cannot silently change an operator's manual command.
 
 ## Calculation and card design
 
@@ -21,7 +22,7 @@ Daily aggregation includes 06:00–10:00, 10:00–14:00, 14:00–18:00, 18:00–
 
 Weekly aggregation includes Monday through Sunday, average daily revenue over seven calendar days, best weekday, the same complete time bands, best product, and a data-derived observation. Fewer than three sales or fewer than two active days produces a neutral insufficient-data statement. Zero-sales periods have zero KPIs and no fabricated ranking or peak.
 
-The daily Flex bubble uses the approved green theme and horizontal text bars. The weekly bubble uses the approved dark-blue theme and a seven-column weekday chart. No employee notification builder was changed.
+The daily Flex bubble uses the approved green theme and horizontal text bars. The weekly bubble uses the approved dark-blue theme and a seven-column weekday chart. Manual DEMO cards retain the prominent orange warning. Scheduled DEMO_TEST cards retain the test-value labels but remove that prominent banner and instead show the small footer `ข้อมูลจากระบบทดสอบ`. No employee notification builder was changed.
 
 ## Delivery safety and migration
 
@@ -36,14 +37,17 @@ A report attempt persists its claim, UUID `X-Line-Retry-Key`, and exact serializ
 
 LINE retry keys are valid for 24 hours. An expiry sweep moves unresolved `SENDING` or `FAILED` rows to `MANUAL_REVIEW`; it never generates a new key or payload automatically. This prevents an uncertain old delivery from being rebroadcast as a new request. LINE acceptance still cannot guarantee recipient delivery.
 
-LIVE jobs derive only the immediately previous day or previous complete week. DEMO_TEST supports a strictly validated `--as-of=YYYY-MM-DD` so physical acceptance can select a completed Bangkok reporting period. Logs include report type, data mode, ISO period, outcome, HTTP status, and LINE request IDs, but never a token or response body.
+Scheduled LIVE and DEMO_TEST jobs derive only the immediately previous day or previous complete week. Manual DEMO_TEST supports a strictly validated `--as-of=YYYY-MM-DD` so physical acceptance can select a completed Bangkok reporting period. Logs include report type, data mode, scheduled/manual state, ISO period, outcome, HTTP status, and LINE request IDs, but never a token or response body.
 
 ## Environment variables
 
 - Existing employee account: `LINE_CHANNEL_ACCESS_TOKEN` (unchanged).
 - New owner account: `LINE_OWNER_CHANNEL_ACCESS_TOKEN`.
 - Shared database: `DATABASE_URL`.
-- Manual demo gate: `OWNER_REPORT_DEMO_ENABLED=true`. Keep it unset or `false` on production Cron services.
+- Scheduled selector: `OWNER_REPORT_SCHEDULED_DATA_MODE=LIVE|DEMO_TEST`. Missing, invalid, or differently cased values default visibly to LIVE and emit a warning.
+- DEMO safety gate: `OWNER_REPORT_DEMO_ENABLED=true`. It remains required for manual DEMO commands and must also be set on a prototype Cron service whose scheduled selector is `DEMO_TEST`.
+
+For scheduled execution, `OWNER_REPORT_SCHEDULED_DATA_MODE=DEMO_TEST` without the exact demo gate fails before a ledger claim or LINE call. Conversely, setting the demo gate on a scheduled job without the exact DEMO_TEST selector also fails. `--demo` and `--scheduled` are mutually exclusive. This makes partial or ambiguous DEMO configuration fail safely, while future production services can explicitly use LIVE.
 
 Never put either token in Git, frontend variables, build output, or command arguments.
 
@@ -69,16 +73,25 @@ npm run report:weekly:demo:send -- --as-of=2026-10-26
 
 The date is optional and represents the Bangkok calendar date on which the normal job would run. Demo previews require `--demo` through the package script and the environment gate, but cannot send because the preview scripts omit `--send`. Demo cards retain the green Daily and blue Weekly themes while prominently showing `DEMO / TEST MODE` and `ข้อมูลทดสอบ — ไม่ใช่รายได้จริง`; totals are labeled as test transaction value.
 
+To preview the same mode and presentation used by a scheduled prototype job, set both scheduled variables in that one shell and run:
+
+```text
+npm run report:daily:scheduled:preview
+npm run report:weekly:scheduled:preview
+```
+
+Scheduled previews use the real previous Bangkok day/week and cannot accept `--as-of`. They create no delivery claim and make no LINE call. With DEMO_TEST selected, the card keeps test-value labels, removes the orange manual-demo banner, and displays only the discreet `ข้อมูลจากระบบทดสอบ` footer.
+
 ## Railway setup for Tech Lead approval
 
 Do not change the existing web service. After review and deployment of the database migration, create two separate Railway Cron services from the same repository and deployment revision:
 
-- Daily: cron `0 1 * * *`; root directory `/backend`; build command `npm ci && npm run build`; start command `npm run report:daily:send`.
-- Weekly: cron `0 1 * * 1`; root directory `/backend`; build command `npm ci && npm run build`; start command `npm run report:weekly:send`.
+- Daily: cron `0 1 * * *`; root directory `/backend`; build command `npm ci && npm run build`; start command `npm run report:daily:scheduled:send`.
+- Weekly: cron `0 1 * * 1`; root directory `/backend`; build command `npm ci && npm run build`; start command `npm run report:weekly:scheduled:send`.
 
-Railway cron is UTC: 01:00 UTC is 08:00 Asia/Bangkok. Give both services the production `DATABASE_URL` and the SmartVendingOwner `LINE_OWNER_CHANNEL_ACCESS_TOKEN`. Do not replace `LINE_CHANNEL_ACCESS_TOKEN`, and do not expose a public trigger endpoint. Configure failure alerts. A manual rerun retries only the same derived current period and remains protected by the delivery ledger.
+Railway cron is UTC: 01:00 UTC is 08:00 Asia/Bangkok. Give both services the production `DATABASE_URL` and the SmartVendingOwner `LINE_OWNER_CHANNEL_ACCESS_TOKEN`. For the prototype, set `OWNER_REPORT_SCHEDULED_DATA_MODE=DEMO_TEST` and `OWNER_REPORT_DEMO_ENABLED=true` independently on both Cron services. Future production services set `OWNER_REPORT_SCHEDULED_DATA_MODE=LIVE` and leave the demo gate unset or false. Do not replace `LINE_CHANNEL_ACCESS_TOKEN`, and do not expose a public trigger endpoint. Configure failure alerts. A manual rerun retries only the same derived current period and remains protected by the delivery ledger.
 
-Do not set `OWNER_REPORT_DEMO_ENABLED` on either Cron service. Do not add `--demo` or `--as-of` to their start commands. Build and preview commands cannot broadcast because only the send scripts include explicit `--send`. Configure the Cron restart policy as `NEVER`; allow the next controlled invocation to reclaim a transient failure using its stored LINE retry key and payload. Railway skips an occurrence while a previous Cron run is still active, and the job explicitly disconnects Prisma so it can exit.
+Do not add `--demo` or `--as-of` to scheduled start commands. Do not use the older manual send scripts as Cron start commands. Build and preview commands cannot broadcast because only the send scripts include explicit `--send`. Configure the Cron restart policy as `NEVER`; allow the next controlled invocation to reclaim a transient failure using its stored LINE retry key and payload. Railway skips an occurrence while a previous Cron run is still active, and the job explicitly disconnects Prisma so it can exit.
 
 Run `npm run migrate:deploy` once through the existing controlled web-service predeploy/release process before enabling either Cron service. Do not put migration or seed commands in a recurring job. The migration is wrapped in one PostgreSQL `BEGIN`/`COMMIT` transaction and is additive.
 
@@ -95,8 +108,27 @@ Run `npm run migrate:deploy` once through the existing controlled web-service pr
 9. Run each DEMO send once from a controlled manual environment. Verify the orange demo warning, `SENT` ledger state, retry key, payload snapshot, and request metadata. An immediate repeat must not broadcast again.
 10. Verify LIVE previews exclude all test transactions and DEMO previews exclude all live transactions.
 11. Exercise mocked/staging LINE timeout, same-key 409, invalid request, and authentication paths. Confirm only transient errors retry and expired uncertainty becomes `MANUAL_REVIEW`.
-12. Enable the Daily Cron, then Weekly Cron. Verify their next-run displays correspond to 01:00 UTC and monitor the first execution logs and owner cards.
-13. Rollback means disabling Cron services and reverting the compatible application revision. Do not run a destructive down migration. Restore the verified database backup only when a full database rollback is explicitly approved.
+12. With both Cron services still disabled, set `OWNER_REPORT_SCHEDULED_DATA_MODE=DEMO_TEST` and `OWNER_REPORT_DEMO_ENABLED=true`, then run each scheduled preview. Confirm the Daily card covers the previous Bangkok day, the Weekly card covers the previous completed Monday–Sunday, the orange banner is absent, and `ข้อมูลจากระบบทดสอบ` is present in the footer.
+13. Enable the Daily Cron, then Weekly Cron. Verify their next-run displays correspond to 01:00 UTC and monitor the first execution logs, selected `DEMO_TEST` mode, ledger row, and owner card.
+14. Confirm an immediate rerun returns `ALREADY_SENT` or `BUSY` and does not create another LINE request. Confirm a service restart preserves the same ledger claim, retry key, and payload snapshot.
+
+## Rollback procedure
+
+1. Disable both Owner Cron services before changing mode or application revision.
+2. To return to real settlement reporting, set `OWNER_REPORT_SCHEDULED_DATA_MODE=LIVE` on both services and remove or set `OWNER_REPORT_DEMO_ENABLED=false`. Preview both scheduled jobs and confirm their logged mode is LIVE before re-enabling them.
+3. To roll back the code, keep the Cron services disabled and revert to the last compatible application revision. The existing ledger and transaction fields are additive and should remain in place; do not run a destructive down migration.
+4. Restore the verified database backup only when a full database rollback is explicitly approved. Never delete DEMO_TEST ledger rows to force another send.
+
+## Physical acceptance checklist
+
+- Create purchases only through the real Opn Test Mode kiosk flow and wait for successful provider reconciliation.
+- Confirm the scheduled Daily preview covers yesterday in Asia/Bangkok and includes only matching test charges.
+- Confirm the scheduled Weekly preview covers the previous completed Monday–Sunday and reconciles its weekday and time-band totals.
+- Confirm LIVE previews exclude those test charges and scheduled DEMO_TEST previews exclude any live charges.
+- Confirm green Daily and blue Weekly styling, no orange DEMO banner, test-value wording, and the exact footer `ข้อมูลจากระบบทดสอบ`.
+- Run at most one approved send per type/period. Verify LINE acceptance, `SENT` ledger state, one attempt, stored retry key, and payload snapshot before any retry decision.
+- Confirm the employee Sale and Restock cards still use the employee OA and remain visually and behaviorally unchanged.
+- Keep both Cron services disabled until all checks pass and the Tech Lead separately approves activation.
 
 ## Remaining limitations
 

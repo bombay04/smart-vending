@@ -70,6 +70,7 @@ export interface RunOwnerReportOptions {
   dataMode?: SalesReportDataMode;
   asOf?: Date;
   demoEnabled?: boolean;
+  scheduled?: boolean;
 }
 
 export interface OwnerReportRunResult {
@@ -348,12 +349,17 @@ export async function runOwnerReportWithDependencies(
   }
   const logger = dependencies.logger ?? defaultLogger;
   const period = getReportPeriod(type, options.asOf ?? now);
-  const context = logContext(type, dataMode, period);
+  const context = {
+    ...logContext(type, dataMode, period),
+    scheduled: options.scheduled === true,
+  };
 
   if (!options.send) {
     const transactions = await dependencies.store.listTransactions(period, dataMode);
     const report = aggregateSalesReport(type, transactions, period, dataMode);
-    const message = buildOwnerReportFlexMessage(report);
+    const message = buildOwnerReportFlexMessage(report, {
+      scheduled: options.scheduled === true,
+    });
     logger.info("Owner sales report preview generated.", context);
     return { report, message, delivery: "PREVIEW" };
   }
@@ -371,7 +377,9 @@ export async function runOwnerReportWithDependencies(
   if (claim.state === "NEEDS_PAYLOAD") {
     const transactions = await dependencies.store.listTransactions(period, dataMode);
     report = aggregateSalesReport(type, transactions, period, dataMode);
-    const newMessage = buildOwnerReportFlexMessage(report);
+    const newMessage = buildOwnerReportFlexMessage(report, {
+      scheduled: options.scheduled === true,
+    });
     claim = await dependencies.store.claimDelivery(
       type,
       dataMode,

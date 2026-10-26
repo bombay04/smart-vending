@@ -6,6 +6,38 @@ export interface OwnerReportJobArguments {
   dataMode: SalesReportDataMode;
   asOf?: Date;
   demoEnabled: boolean;
+  scheduled: boolean;
+  configurationWarning?: string;
+}
+
+const SCHEDULED_DATA_MODE_VARIABLE = "OWNER_REPORT_SCHEDULED_DATA_MODE";
+
+function scheduledDataMode(
+  environment: NodeJS.ProcessEnv,
+  demoEnabled: boolean,
+): { dataMode: SalesReportDataMode; configurationWarning?: string } {
+  const configuredMode = environment[SCHEDULED_DATA_MODE_VARIABLE];
+
+  if (configuredMode === "DEMO_TEST") {
+    if (!demoEnabled) {
+      throw new Error("Scheduled DEMO_TEST reports require OWNER_REPORT_DEMO_ENABLED=true.");
+    }
+    return { dataMode: "DEMO_TEST" };
+  }
+
+  if (demoEnabled) {
+    throw new Error(
+      "Scheduled reports with OWNER_REPORT_DEMO_ENABLED=true require " +
+        `${SCHEDULED_DATA_MODE_VARIABLE}=DEMO_TEST.`,
+    );
+  }
+
+  if (configuredMode === "LIVE") return { dataMode: "LIVE" };
+
+  return {
+    dataMode: "LIVE",
+    configurationWarning: `${SCHEDULED_DATA_MODE_VARIABLE} is missing or invalid; defaulting to LIVE.`,
+  };
 }
 
 function parseAsOf(value: string): Date {
@@ -32,12 +64,14 @@ export function parseOwnerReportArguments(
   const [reportName, ...flags] = arguments_;
   if (reportName !== "daily" && reportName !== "weekly") {
     throw new Error(
-      "Usage: owner-sales-report <daily|weekly> [--demo] [--as-of=YYYY-MM-DD] [--send]",
+      "Usage: owner-sales-report <daily|weekly> [--scheduled|--demo] " +
+        "[--as-of=YYYY-MM-DD] [--send]",
     );
   }
 
   let send = false;
   let demo = false;
+  let scheduled = false;
   let asOf: Date | undefined;
   const seen = new Set<string>();
   for (const flag of flags) {
@@ -46,21 +80,27 @@ export function parseOwnerReportArguments(
     seen.add(name);
     if (flag === "--send") send = true;
     else if (flag === "--demo") demo = true;
+    else if (flag === "--scheduled") scheduled = true;
     else if (flag.startsWith("--as-of=")) asOf = parseAsOf(flag.slice("--as-of=".length));
     else throw new Error(`Unknown argument: ${flag}`);
   }
 
+  if (demo && scheduled) throw new Error("--demo and --scheduled cannot be combined.");
   if (asOf && !demo) throw new Error("--as-of is permitted only with --demo.");
   const demoEnabled = environment.OWNER_REPORT_DEMO_ENABLED === "true";
   if (demo && !demoEnabled) {
     throw new Error("--demo requires OWNER_REPORT_DEMO_ENABLED=true.");
   }
 
+  const scheduledMode = scheduled ? scheduledDataMode(environment, demoEnabled) : undefined;
+
   return {
     type: reportName === "daily" ? "DAILY" : "WEEKLY",
     send,
-    dataMode: demo ? "DEMO_TEST" : "LIVE",
+    dataMode: demo ? "DEMO_TEST" : (scheduledMode?.dataMode ?? "LIVE"),
     asOf,
     demoEnabled,
+    scheduled,
+    configurationWarning: scheduledMode?.configurationWarning,
   };
 }
