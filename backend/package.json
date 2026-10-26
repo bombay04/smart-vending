@@ -29,6 +29,7 @@
     "report:weekly:scheduled:preview": "tsx src/jobs/owner-sales-report.ts weekly --scheduled",
     "report:daily:scheduled:send": "node dist/jobs/owner-sales-report.js daily --scheduled --send",
     "report:weekly:scheduled:send": "node dist/jobs/owner-sales-report.js weekly --scheduled --send",
+    "hardware:evaluate": "node dist/jobs/hardware-health-evaluator.js",
     "prisma:generate": "prisma generate",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts"

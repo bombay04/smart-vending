@@ -59,6 +59,29 @@ enum KioskSessionStatus {
   CANCELLED
 }
 
+enum MachineConnectivityStatus {
+  ONLINE
+  OFFLINE
+}
+
+enum HardwareAlertTransition {
+  OFFLINE
+  RECOVERED
+}
+
+enum HardwareAlertSeverity {
+  CRITICAL
+  RECOVERED
+}
+
+enum HardwareAlertDeliveryStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+  MANUAL_REVIEW
+}
+
 model Product {
   id           Int           @id @default(autoincrement())
   name         String
@@ -172,4 +195,47 @@ model RestockLog {
   employee                Employee  @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
+}
+
+model HardwareMachine {
+  machineId             String                    @id
+  connectivity          MachineConnectivityStatus @default(ONLINE)
+  enrolledAt            DateTime                  @default(now())
+  lastHeartbeatAt       DateTime
+  lastObservedAt        DateTime
+  lastSequence          BigInt
+  offlineCandidateSince DateTime?
+  lastEvaluatedAt       DateTime?
+  offlineSince          DateTime?
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  alertEvents           HardwareAlertEvent[]
+
+  @@index([connectivity, lastHeartbeatAt])
+}
+
+model HardwareAlertEvent {
+  id                    BigInt                      @id @default(autoincrement())
+  machineId             String
+  transition            HardwareAlertTransition
+  severity              HardwareAlertSeverity
+  detectedAt            DateTime
+  description           String
+  recommendedAction     String
+  payloadSnapshot       String
+  retryKey              String                      @unique
+  retryKeyCreatedAt     DateTime
+  deliveryStatus        HardwareAlertDeliveryStatus @default(PENDING)
+  attemptCount          Int                         @default(0)
+  claimedAt             DateTime?
+  sentAt                DateTime?
+  lineRequestId         String?
+  lineAcceptedRequestId String?
+  lastErrorCode         String?
+  createdAt             DateTime                    @default(now())
+  updatedAt             DateTime                    @updatedAt
+  machine               HardwareMachine             @relation(fields: [machineId], references: [machineId], onDelete: Cascade)
+
+  @@index([deliveryStatus, retryKeyCreatedAt, claimedAt])
+  @@index([machineId, transition, detectedAt])
 }

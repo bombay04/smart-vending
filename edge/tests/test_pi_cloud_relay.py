@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import unittest
 
 from edge.pi_cloud_relay import (
+    HardwareHeartbeatWorker,
     MAX_REQUEST_BYTES,
     RelayConfig,
     RelayTimeoutError,
@@ -353,6 +355,50 @@ class PiCloudRelayTests(unittest.TestCase):
         log_output = stream.getvalue()
         self.assertNotIn("test-client-id.access", log_output)
         self.assertNotIn("test-client-secret", log_output)
+
+
+class HardwareHeartbeatWorkerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.transport = FakeTransport()
+        self.transport.response = UpstreamResponse(
+            status=202,
+            headers={"content-type": "application/json"},
+            body=b'{"status":"accepted"}',
+        )
+        self.config = RelayConfig(
+            upstream_origin="https://pi-api.smartvendingpt.com",
+            client_id="machine-specific-client.access",
+            client_secret="machine-specific-secret",
+        )
+
+    def test_heartbeat_is_outbound_authenticated_and_works_without_browser(self) -> None:
+        worker = HardwareHeartbeatWorker(
+            self.config,
+            "PILOT_KIOSK",
+            transport=self.transport,
+            clock=lambda: 1_798_000_000.0,
+        )
+        self.assertTrue(worker.step())
+        method, path, headers, body = self.transport.calls[0]
+        self.assertEqual((method, path), ("POST", "/api/v1/hardware/heartbeat"))
+        self.assertEqual(headers["CF-Access-Client-Id"], "machine-specific-client.access")
+        payload = json.loads(body or b"{}")
+        self.assertEqual(
+            set(payload), {"version", "machineId", "sequence", "observedAt"}
+        )
+        self.assertEqual(payload["version"], 1)
+        self.assertEqual(payload["machineId"], "PILOT_KIOSK")
+        self.assertEqual(payload["observedAt"], "2026-12-23T04:26:40.000Z")
+        self.assertGreater(payload["sequence"], 0)
+
+    def test_transient_cloud_failure_is_not_retried_inside_one_step(self) -> None:
+        worker = HardwareHeartbeatWorker(
+            self.config, "PILOT_KIOSK", transport=self.transport
+        )
+        self.transport.error = RelayTransportError("offline")
+
+        self.assertFalse(worker.step())
+        self.assertEqual(len(self.transport.calls), 1)
 
 
 if __name__ == "__main__":

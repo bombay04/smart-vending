@@ -21,6 +21,8 @@ See [the canonical project specification](docs/project-spec.md),
 
 Owner daily/weekly reporting architecture and the review-first Railway Cron
 runbook are documented in [Phase 2 owner sales reports](docs/phase2-owner-sales-reports.md).
+Hardware heartbeat, alerting, deployment, and physical acceptance are documented in
+[Phase 3 hardware monitoring](docs/phase3-hardware-monitoring.md).
 
 ## Local development
 

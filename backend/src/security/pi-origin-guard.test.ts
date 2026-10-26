@@ -4,7 +4,11 @@ import type { AddressInfo } from "node:net";
 import test from "node:test";
 import express from "express";
 import { AccessJwtVerificationError, type AccessJwtFailureCategory } from "./cloudflare-access-jwt";
-import { createPiOriginGuard, isAllowedPiApiRequest } from "./pi-origin-guard";
+import {
+  createPiOriginGuard,
+  isAllowedPiApiRequest,
+  parseMachineBindings,
+} from "./pi-origin-guard";
 
 const validClaims = {
   type: "app" as const,
@@ -24,6 +28,7 @@ async function request(options: {
   forwardedHost?: string;
   verifier?: (token: string) => Promise<typeof validClaims>;
   logVerificationFailure?: (category: AccessJwtFailureCategory) => void;
+  resolveMachineId?: (claims: typeof validClaims) => string | null;
 }): Promise<Response> {
   const app = express();
   app.use(
@@ -36,6 +41,7 @@ async function request(options: {
           return validClaims;
         }),
       logVerificationFailure: options.logVerificationFailure ?? (() => undefined),
+      resolveMachineId: options.resolveMachineId,
     }),
   );
   app.use((_request, response) => {
@@ -98,6 +104,7 @@ test("origin allowlist exactly matches the relay cloud surface", () => {
     ["POST", "/api/v1/employees/auth/face"],
     ["POST", "/api/v1/restocks/mock"],
     ["POST", "/api/v1/restocks/unlock-grant"],
+    ["POST", "/api/v1/hardware/heartbeat"],
     ["POST", "/api/v1/employees/face-registration/complete"],
     ["POST", "/api/v1/kiosk-sessions/1/draft-delete-result"],
     ["POST", "/api/v1/kiosk-sessions/1/offboarding-complete"],
@@ -121,6 +128,34 @@ test("origin allowlist exactly matches the relay cloud surface", () => {
   for (const [method, path] of denied) {
     assert.equal(isAllowedPiApiRequest(method, path), false, `${method} ${path}`);
   }
+});
+
+test("hardware heartbeat requires an enrolled machine-specific credential", async () => {
+  const enrolled = await request({
+    host: "pi-api.smartvendingpt.com",
+    method: "POST",
+    path: "/api/v1/hardware/heartbeat",
+    token: "valid-token",
+    resolveMachineId: (claims) =>
+      claims.common_name === "pi-service-token.access" ? "PILOT_KIOSK" : null,
+  });
+  assert.equal(enrolled.status, 200);
+
+  const unenrolled = await request({
+    host: "pi-api.smartvendingpt.com",
+    method: "POST",
+    path: "/api/v1/hardware/heartbeat",
+    token: "valid-token",
+    resolveMachineId: () => null,
+  });
+  assert.equal(unenrolled.status, 403);
+  assert.deepEqual(await unenrolled.json(), { error: "Machine identity is not enrolled." });
+
+  assert.deepEqual(
+    [...parseMachineBindings('{"pi-service-token.access":"PILOT_KIOSK"}')],
+    [["pi-service-token.access", "PILOT_KIOSK"]],
+  );
+  assert.throws(() => parseMachineBindings('{"shared":"../../other"}'));
 });
 
 test("Pi hostname requires a verified JWT on allowed routes", async () => {
