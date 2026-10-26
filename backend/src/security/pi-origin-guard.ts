@@ -32,6 +32,7 @@ const PI_ROUTE_ALLOWLIST: ReadonlyArray<{
   { method: "POST", path: /^\/api\/v1\/employees\/auth\/face$/ },
   { method: "POST", path: /^\/api\/v1\/restocks\/mock$/ },
   { method: "POST", path: /^\/api\/v1\/restocks\/unlock-grant$/ },
+  { method: "POST", path: /^\/api\/v1\/hardware\/heartbeat$/ },
   {
     method: "POST",
     path: /^\/api\/v1\/employees\/face-registration\/complete$/,
@@ -76,9 +77,35 @@ function requestHost(request: Request): string | null {
 
 type AccessJwtVerifier = (token: string) => Promise<CloudflareAccessClaims>;
 
+export function parseMachineBindings(value: string | undefined): ReadonlyMap<string, string> {
+  if (!value) return new Map();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("PI_MACHINE_BINDINGS_JSON must be a JSON object.");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("PI_MACHINE_BINDINGS_JSON must be a JSON object.");
+  }
+  const bindings = new Map<string, string>();
+  for (const [clientId, machineId] of Object.entries(parsed)) {
+    if (
+      !clientId ||
+      typeof machineId !== "string" ||
+      !/^[A-Z0-9][A-Z0-9_-]{2,63}$/.test(machineId)
+    ) {
+      throw new Error("PI_MACHINE_BINDINGS_JSON contains an invalid binding.");
+    }
+    bindings.set(clientId, machineId);
+  }
+  return bindings;
+}
+
 export function createPiOriginGuard(options: {
   piApiHostname: string;
   verifyAccessJwt: AccessJwtVerifier;
+  resolveMachineId?: (claims: CloudflareAccessClaims) => string | null;
   logVerificationFailure?: (category: AccessJwtFailureCategory) => void;
 }): RequestHandler {
   const piApiHostname = options.piApiHostname.toLowerCase();
@@ -106,7 +133,13 @@ export function createPiOriginGuard(options: {
     }
 
     try {
-      await options.verifyAccessJwt(token);
+      const claims = await options.verifyAccessJwt(token);
+      const machineId = options.resolveMachineId?.(claims) ?? null;
+      if (request.path === "/api/v1/hardware/heartbeat" && machineId === null) {
+        response.status(403).json({ error: "Machine identity is not enrolled." });
+        return;
+      }
+      if (machineId !== null) response.locals.machineId = machineId;
       next();
     } catch (error) {
       const category =
@@ -122,6 +155,7 @@ export function createPiOriginGuard(options: {
 export function createPiOriginGuardFromEnvironment(): RequestHandler {
   const piApiHostname = process.env.PI_API_HOSTNAME?.trim() || DEFAULT_PI_API_HOSTNAME;
   let verifier: AccessJwtVerifier | null = null;
+  let machineBindings: ReadonlyMap<string, string> | null = null;
 
   const loadVerifier = (): AccessJwtVerifier => {
     if (verifier !== null) return verifier;
@@ -148,5 +182,9 @@ export function createPiOriginGuardFromEnvironment(): RequestHandler {
   return createPiOriginGuard({
     piApiHostname,
     verifyAccessJwt: (token) => loadVerifier()(token),
+    resolveMachineId: (claims) => {
+      machineBindings ??= parseMachineBindings(process.env.PI_MACHINE_BINDINGS_JSON);
+      return machineBindings.get(claims.common_name) ?? null;
+    },
   });
 }

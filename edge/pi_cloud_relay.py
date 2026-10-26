@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+import atexit
 import http.client
 import json
 import logging
 import os
+import re
 import socket
+import threading
+import time
 from typing import Callable, Mapping, Protocol
 from urllib.parse import urlsplit
 
@@ -24,6 +29,8 @@ MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_BACKEND_INTEGER = 2_147_483_647
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 5.0
 DEFAULT_READ_TIMEOUT_SECONDS = 30.0
+DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 60.0
+HEARTBEAT_PATH = "/api/v1/hardware/heartbeat"
 
 
 class RelayTransportError(Exception):
@@ -169,6 +176,82 @@ class HttpsRelayTransport:
             raise RelayTransportError("The upstream request failed.") from error
         finally:
             connection.close()
+
+
+class HardwareHeartbeatWorker:
+    """Send bounded outbound health observations; never opens the Serial port."""
+
+    def __init__(
+        self,
+        config: RelayConfig,
+        machine_id: str,
+        *,
+        transport: RelayTransport | None = None,
+        interval_seconds: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+        clock: Callable[[], float] = time.time,
+        logger: logging.Logger | None = None,
+    ) -> None:
+        if re.fullmatch(r"[A-Z0-9][A-Z0-9_-]{2,63}", machine_id) is None:
+            raise ValueError("KIOSK_MACHINE_ID is required for hardware monitoring.")
+        self.config = config
+        self.machine_id = machine_id
+        self.transport = transport or HttpsRelayTransport(config)
+        self.interval_seconds = interval_seconds
+        self.clock = clock
+        self.logger = logger or logging.getLogger("pi-cloud-relay-heartbeat")
+        self._last_sequence = 0
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def _sequence(self) -> int:
+        candidate = int(self.clock() * 1000)
+        self._last_sequence = max(candidate, self._last_sequence + 1)
+        return self._last_sequence
+
+    def step(self) -> bool:
+        payload = {
+            "version": 1,
+            "machineId": self.machine_id,
+            "sequence": self._sequence(),
+            "observedAt": datetime.fromtimestamp(
+                self.clock(), timezone.utc
+            ).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        }
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "CF-Access-Client-Id": self.config.client_id,
+            "CF-Access-Client-Secret": self.config.client_secret,
+            "User-Agent": "smart-vending-pi-cloud-relay/1",
+        }
+        try:
+            response = self.transport.request("POST", HEARTBEAT_PATH, headers, body)
+        except RelayTransportError:
+            self.logger.warning("Hardware heartbeat could not reach the Cloud API")
+            return False
+        if response.status != 202:
+            self.logger.warning("Hardware heartbeat was rejected with status %s", response.status)
+            return False
+        return True
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(
+            target=self._run, name="hardware-heartbeat", daemon=True
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop_event.wait(self.interval_seconds):
+            self.step()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=6)
+            self._thread = None
 
 
 def _is_json_content_type(value: str) -> bool:
@@ -460,6 +543,16 @@ def main() -> None:
     if not 1 <= port <= 65535:
         raise ValueError("PI_CLOUD_RELAY_PORT must be between 1 and 65535.")
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    heartbeat_worker = HardwareHeartbeatWorker(
+        config,
+        os.getenv("KIOSK_MACHINE_ID", "").strip(),
+        interval_seconds=_positive_float_from_environment(
+            "HARDWARE_HEARTBEAT_INTERVAL_SECONDS",
+            DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+        ),
+    )
+    heartbeat_worker.start()
+    atexit.register(heartbeat_worker.stop)
     create_app(config).run(
         host=host,
         port=port,

@@ -9,6 +9,7 @@ import restockRouter from "./routes/restock.routes";
 import slotRouter from "./routes/slot.routes";
 import transactionRouter from "./routes/transaction.routes";
 import kioskSessionRouter from "./routes/kiosk-session.routes";
+import hardwareRouter from "./routes/hardware.routes";
 import { createPiOriginGuardFromEnvironment } from "./security/pi-origin-guard";
 
 const app = express();
@@ -53,6 +54,7 @@ app.use("/api/v1/transactions", transactionRouter);
 app.use("/api/v1/restocks", restockRouter);
 app.use("/api/v1/kiosk-sessions", kioskSessionRouter);
 app.use("/api/v1/admin/slots", adminSlotRouter);
+app.use("/api/v1/hardware", hardwareRouter);
 
 const frontendDistDirectory = path.resolve(__dirname, "../../frontend/dist");
 app.use(express.static(frontendDistDirectory, { index: false }));
