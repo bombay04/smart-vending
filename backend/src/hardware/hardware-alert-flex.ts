@@ -19,8 +19,22 @@ const COLORS = {
 } as const;
 
 const THAI_TITLES = {
-  CRITICAL: "ระบบขัดข้องระดับวิกฤต",
+  CRITICAL: "ระบบขัดข้อง",
   RECOVERED: "ระบบกลับมาทำงานปกติ",
+} as const;
+
+export const HARDWARE_CONNECTIVITY_COPY = {
+  OFFLINE: {
+    description: "เครื่องจำหน่ายสินค้าขาดการติดต่อ",
+    recommendedAction:
+      "ตรวจสอบการเชื่อมต่อเครือข่าย สถานะ Raspberry Pi และบริการ Cloud Relay เหตุการณ์นี้หมายถึง Cloud ไม่ได้รับ Heartbeat เท่านั้น ยังไม่ยืนยันว่าอุปกรณ์เสียหายหรือไฟฟ้าดับ",
+  },
+  RECOVERED: {
+    description:
+      "Cloud ได้รับ Heartbeat จากเครื่องจำหน่ายสินค้าอีกครั้ง และสถานะการเชื่อมต่อกลับมาเป็น Online",
+    recommendedAction:
+      "ตรวจสอบว่าเครื่องทำงานได้ตามปกติ และติดตาม Heartbeat ต่อเนื่องเพื่อยืนยันว่าการเชื่อมต่อมีเสถียรภาพ",
+  },
 } as const;
 
 function text(value: string, options: Record<string, unknown> = {}) {
@@ -63,8 +77,8 @@ export function createHardwareAlertFlex(
         paddingAll: "18px",
         spacing: "md",
         contents: [
-          text(`เครื่อง: ${input.machineId}`, { weight: "bold", wrap: true }),
-          text(`อุปกรณ์: ${input.affectedHardware}`, { wrap: true }),
+          text(`รหัสเครื่อง: ${input.machineId}`, { weight: "bold", wrap: true }),
+          text(`ระบบที่ติดตาม: ${input.affectedHardware}`, { wrap: true }),
           text(input.description, { color: "#0F172A", weight: "bold", wrap: true }),
           text(`ตรวจพบครั้งแรก: ${bangkokDateTime(input.detectedAt)}`, {
             color: "#475569",
