@@ -8,7 +8,7 @@ import {
   LINE_RETRY_KEY_VALIDITY_MS,
   type HardwareHeartbeatInput,
 } from "./hardware-monitoring";
-import { createHardwareAlertFlex } from "./hardware-alert-flex";
+import { createHardwareAlertFlex, HARDWARE_CONNECTIVITY_COPY } from "./hardware-alert-flex";
 import { getMaintenanceAlertProvider } from "./maintenance-line-alert.provider";
 import {
   OwnerReportDeliveryError,
@@ -60,12 +60,7 @@ function payloadForConnectivityEvent(input: {
   detectedAt: Date;
 }): { description: string; recommendedAction: string; payloadSnapshot: string } {
   const recovered = input.transition === "RECOVERED";
-  const description = recovered
-    ? "Pi Cloud Relay heartbeat has recovered."
-    : "Pi Cloud Relay heartbeat is offline.";
-  const recommendedAction = recovered
-    ? "Verify kiosk operation when convenient."
-    : "Check Raspberry Pi power, network, and the Cloud Relay service.";
+  const { description, recommendedAction } = HARDWARE_CONNECTIVITY_COPY[input.transition];
   const message = createHardwareAlertFlex({
     machineId: input.machineId,
     severity: recovered ? "RECOVERED" : "CRITICAL",
