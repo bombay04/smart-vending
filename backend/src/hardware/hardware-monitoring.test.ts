@@ -18,6 +18,12 @@ import {
 
 const NOW = new Date("2026-10-26T12:00:00.000Z");
 
+test("offline timing uses a two-minute threshold, two-minute confirmation, and short continuity gap", () => {
+  assert.equal(OFFLINE_THRESHOLD_MS, 2 * 60_000);
+  assert.equal(OFFLINE_CONFIRMATION_MS, 2 * 60_000);
+  assert.equal(EVALUATOR_CONTINUITY_MAX_GAP_MS, 90_000);
+});
+
 function heartbeat(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     version: 1,
@@ -120,6 +126,17 @@ test("fresh heartbeat cancels confirmation and cloud downtime restarts it", () =
       NOW,
     ),
     "START_CONFIRMATION",
+  );
+  assert.equal(
+    offlineEvaluationDecision(
+      {
+        lastHeartbeatAt: new Date(NOW.getTime() - OFFLINE_THRESHOLD_MS),
+        offlineCandidateSince: new Date(NOW.getTime() - OFFLINE_CONFIRMATION_MS),
+        lastEvaluatedAt: new Date(NOW.getTime() - EVALUATOR_CONTINUITY_MAX_GAP_MS),
+      },
+      NOW,
+    ),
+    "OFFLINE",
   );
 });
 

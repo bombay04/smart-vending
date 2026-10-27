@@ -1,12 +1,8 @@
-import {
-  deliverPendingHardwareAlerts,
-  evaluateOfflineMachines,
-} from "../hardware/hardware-monitoring.service";
+import { runHardwareHealthCycle } from "../hardware/hardware-health-loop";
 import { prisma } from "../lib/prisma";
 
 async function main(): Promise<void> {
-  const transitions = await evaluateOfflineMachines();
-  const delivery = await deliverPendingHardwareAlerts();
+  const { transitions, delivery } = await runHardwareHealthCycle();
   console.log(
     `Hardware health evaluation complete; offline transitions=${transitions}, sent=${delivery.sent}, failed=${delivery.failed}, manualReview=${delivery.manualReview}.`,
   );

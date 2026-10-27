@@ -51,6 +51,32 @@ test("offline and recovery transitions are atomically guarded against concurrenc
   assert.match(service, /transition: "RECOVERED"/);
 });
 
+test("long-running backend starts one bounded health loop while Cron reuses only its cycle", async () => {
+  const [server, loop, cron] = await Promise.all([
+    readFile(resolve("src/server.ts"), "utf8"),
+    readFile(resolve("src/hardware/hardware-health-loop.ts"), "utf8"),
+    readFile(resolve("src/jobs/hardware-health-evaluator.ts"), "utf8"),
+  ]);
+  assert.match(server, /startHardwareHealthLoop\(\)/);
+  assert.match(server, /hardwareHealthLoop[\s\S]*\.stop\(\)/);
+  assert.match(loop, /HARDWARE_HEALTH_LOOP_INTERVAL_MS = 30_000/);
+  assert.match(loop, /\.finally\([\s\S]*schedule\(intervalMs\)/);
+  assert.match(cron, /runHardwareHealthCycle\(\)/);
+  assert.doesNotMatch(cron, /startHardwareHealthLoop/);
+});
+
+test("heartbeat response is independent of LINE delivery and recovery remains durable", async () => {
+  const [controller, service, loop] = await Promise.all([
+    readFile(resolve("src/controllers/hardware.controller.ts"), "utf8"),
+    readFile(resolve("src/hardware/hardware-monitoring.service.ts"), "utf8"),
+    readFile(resolve("src/hardware/hardware-health-loop.ts"), "utf8"),
+  ]);
+  assert.match(controller, /response\.status\(202\)\.json/);
+  assert.doesNotMatch(controller, /deliverPendingHardwareAlerts|provider\.send/);
+  assert.match(service, /if \(recovered\)[\s\S]*createConnectivityAlert/);
+  assert.match(loop, /deliverPendingHardwareAlerts/);
+});
+
 test("LINE retries use the immutable snapshot and key with bounded manual review", async () => {
   const service = await readFile(resolve("src/hardware/hardware-monitoring.service.ts"), "utf8");
   assert.match(service, /getMaintenanceAlertProvider\(\)/);

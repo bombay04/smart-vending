@@ -3,7 +3,7 @@
 ## Scope and safety boundary
 
 Phase 3 monitors only whether the existing Pi Cloud Relay is reaching the Cloud API.
-The relay sends one authenticated heartbeat every 60 seconds from its own daemon thread.
+The relay sends one authenticated heartbeat every 30 seconds from its own daemon thread.
 It does not call the Pi Unlock Service, /hardware/status, or /monitoring/snapshot; it
 does not import or open a Serial port; and it does not depend on Chromium. No ESP32,
 IR, Reed, solenoid, or unlock-fault monitoring is present.
@@ -48,9 +48,9 @@ online/offline state.
 The first authenticated heartbeat enrolls the machine as ONLINE; there is no row and
 no alert before enrollment. A stale machine goes through two durable stages:
 
-1. After five minutes without a server-received heartbeat, an evaluator records an
+1. After two minutes without a server-received heartbeat, an evaluator records an
    offline candidate without alerting.
-2. A later evaluator, after another five minutes of continuous evaluator operation and
+2. A later evaluator, after another two minutes of continuous evaluator operation and
    continued heartbeat absence, atomically changes ONLINE to OFFLINE and creates one
    OFFLINE event.
 
@@ -80,9 +80,19 @@ other responses go to MANUAL_REVIEW. Retry keys expire after 24 hours, and stale
 SENDING claims count toward the five-attempt cap. Expired, exhausted, and non-retryable
 deliveries enter durable MANUAL_REVIEW and are not sent automatically again.
 
-Implementation and tests must not invoke real LINE delivery. The scheduled evaluator
-command creates durable events and then processes their bounded delivery claims; no
-scheduler is created during implementation review.
+Implementation and tests must not invoke real LINE delivery. The long-running Backend
+starts one non-overlapping health cycle every 30 seconds. Each cycle evaluates durable
+state and then processes the existing bounded delivery claims. Failures are contained
+and the next cycle retries according to the persisted five-attempt, stale-claim, and
+24-hour rules. The five-minute Railway Cron invokes the same side-effect-free cycle as
+a fallback; importing the cycle from scripts, tests, migrations, or Cron does not start
+the Backend loop.
+
+The shorter 90-second evaluator-continuity limit is intentionally greater than the
+30-second Backend loop interval and shorter than the offline confirmation window. If
+the Backend or database has been unavailable, the first successful evaluation restarts
+confirmation instead of immediately creating an OFFLINE event. Serializable state
+updates and delivery claims make overlapping Backend replicas and Cron runs converge.
 
 ## Migration safety
 
@@ -111,9 +121,9 @@ LINE_MAINTENANCE_CHANNEL_ACCESS_TOKEN=<VendingMaintenance channel access token>
 ~~~
 
 Do not put the service-token secret in Railway. Keep the existing Cloudflare Access
-issuer, audience, and expected service-token client-ID settings unchanged. After
-separate Tech Lead approval, a scheduler must run npm run hardware:evaluate about
-every five minutes. Do not create it during implementation review.
+issuer, audience, and expected service-token client-ID settings unchanged. Keep the
+existing `hardware-health-evaluator` service on `npm run hardware:evaluate` with its
+five-minute schedule and `NEVER` restart policy.
 
 LINE_OWNER_CHANNEL_ACCESS_TOKEN remains the independent Phase 2 Daily/Weekly report
 credential. LINE_CHANNEL_ACCESS_TOKEN remains the independent employee-notification
@@ -123,7 +133,7 @@ Pi /etc/smart-vending/pi-cloud-relay.env:
 
 ~~~text
 KIOSK_MACHINE_ID=PILOT_KIOSK
-HARDWARE_HEARTBEAT_INTERVAL_SECONDS=60
+HARDWARE_HEARTBEAT_INTERVAL_SECONDS=30
 CF_ACCESS_CLIENT_ID=<existing machine service-token client ID>
 CF_ACCESS_CLIENT_SECRET=<existing machine service-token secret>
 ~~~
@@ -131,24 +141,32 @@ CF_ACCESS_CLIENT_SECRET=<existing machine service-token secret>
 Keep the existing fixed PI_CLOUD_UPSTREAM_ORIGIN and timeout settings. No new Pi
 process and no Pi Unlock Service configuration change are required.
 
+The Railway Backend runs the 30-second health loop from its normal server entry point.
+Do not add that startup call to Prisma, test, migration, or Cron entry points. Keep the
+existing hardware-health-evaluator schedule at `*/5 * * * *`; Railway does not support
+sub-five-minute Cron schedules, and this service remains a retry/recovery fallback.
+
 ## Deployment and Physical Acceptance plan
 
 Do not deploy before Tech Lead approval.
 
-1. Take a fresh production backup and restore it into an isolated database.
-2. Apply the pending migration to the isolated restore and run backend regression tests.
-3. Apply the migration and backend release before upgrading the Pi.
-4. Configure the Railway machine binding, then separately review and create the
-   five-minute evaluator schedule.
+1. Run backend, Pi relay, payment, unlock, restock, and reporting regressions against
+   the already-applied Phase 3 schema. This optimization requires no migration.
+2. Deploy the Backend release without changing the existing evaluator Cron schedule,
+   maintenance LINE token, machine binding, or Cloudflare configuration.
+3. Confirm Backend logs show one healthy loop and no overlapping or unhandled cycle.
+4. Set `HARDWARE_HEARTBEAT_INTERVAL_SECONDS=30` in the existing Pi Cloud Relay
+   environment file.
 5. Update and restart only the existing Pi Cloud Relay service; leave the unlock
    service, frontend, firmware, and Chromium configuration unchanged.
 6. With Chromium and the Pi Unlock Service stopped, confirm the relay still records
-   three 60-second heartbeats and no alert.
+   at least three 30-second heartbeats and no alert.
 7. Stop the relay/network. Confirm the first stale evaluation only starts confirmation,
-   the later continuous evaluation creates one OFFLINE event, and repeated runs create
-   no additional events or messages.
+   the later continuous evaluation creates one OFFLINE event in approximately 3-5
+   minutes, and repeated Backend/Cron runs create no additional events or messages.
 8. Restore the relay and confirm one authenticated heartbeat creates one RECOVERED
-   event. An unreadable/malformed heartbeat must not recover the machine.
+   event and the Backend loop normally delivers it within 60 seconds. An
+   unreadable/malformed heartbeat must not recover the machine.
 9. Simulate evaluator/Cloud downtime longer than the thresholds, restore the Cloud
    while the Pi remains offline, and confirm the confirmation window restarts.
 10. Use a stub LINE provider to verify maintenance-token isolation, missing-token
