@@ -17,9 +17,9 @@ import {
   type OwnerReportProvider,
 } from "../reports/owner-line-report.provider";
 
-export const OFFLINE_THRESHOLD_MS = 5 * 60_000;
-export const OFFLINE_CONFIRMATION_MS = 5 * 60_000;
-export const EVALUATOR_CONTINUITY_MAX_GAP_MS = 7 * 60_000;
+export const OFFLINE_THRESHOLD_MS = 2 * 60_000;
+export const OFFLINE_CONFIRMATION_MS = 2 * 60_000;
+export const EVALUATOR_CONTINUITY_MAX_GAP_MS = 90_000;
 export const HARDWARE_ALERT_CLAIM_STALE_MS = 5 * 60_000;
 const SERIALIZABLE_RETRIES = 3;
 
